@@ -15,7 +15,7 @@
 - Reproduction with the user-supplied Mewtwo STL (not committed): 131,408 faces, alpha 1 reports 394,224 split vertices and rejects it; processed input has 65,703 vertices, a single watertight component, consistent winding and positive volume. Import acceptance verified locally with Trimesh. Full Keymaster cutting and native Windows interaction have not been tested on that model.
 - UI: PySide6 and PyVistaQt for model display, cut-axis/coordinate, per-key settings, manual/picked/auto placement, exploded view and export.
 - Alpha 3 bug fix: Trimesh bounds are shape (2, 3). Alpha 2 wrongly used bounds[2], bounds[axis], and bounds.mean(axis=1) in the GUI. After successful STL validation this raised an uncaught IndexError in the Qt slot, leaving "No model loaded". Alpha 3 fixes all three coordinate calculations, suppresses premature signals while initializing the mesh, and makes errors in preview rendering visible.
-- Alpha 3 UI regression: headless Qt tests use a fake viewport to exercise importing an actual STL from a file dialog, label updates, generated 3D plane, axis/coordinate changes, and failure messages on both Linux and Windows CI.
+- Alpha 3 UI regression: headless Qt tests use a fake viewport to exercise importing an actual STL from a file dialog, label updates, generated 3D plane, axis/coordinate changes, and failure messages on Windows CI. Linux CI runs geometry tests without GUI dependencies because its hosted image lacks libEGL.so.1.
 - Updater: read-only notification and a browser link. Explicit update installation/rollback has not been implemented.
 - Persistence: QSettings INI under QStandardPaths.AppConfigLocation, user scope, separate from the EXE.
 
