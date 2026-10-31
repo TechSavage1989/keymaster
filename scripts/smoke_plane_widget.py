@@ -23,7 +23,13 @@ from keymaster.plane_interaction import PlaneInteractionBridge
 def main() -> int:
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     # The real VTK interactor/widget is intentionally used, not a fake.
-    viewport = QtInteractor(off_screen=True)
+    # Qt itself is offscreen, but VTK must still have a live interactor for
+    # native widget input events. QtInteractor(off_screen=True) sets iren=None.
+    viewport = QtInteractor(off_screen=False)
+    viewport.show()
+    app.processEvents()
+    if viewport.iren is None:
+        raise RuntimeError("Qt/VTK render-window interactor failed to initialize")
     viewport.set_background("#151a20")
     viewport.add_mesh(pv.Cube(), color="#b9cad4", smooth_shading=True)
     applied = []

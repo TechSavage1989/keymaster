@@ -39,7 +39,6 @@ jobs:
       - name: Native Qt/VTK plane widget lifecycle smoke
         env:
           QT_QPA_PLATFORM: offscreen
-          PYVISTA_OFF_SCREEN: "true"
         run: python scripts/smoke_plane_widget.py
       - name: Create native icon before compilation
         run: python scripts/generate_icon.py
