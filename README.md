@@ -40,7 +40,7 @@ Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ me
 
 Get the currently published **Windows prerelease** from the [GitHub releases page](https://github.com/TechSavage1989/keymaster/releases) and select **Keymaster_Windows_Portable.zip**. Keep the extracted Keymaster folder together; launch the stable filename **Keymaster.exe**.
 
-The next approved prerelease is **0.2.0 alpha 2**, following the [0.2.0 alpha 1 release](https://github.com/TechSavage1989/keymaster/releases/tag/v0.2.0-alpha.1). Use [GitHub Releases](https://github.com/TechSavage1989/keymaster/releases) to obtain only the published, verified ZIP. Alpha 2 addresses native plane-click crashes and improves on-plane move/rotate controls. The Windows portable ZIP is 174.4 MB (166.3 MiB). There is no production-tested stable release. This update includes selective section detachment, direct plane manipulation, improved shading, automatic multi-key placement and additional connector prototypes. Previous releases remain available.
+The current published prerelease is **0.2.0 alpha 2**, available from the [verified GitHub release](https://github.com/TechSavage1989/keymaster/releases/tag/v0.2.0-alpha.2). Use the Windows portable ZIP published under that tag. This update addresses native plane-click crashes and improves on-plane move/rotate controls. The Windows portable ZIP is 174.4 MB (166.3 MiB). There is no production-tested stable release. This update includes selective section detachment, direct plane manipulation, improved shading, automatic multi-key placement and additional connector prototypes. Previous releases remain available.
 
 ## Requirements
 
