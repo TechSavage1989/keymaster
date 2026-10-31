@@ -45,6 +45,7 @@ jobs:
           --icon build/assets/Keymaster.ico
           --hidden-import vtkmodules.vtkRenderingOpenGL2
           --hidden-import vtkmodules.vtkInteractionStyle
+          --hidden-import vtkmodules.vtkInteractionWidgets
           --hidden-import vtkmodules.vtkRenderingFreeType
           --hidden-import vtkmodules.vtkRenderingVolumeOpenGL2
           scripts/launch.py
@@ -69,12 +70,12 @@ jobs:
           retention-days: 30
 
   publish-approved-alpha:
-    name: Publish approved alpha 4 preview only
+    name: Publish approved 0.2 alpha 1 preview only
     needs: [tests, windows-portable]
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      contains(github.event.head_commit.message, '[keymaster-alpha4-release-approved]')
+      contains(github.event.head_commit.message, '[keymaster-0.2-alpha1-release-approved]')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,11 +94,11 @@ jobs:
           test -s release-assets/Keymaster_Windows_Portable.zip
           test -s release-assets/SHA256SUMS.txt
           (cd release-assets && sha256sum --check SHA256SUMS.txt)
-          gh release create v0.1.0-alpha.4 \
+          gh release create v0.2.0-alpha.1 \
             release-assets/Keymaster_Windows_Portable.zip \
             release-assets/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Keymaster 0.1.0 alpha 4" \
+            --title "Keymaster 0.2.0 alpha 1" \
             --prerelease \
-            --notes-file docs/releases/0.1.0a4.md
+            --notes-file docs/releases/0.2.0a1.md

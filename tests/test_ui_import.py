@@ -16,6 +16,18 @@ from PySide6 import QtCore, QtWidgets
 import keymaster.app as app
 
 
+class FakeActor:
+    def __init__(self):
+        self.position = None
+        self.visibility = True
+
+    def SetPosition(self, *args):
+        self.position = tuple(args)
+
+    def SetVisibility(self, visible):
+        self.visibility = bool(visible)
+
+
 class FakeInteractor(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -34,7 +46,7 @@ class FakeInteractor(QtWidgets.QWidget):
 
     def add_mesh(self, mesh, **kwargs):
         self.added.append((mesh, kwargs))
-        return object()
+        return FakeActor()
 
     def reset_camera(self):
         self.camera_resets += 1
@@ -217,3 +229,99 @@ def test_drop_event_imports_stl(window, source_stl, monkeypatch):
     assert window.model is not None
     assert window.model_label.text() == source_stl.name
     assert not errors
+
+
+
+def test_free_plane_widget_callback_and_coordinate_lock(window, source_stl, monkeypatch):
+    errors = []
+    monkeypatch.setattr(window, "_error", errors.append)
+    window._load_path(source_stl)
+    window._on_gizmo_move((1, 1, 0), (2, 3, 4))
+    assert not errors
+    assert window.axis.currentText() == "Free"
+    assert window.position_slider.isEnabled() is False
+    assert np.allclose(window._plane().origin, (2, 3, 4))
+    assert np.allclose(window._plane().normal, (2**-.5, 2**-.5, 0))
+    window.axis.setCurrentText("Z")
+    assert window.position_slider.isEnabled()
+
+
+def test_shading_modes_render_material_options(window, source_stl, monkeypatch):
+    errors = []
+    monkeypatch.setattr(window, "_error", errors.append)
+    window._load_path(source_stl)
+    for name in ("Studio clay", "Lit solid", "Shaded edges", "X-ray", "Wireframe"):
+        window.shading_mode.setCurrentText(name)
+        assert window.view.added
+        assert not errors
+    assert window._material_options()["style"] == "wireframe"
+    window.shading_mode.setCurrentText("Shaded edges")
+    assert window._material_options()["show_edges"] is True
+    assert window._material_options()["specular"] > 0
+
+
+def _build_branched_stl(tmp_path):
+    from keymaster.geometry import _as_manifold, _as_trimesh
+    base = trimesh.creation.box(extents=(44, 16, 10))
+    base.apply_translation((0, 0, -7))
+    a = trimesh.creation.box(extents=(10, 12, 23))
+    a.apply_translation((-12, 0, 1))
+    b = trimesh.creation.box(extents=(10, 12, 23))
+    b.apply_translation((12, 0, 1))
+    mesh = _as_trimesh(_as_manifold(base) + _as_manifold(a) + _as_manifold(b))
+    path = tmp_path / "branched_sculpt.stl"
+    mesh.export(path)
+    return path
+
+
+def test_analyze_selective_components_and_preview(window, tmp_path, monkeypatch):
+    errors = []
+    monkeypatch.setattr(window, "_error", errors.append)
+    path = _build_branched_stl(tmp_path)
+    window._load_path(path)
+    window.coordinate.setValue(0)
+    window.analyze_sections()
+    assert len(window._section_candidates) == 2
+    assert window.section_list.count() == 2
+    first = window.section_list.item(0)
+    first.setCheckState(QtCore.Qt.CheckState.Unchecked)
+    assert len(window._selected_sections()) == 1
+    window.generate()
+    assert not errors
+    assert len(window.result.parts) == 2
+    assert all(part.is_watertight for part in window.result.parts)
+    assert window.stack.currentIndex() == 3
+    assert window.export_button.isEnabled()
+
+
+def test_automatic_keys_are_scoped_to_selected_section(window, tmp_path, monkeypatch):
+    errors = []
+    monkeypatch.setattr(window, "_error", errors.append)
+    window._load_path(_build_branched_stl(tmp_path))
+    window.coordinate.setValue(0)
+    window.analyze_sections()
+    window.section_list.item(1).setCheckState(QtCore.Qt.CheckState.Unchecked)
+    window.key_diameter.setValue(2)
+    window.key_depth.setValue(3)
+    window.auto_count.setValue(1)
+    window.auto_key()
+    assert not errors
+    assert len(window.keys) == 1
+    assert window._section_candidates[0].cap is not None
+    window.generate()
+    assert not errors
+    assert len(window.result.parts) == 2
+
+
+def test_face_gap_edited_and_invalidates_export(window, source_stl, monkeypatch):
+    errors = []
+    monkeypatch.setattr(window, "_error", errors.append)
+    window._load_path(source_stl)
+    window.face_gap.setValue(.2)
+    assert window.result is None
+    window.generate()
+    assert not errors
+    assert window.export_button.isEnabled()
+    window.face_gap.setValue(.3)
+    assert not window.export_button.isEnabled()
+    assert window.result is None
