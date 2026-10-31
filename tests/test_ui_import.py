@@ -237,6 +237,11 @@ def test_free_plane_widget_callback_and_coordinate_lock(window, source_stl, monk
     monkeypatch.setattr(window, "_error", errors.append)
     window._load_path(source_stl)
     window._on_gizmo_move((1, 1, 0), (2, 3, 4))
+    # Old test assumed immediate VTK/Qt redraw inside a native mouse event.
+    # The crash fix intentionally applies the plane only after the event returns.
+    assert window.axis.currentText() == "Z"
+    assert window._plane_bridge.has_pending
+    window._plane_bridge.flush()
     assert not errors
     assert window.axis.currentText() == "Free"
     assert window.position_slider.isEnabled() is False
