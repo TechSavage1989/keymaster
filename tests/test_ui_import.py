@@ -341,3 +341,16 @@ def test_click_to_select_one_detachable_section(window, tmp_path, monkeypatch):
     assert window._selected_sections() == (1,)
     window._picked_section(surface_point)
     assert set(window._selected_sections()) == {0, 1}
+
+
+
+def test_key_point_selection_restores_cut_controls(window, source_stl, monkeypatch):
+    errors = []
+    monkeypatch.setattr(window, "_error", errors.append)
+    window._load_path(source_stl)
+    window.key_diameter.setValue(3)
+    window._picked((0, 0, 1))
+    assert not errors
+    assert len(window.keys) == 1
+    assert window.keys[0].u == pytest.approx(0)
+    assert window.keys[0].v == pytest.approx(0)

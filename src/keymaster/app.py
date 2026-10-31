@@ -980,24 +980,28 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             return self._error("Import a model first.")
         try:
             self._draw_original()
+            self._clear_gizmo()
             self.statusBar().showMessage("Click on the model to place a key on the cut plane.")
             self.view.enable_surface_point_picking(
                 callback=self._picked, show_message=False, left_clicking=True,
             )
         except Exception as exc:
+            self._enable_gizmo(reset=True)
             self._error(exc)
 
     def _picked(self, position):
-        if position is None:
-            return
         try:
+            if position is None:
+                return
             origin, _, u, v = frame(self._plane())
             relative = np.asarray(position) - origin
             self.key_u.setValue(float(relative @ u))
             self.key_v.setValue(float(relative @ v))
             self.add_key()
         finally:
-            self.view.disable_picking()
+            if hasattr(self.view, "disable_picking"):
+                self.view.disable_picking()
+            self._enable_gizmo(reset=True)
 
     def remove_key(self):
         rows = sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True)
