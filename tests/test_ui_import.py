@@ -237,6 +237,11 @@ def test_free_plane_widget_callback_and_coordinate_lock(window, source_stl, monk
     monkeypatch.setattr(window, "_error", errors.append)
     window._load_path(source_stl)
     window._on_gizmo_move((1, 1, 0), (2, 3, 4))
+    # Old test assumed immediate VTK/Qt redraw inside a native mouse event.
+    # The crash fix intentionally applies the plane only after the event returns.
+    assert window.axis.currentText() == "Z"
+    assert window._plane_bridge.has_pending
+    window._plane_bridge.flush()
     assert not errors
     assert window.axis.currentText() == "Free"
     assert window.position_slider.isEnabled() is False
@@ -354,3 +359,195 @@ def test_key_point_selection_restores_cut_controls(window, source_stl, monkeypat
     assert len(window.keys) == 1
     assert window.keys[0].u == pytest.approx(0)
     assert window.keys[0].v == pytest.approx(0)
+
+
+
+class SpyPlaneRepresentation:
+    def __init__(self, view):
+        self.view = view
+        self.origins = []
+        self.normals = []
+        self.builds = 0
+
+    def SetOrigin(self, *origin):
+        self.view.ensure_not_in_native_callback()
+        self.origins.append(tuple(origin))
+
+    def SetNormal(self, *normal):
+        self.view.ensure_not_in_native_callback()
+        self.normals.append(tuple(normal))
+
+    def BuildRepresentation(self):
+        self.view.ensure_not_in_native_callback()
+        self.builds += 1
+
+
+class SpyPlaneWidget:
+    def __init__(self, view, callback, options):
+        self.view = view
+        self.callback = callback
+        self.options = options
+        self.representation = SpyPlaneRepresentation(view)
+
+    def GetRepresentation(self):
+        self.view.ensure_not_in_native_callback()
+        return self.representation
+
+    def invoke_release(self, normal, origin):
+        """Simulate a native event with an active widget on the C++ stack."""
+        self.view.in_native_callback = True
+        try:
+            self.callback(normal, origin)
+        finally:
+            self.view.in_native_callback = False
+
+
+class SpyPlaneInteractor(FakeInteractor):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.native_mutations = []
+        self.in_native_callback = False
+        self.native_widget = None
+        self.widgets_created = []
+        self.removed_actors = []
+
+    def ensure_not_in_native_callback(self):
+        if self.in_native_callback:
+            raise AssertionError("UI modified VTK while its mouse callback was active")
+
+    def add_plane_widget(self, callback, **kwargs):
+        self.ensure_not_in_native_callback()
+        widget = SpyPlaneWidget(self, callback, kwargs)
+        self.native_widget = widget
+        self.widgets_created.append(widget)
+        return widget
+
+    def clear_plane_widgets(self):
+        self.ensure_not_in_native_callback()
+        self.native_widget = None
+        self.native_mutations.append("clear_plane_widgets")
+
+    def remove_actor(self, name, **kwargs):
+        self.ensure_not_in_native_callback()
+        self.removed_actors.append(name)
+
+    def add_mesh(self, mesh, **kwargs):
+        self.ensure_not_in_native_callback()
+        return super().add_mesh(mesh, **kwargs)
+
+    def clear(self):
+        self.ensure_not_in_native_callback()
+        return super().clear()
+
+
+@pytest.fixture
+def plane_window(qapplication, monkeypatch):
+    monkeypatch.setattr(app, "QtInteractor", SpyPlaneInteractor)
+    win = app.KeymasterWindow()
+    yield win
+    win.close()
+
+
+def test_plane_callback_does_not_mutate_vtk_during_a_click(plane_window, source_stl, monkeypatch):
+    errors = []
+    monkeypatch.setattr(plane_window, "_error", errors.append)
+    plane_window._load_path(source_stl)
+    widget = plane_window.view.native_widget
+    assert widget is not None
+    assert widget.options["interaction_event"] == "end"
+    assert widget.options["normal_rotation"] is True
+    assert widget.options["origin_translation"] is True
+    assert widget.options["tubing"] is True
+    assert widget.options["test_callback"] is False
+    native_mutations = list(plane_window.view.native_mutations)
+    added = len(plane_window.view.added)
+    widget.invoke_release((0, 0, 1), (0, 0, 0))
+    assert plane_window._plane_bridge.has_pending
+    assert plane_window.axis.currentText() == "Z"
+    assert plane_window.view.native_mutations == native_mutations
+    assert len(plane_window.view.added) == added
+    plane_window._plane_bridge.flush()
+    assert not errors
+    assert len(plane_window.view.added) == added
+    assert plane_window.view.native_widget is widget
+
+
+def test_plane_move_rotate_defers_scene_update_until_event_returns(plane_window, source_stl, monkeypatch):
+    errors = []
+    monkeypatch.setattr(plane_window, "_error", errors.append)
+    plane_window._load_path(source_stl)
+    widget = plane_window.view.native_widget
+    prior = len(plane_window.view.added)
+    widget.invoke_release((0, 1, 0), (2, 3, 4))
+    assert plane_window.axis.currentText() == "Z"
+    assert plane_window._gizmo_origin is None
+    assert len(plane_window.view.added) == prior
+    plane_window._plane_bridge.flush()
+    assert not errors
+    assert plane_window.axis.currentText() == "Free"
+    assert np.allclose(plane_window._plane().origin, (2, 3, 4))
+    assert np.allclose(plane_window._plane().normal, (0, 1, 0))
+    assert plane_window.view.native_widget is widget
+    assert len(plane_window.view.added) > prior
+
+
+def test_plane_widget_mode_explicitly_rebuilds_handles_outside_vtk(plane_window, source_stl):
+    plane_window._load_path(source_stl)
+    initial = plane_window.view.native_widget
+    plane_window.plane_handle_mode.setCurrentText("Move only")
+    move = plane_window.view.native_widget
+    assert move is not initial
+    assert move.options["origin_translation"] is True
+    assert move.options["normal_rotation"] is False
+    plane_window.plane_handle_mode.setCurrentText("Rotate only")
+    rotate = plane_window.view.native_widget
+    assert rotate is not move
+    assert rotate.options["origin_translation"] is False
+    assert rotate.options["normal_rotation"] is True
+
+
+def test_disabled_widget_keeps_slider_and_ignores_stale_native_events(plane_window, source_stl):
+    plane_window._load_path(source_stl)
+    original = plane_window.view.native_widget
+    plane_window.plane_handles_enabled.setChecked(False)
+    assert plane_window.view.native_widget is None
+    original.invoke_release((0, 1, 0), (1, 2, 3))
+    assert not plane_window._plane_bridge.has_pending
+    plane_window.position_slider.setValue(800)
+    assert plane_window.coordinate.value() == pytest.approx(15.0, abs=.1)
+    assert plane_window.view.native_widget is None
+    plane_window.plane_handles_enabled.setChecked(True)
+    assert plane_window.view.native_widget is not None
+
+
+def test_numeric_plane_changes_sync_without_widget_recreation(plane_window, source_stl):
+    plane_window._load_path(source_stl)
+    widget = plane_window.view.native_widget
+    plane_window.coordinate.setValue(5.0)
+    assert plane_window.view.native_widget is widget
+    assert widget.representation.origins
+    assert widget.representation.builds >= 1
+    assert widget.representation.origins[-1][2] == pytest.approx(5.0)
+
+
+def test_plane_bridge_coalesces_multiple_native_poses_and_rejects_nan(qapplication):
+    from keymaster.plane_interaction import PlaneInteractionBridge
+
+    applied = []
+    bridge = PlaneInteractionBridge(lambda normal, origin: applied.append((normal, origin)))
+    bridge.capture((0, 0, 1), (0, 0, 0))
+    bridge.capture((0, 2, 0), (3, 4, 5))
+    bridge.capture((float("nan"), 0, 1), (10, 10, 10))
+    assert not applied
+    bridge.flush()
+    assert len(applied) == 1
+    assert np.allclose(applied[0][0], (0, 1, 0))
+    assert np.allclose(applied[0][1], (3, 4, 5))
+    bridge.capture((1, 0, 0), (7, 8, 9))
+    bridge.cancel()
+    bridge.flush()
+    assert len(applied) == 1
+    bridge.shutdown()
+    bridge.capture((1, 0, 0), (2, 3, 4))
+    bridge.flush()
+    assert len(applied) == 1

@@ -22,6 +22,7 @@ from .segmentation import (
     analyze_sections, cut_selected_sections, place_keys_on_cap,
 )
 from .theme import ACCENT, BLUE, COPPER, MUTED, STYLESHEET, button, icon_for
+from .plane_interaction import PlaneInteractionBridge
 from .updates import UpdateMonitor
 
 
@@ -97,6 +98,8 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         self._gizmo_origin = None
         self._gizmo_normal = None
         self._gizmo_callback_active = False
+        self._gizmo_generation = 0
+        self._plane_bridge = PlaneInteractionBridge(self._apply_gizmo_pose, self)
 
         root = QtWidgets.QWidget()
         root_layout = QtWidgets.QVBoxLayout(root)
@@ -319,11 +322,30 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.position_slider)
         self.range_hint = _muted("Load a model to enable the range.", "Hint")
         layout.addWidget(self.range_hint)
-        layout.addWidget(_muted(
-            "Drag the handles on the plane in the 3D view to move or rotate it. "
-            "The Free option allows any angle; X/Y/Z restore a straight cut.",
+        layout.addWidget(_muted("ON-PLANE HANDLES", "SectionHeading"))
+        self.plane_handle_mode = QtWidgets.QComboBox()
+        self.plane_handle_mode.addItems(["Move + rotate", "Move only", "Rotate only"])
+        self.plane_handle_mode.setToolTip(
+            "Move: drag center sphere or outer frame. Rotate: drag the normal arrow. "
+            "Restrict to Move only or Rotate only to prevent accidental changes."
+        )
+        self.plane_handle_mode.currentIndexChanged.connect(self._handle_mode_changed)
+        layout.addWidget(self.plane_handle_mode)
+        self.plane_handles_enabled = QtWidgets.QCheckBox("Show interactive plane handles")
+        self.plane_handles_enabled.setChecked(True)
+        self.plane_handles_enabled.setToolTip(
+            "Turn off if your graphics driver cannot handle VTK plane widgets. "
+            "The position slider and numeric controls remain available."
+        )
+        self.plane_handles_enabled.toggled.connect(self._handles_toggled)
+        layout.addWidget(self.plane_handles_enabled)
+        self.handle_hint = _muted(
+            "Drag the orange center sphere or outer frame to move the plane. "
+            "Drag the normal arrow to rotate. Drag outside the handles to orbit. "
+            "The cut preview updates after you release the mouse.",
             "Hint",
-        ))
+        )
+        layout.addWidget(self.handle_hint)
         self.face_gap = _spin(0.0, 0.0, 3.0, 3)
         self.face_gap.setSingleStep(.05)
         self.face_gap.valueChanged.connect(self._dirty)
@@ -485,6 +507,10 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         layout.addStretch(1)
 
     def _show_tool(self, index: int):
+        if (index in (1, 2) and self.model is not None
+                and self._display_mode == "parts"):
+            self._draw_original()
+            self._enable_gizmo(reset=True)
         self.stack.setCurrentIndex(index)
         keys = ["model", "cut", "keys", "parts"]
         self.nav_buttons[keys[index]].setChecked(True)
@@ -536,6 +562,10 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             try:
                 self._update_plane_slider()
                 self._draw_original()
+                if self._gizmo_widget is None:
+                    self._enable_gizmo(reset=True)
+                else:
+                    self._sync_gizmo_from_controls()
             except Exception as exc:
                 self._error(f"Could not update cut plane preview: {exc}")
 
@@ -549,6 +579,10 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         self._invalidate_analysis()
         try:
             self._draw_original()
+            if self._gizmo_widget is None:
+                self._enable_gizmo(reset=True)
+            else:
+                self._sync_gizmo_from_controls()
         except Exception as exc:
             self._error(f"Could not update cut plane: {exc}")
 
@@ -634,7 +668,22 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             settings.update(opacity=.48)
         return settings
 
+    def _handles_toggled(self, checked):
+        if self.model is None:
+            return
+        if checked and self._display_mode == "original":
+            self._enable_gizmo(reset=True)
+        else:
+            self._clear_gizmo()
+
+    def _handle_mode_changed(self, *_):
+        if self.model is not None and self._display_mode == "original":
+            # Only rebuild native handles from normal Qt user actions.
+            self._enable_gizmo(reset=True)
+
     def _clear_gizmo(self):
+        self._plane_bridge.cancel()
+        self._gizmo_generation += 1
         self._gizmo_widget = None
         if hasattr(self.view, "clear_plane_widgets"):
             try:
@@ -643,56 +692,94 @@ class KeymasterWindow(QtWidgets.QMainWindow):
                 pass
 
     def _enable_gizmo(self, *, reset=False):
-        """VTK interactive move/rotate plane handles; skip in headless tests."""
-        if self.model is None or not hasattr(self.view, "add_plane_widget"):
+        """Build native plane handles only from load or explicit user controls."""
+        if self.model is None or self._display_mode != "original":
+            return
+        if not self.plane_handles_enabled.isChecked():
+            self._clear_gizmo()
+            return
+        if not hasattr(self.view, "add_plane_widget"):
             return
         if self._gizmo_widget is not None and not reset:
-            try:
-                rep = self._gizmo_widget.GetRepresentation()
-                if not self._gizmo_callback_active:
-                    p = self._plane()
-                    rep.SetOrigin(*p.origin)
-                    rep.SetNormal(*p.normal)
-                    rep.BuildRepresentation()
-                return
-            except (AttributeError, RuntimeError):
-                self._clear_gizmo()
+            return
         self._clear_gizmo()
-        p = self._plane()
+        plane = self._plane()
         bounds = self.model.bounds
-        pv_bounds = (float(bounds[0, 0]), float(bounds[1, 0]),
-                     float(bounds[0, 1]), float(bounds[1, 1]),
-                     float(bounds[0, 2]), float(bounds[1, 2]))
+        pv_bounds = tuple(float(x) for x in (
+            bounds[0, 0], bounds[1, 0], bounds[0, 1],
+            bounds[1, 1], bounds[0, 2], bounds[1, 2],
+        ))
+        mode = self.plane_handle_mode.currentText()
+        can_move, can_rotate = mode != "Rotate only", mode != "Move only"
+        generation = self._gizmo_generation
         try:
             self._gizmo_widget = self.view.add_plane_widget(
-                self._on_gizmo_move, normal=p.normal, origin=p.origin,
-                bounds=pv_bounds, color=COPPER, normal_rotation=True,
-                interaction_event="always", test_callback=False,
+                lambda normal, origin, gen=generation:
+                    self._on_gizmo_move(normal, origin, gen),
+                normal=plane.normal,
+                origin=plane.origin,
+                bounds=pv_bounds,
+                color=COPPER,
+                normal_rotation=can_rotate,
+                origin_translation=can_move,
+                outline_translation=can_move,
+                tubing=True,
+                outline_opacity=.45,
+                implicit=True,
+                interaction_event="end",
+                test_callback=False,
             )
         except Exception as exc:
             self._gizmo_widget = None
-            self.statusBar().showMessage(f"Plane gizmo unavailable: {exc}", 10000)
+            self.statusBar().showMessage(
+                f"Plane handles unavailable: {exc}. Use the slider or coordinate field.", 10000
+            )
 
-    def _on_gizmo_move(self, normal, origin):
-        if self.model is None or self._gizmo_callback_active:
+    def _sync_gizmo_from_controls(self):
+        """Sync spinbox/slider edits, strictly outside native VTK mouse callbacks."""
+        if self._gizmo_widget is None or self._gizmo_callback_active:
             return
         try:
-            normal = np.asarray(normal, dtype=float)
-            origin = np.asarray(origin, dtype=float)
-            if not np.all(np.isfinite(origin)) or not np.all(np.isfinite(normal)):
-                return
-            normal /= np.linalg.norm(normal)
-            self._gizmo_origin = tuple(float(x) for x in origin)
-            self._gizmo_normal = tuple(float(x) for x in normal)
-            self._gizmo_callback_active = True
+            rep = self._gizmo_widget.GetRepresentation()
+            plane = self._plane()
+            rep.SetOrigin(*plane.origin)
+            rep.SetNormal(*plane.normal)
+            rep.BuildRepresentation()
+        except (AttributeError, RuntimeError):
+            self.statusBar().showMessage(
+                "Unable to update plane handles. Toggle the handle setting to reset.", 8000
+            )
+
+    def _on_gizmo_move(self, normal, origin, generation=None):
+        """Native VTK callback: capture coordinates and do nothing to the scene."""
+        if self.model is None or self._display_mode != "original":
+            return
+        if generation is not None and generation != self._gizmo_generation:
+            return
+        self._plane_bridge.capture(normal, origin)
+
+    def _apply_gizmo_pose(self, normal, origin):
+        """Qt-timer callback, called after native widget interaction finishes."""
+        if self.model is None or self._display_mode != "original":
+            return
+        previous = self._plane()
+        if (np.allclose(normal, previous.normal, atol=1e-7)
+                and np.allclose(origin, previous.origin, atol=1e-6)):
+            return
+        self._gizmo_callback_active = True
+        try:
+            self._gizmo_origin = tuple(origin)
+            self._gizmo_normal = tuple(normal)
             with QtCore.QSignalBlocker(self.axis):
                 self.axis.setCurrentText("Free")
             self._update_plane_slider()
             self._dirty()
             self._invalidate_analysis()
             self._draw_original()
+            self.statusBar().showMessage(
+                "Cut plane updated. Drag again or detect detachable sections.")
         except Exception as exc:
-            self.statusBar().showMessage(f"Plane manipulation failed: {exc}", 10000)
+            self._error(f"Could not update cutting plane: {exc}")
         finally:
             self._gizmo_callback_active = False
 
@@ -931,7 +1018,6 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             self.view.reset_camera()
         self._display_mode = "original"
         self.actors = ()
-        self._enable_gizmo()
         if self._section_candidates and hasattr(self.view, "remove_actor"):
             self._highlight_candidate(self.section_list.currentRow())
 
@@ -1063,6 +1149,7 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             if self.model is not None:
                 try:
                     self._draw_original()
+                    self._enable_gizmo(reset=True)
                 except Exception:
                     pass
         finally:
@@ -1143,6 +1230,7 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         return super().event(event)
 
     def closeEvent(self, event):
+        self._plane_bridge.shutdown()
         self._clear_gizmo()
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("splitter", self.splitter.sizes())

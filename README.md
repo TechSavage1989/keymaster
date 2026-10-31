@@ -17,8 +17,9 @@ Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ me
 - Drag a position slider to move the visible cut plane without doing a costly solid Boolean operation on every change.
 - Recognize shared vertices in standard STL exports before validating mesh watertightness.
 - Initialize the model preview and X/Y/Z cutting plane correctly after loading, and report preview errors.
-- Cut along an X, Y, or freely rotated plane using draggable and rotatable 3D handles (where the VTK viewport supports interactive plane widgets).
+- Cut along an X, Y, or freely rotated plane using on-plane native handles: drag the center sphere or outer frame to translate, and drag the normal arrow to rotate. Choose Move only or Rotate only if needed.
 - Inspect the actual intersection curve instead of guessing from a translucent plane.
+- Plane interaction uses end-of-drag events and defers all scene modifications until the VTK callback finishes. A handle visibility toggle provides a fallback for unsupported graphics drivers.
 - Detect independently detachable positive-side solid sections and check or click which ones to detach; unselected sections stay attached to the retained body.
 - Apply an optional mating-face gap for fully selected cuts and independent peg/socket clearances.
 - Add round, square or tapered integral pegs and matching sockets; an experimental barbed snap option is provided for fit experimentation on compliant FDM materials.
@@ -39,7 +40,7 @@ Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ me
 
 Get the currently published **Windows prerelease** from the [GitHub releases page](https://github.com/TechSavage1989/keymaster/releases) and select **Keymaster_Windows_Portable.zip**. Keep the extracted Keymaster folder together; launch the stable filename **Keymaster.exe**.
 
-The currently published preview is **0.2.0 alpha 1**, available on the [verified prerelease page](https://github.com/TechSavage1989/keymaster/releases/tag/v0.2.0-alpha.1). The Windows portable ZIP is 174.4 MB (166.3 MiB). There is no production-tested stable release. This update includes selective section detachment, direct plane manipulation, improved shading, automatic multi-key placement and additional connector prototypes. Previous releases remain available.
+The next approved prerelease is **0.2.0 alpha 2**, following the [0.2.0 alpha 1 release](https://github.com/TechSavage1989/keymaster/releases/tag/v0.2.0-alpha.1). Use [GitHub Releases](https://github.com/TechSavage1989/keymaster/releases) to obtain only the published, verified ZIP. Alpha 2 addresses native plane-click crashes and improves on-plane move/rotate controls. The Windows portable ZIP is 174.4 MB (166.3 MiB). There is no production-tested stable release. This update includes selective section detachment, direct plane manipulation, improved shading, automatic multi-key placement and additional connector prototypes. Previous releases remain available.
 
 ## Requirements
 
@@ -68,7 +69,7 @@ To run directly from source:
 
 ## How to use
 
-**Cut plane.** Drag the 3D plane widget's handle to move it and rotate its normal. The plane becomes **Free** when manipulated directly; the X/Y/Z presets restore axis-aligned cutting. The highlighted orange intersection line shows the mesh region touched by the plane. Live movement updates the guide, not the expensive manifold Boolean. **Detect detachable sections** performs a deliberate analysis and lists positive-side connected solids. Uncheck sections to keep their original connection to the retained body. The opposite normal can be obtained by rotating the widget. A face gap is allowed only when all detected sections are detached; selective detachment with unselected sections uses zero face gap.
+**Cut plane.** With on-plane handles enabled, drag the orange center sphere or outer frame to translate, and drag the normal arrow to rotate. Use the handle-mode control to restrict editing to Move only or Rotate only. Plane updates occur after releasing the mouse to avoid native callback conflicts. Toggle Show interactive plane handles off to use the original slider and numeric fields as a fallback. Drag the 3D plane widget's handle to move it and rotate its normal. The plane becomes **Free** when manipulated directly; the X/Y/Z presets restore axis-aligned cutting. The highlighted orange intersection line shows the mesh region touched by the plane. Live movement updates the guide, not the expensive manifold Boolean. **Detect detachable sections** performs a deliberate analysis and lists positive-side connected solids. Uncheck sections to keep their original connection to the retained body. The opposite normal can be obtained by rotating the widget. A face gap is allowed only when all detected sections are detached; selective detachment with unselected sections uses zero face gap.
 
 **Key settings.** Choose a resin or FDM clearance preset, or select Custom to enter independent radial and axial tolerances. U and V describe local cut-plane positions. **Auto-place** finds a spaced set of keys and, after section detection, scopes them to the first checked section. **Click to place** projects a selected visible point onto the plane. Connector types: round, square, tapered, and experimental snap/barbed latch. Snap hardware must be trial-printed on compliant FDM materials; it is not tested for resin and is not a structural joint. Existing keys retain their own settings.
 
@@ -88,7 +89,7 @@ Window geometry is saved under the user's application configuration directory. N
 
 - **Import rejected:** Alpha 2 corrected the STL topology import issue; Alpha 3 corrected the UI initialization issue. Alpha 4 retains both fixes. Genuinely open, inverted, or self-intersecting meshes may still require repair.
 - **Key does not fit:** Reduce diameter and/or margin, or reposition the key to a wider portion of the cut face.
-- **Unusable viewport:** Update the graphics driver or run on a system with supported OpenGL. Try Studio clay or Shaded edges for relief details. Native GPU rendering and plane widgets still require user testing.
+- **Unusable viewport or plane click crash:** Try a version newer than alpha 1. Alpha 2 separates VTK mouse callbacks from scene modifications. As an immediate workaround, turn off **Show interactive plane handles** and use the axis/position slider. For graphic instability, update the GPU driver. Real mouse/GPU validation remains outstanding.
 - **Only one detachable section:** Positive-side regions are still connected across this cut. Rotate/move the plane until the intended limbs are separate, then analyze again.
 - **Too many keys or snap fit fails:** Reduce key count/size and verify real-material clearance and compliance on a test print. Experimental snap connectors are not guaranteed to engage.
 - **Export refused:** Existing files are never replaced. Choose another output folder.
