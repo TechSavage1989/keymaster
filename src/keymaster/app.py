@@ -632,8 +632,6 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             settings.update(style="wireframe", line_width=1.3)
         elif mode == "X-ray":
             settings.update(opacity=.48)
-        elif mode == "Lit solid" and not part:
-            settings.update(color="#becbd6")
         return settings
 
     def _clear_gizmo(self):
@@ -894,7 +892,9 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             self.view.add_axes()
             self.view.add_mesh(
                 self._preview_polydata if self._preview_polydata is not None else _as_polydata(self.model),
-                name="original", color="#a7b6c4", **self._material_options(),
+                name="original",
+                color=("#becbd6" if self.shading_mode.currentText() == "Lit solid" else "#a7b6c4"),
+                **self._material_options(),
             )
             if camera is not None:
                 self.view.camera_position = camera
