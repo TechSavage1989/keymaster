@@ -2,7 +2,7 @@
 
 ## Baseline
 - App: Keymaster, Windows-first portable GUI.
-- Current published preview: v0.2.0-alpha.1 (0.2.0a1), released October 31, 2026 from merged main commit dee9afd15be9e98c9f3c643808e4271c19260120. Current fix in development: v0.2.0a2 on development/keymaster-0.2-alpha2-plane-stability. The user subsequently explicitly approved releasing v0.2.0-alpha.2 on October 31, 2026. Merge only after required checks; publication remains gated on the approved merge marker and passing main CI. Development branch: development/keymaster-0.2-selective-cut. Prior published baseline: v0.1.0-alpha.4 at 8879fd3d45e4014ffbfc3658a49496768c87e9a7. Preserve earlier releases.
+- Current published preview: v0.2.0-alpha.2 (0.2.0a2), released October 31, 2026 from verified tag/merged commit 80ca5b7db8246bd800e9d027a50fabc54381998c. Development branch: development/keymaster-0.2-alpha2-plane-stability. Earlier prereleases, including v0.2.0-alpha.1, remain available. Keymaster.exe is the stable executable name.
 - Repository: https://github.com/TechSavage1989/keymaster (public at task start).
 - Default branch: main. Original commit was 29b7c7baf0bfe9955d8c6146425104d5d197cbf8 with only README.md.
 - No previous app, existing icon, license, binary releases, or stable user-confirmed build existed at baseline.
@@ -35,6 +35,15 @@ Commands from the repository root:
     python -m keymaster
 
 Windows packaging is defined in .github/workflows/ci.yml using Python 3.12 and PyInstaller on windows-latest. Archive format: one Keymaster/ folder with Keymaster.exe inside, plus SHA256SUMS.txt alongside the uploaded ZIP.
+
+## Alpha 0.2 alpha 2 release validation
+- Pull request: https://github.com/TechSavage1989/keymaster/pull/8, merged after passing hosted checks.
+- Published release: https://github.com/TechSavage1989/keymaster/releases/tag/v0.2.0-alpha.2
+- Hosted release workflow: https://github.com/TechSavage1989/keymaster/actions/runs/41244871289. Linux source/geometry checks, Windows tests and portable packaging, and gated release publication all passed.
+- Git tag v0.2.0-alpha.2 targets 80ca5b7db8246bd800e9d027a50fabc54381998c; latest public GitHub Releases feed includes this prerelease.
+- Windows portable ZIP: Keymaster_Windows_Portable.zip, 174,424,620 bytes, SHA256 69918e036baeaf612f01d11d81aa93b9500771bbabf283f7cb05035bf9719644. SHA256SUMS.txt was published separately; main CI verified matching digest before publishing.
+- Regression validation: 51 Windows tests and real offscreen VTK plane-widget lifecycle smoke passed on the PR test build. Windows packaging and the final main-branch publication workflow also passed. This is not a native physical mouse click/drag or user GPU stability guarantee.
+- Scope: VTK mouse callback safety and explicit attached handle modes. No changes to Manifold3D segmentation/Boolean engine, imported model assets, or safe export policy.
 
 ## Alpha 0.2 alpha 1 release validation
 - Pull request: https://github.com/TechSavage1989/keymaster/pull/6, merged after hosted checks.
@@ -70,7 +79,7 @@ Root allowlist: README.md, AGENTS.md, DEVELOPMENT_HANDOFF.md, pyproject.toml, .g
 On October 31, 2026, the user explicitly approved source/tests/build assets/documentation upload, public-source publication to this named repository, PR creation and ready-for-review, merge after checks, and tagging/asset release/publication for the initial task. The user subsequently approved alpha 2 and alpha 3 fixes, and the alpha 4 UI modernization. On October 31, 2026, they explicitly requested implementing and publishing the next phase of interactive selective cutting, shading, auto keys, snaps and tolerances; this grants publication for v0.2.0-alpha.1 in this named public repository after checks pass. Each approval is scoped to its task, not future releases. Each approval applies only to its named change. The subsequent request 'release the version as before' explicitly approves publication of the plane-crash fix as v0.2.0-alpha.2, scoped to this release only. No standing consent for future releases; CI, repository protections and reviews remain binding.
 
 ## Next tasks
-1. Validate the v0.2.0a2 plane-crash fix in CI and on native Windows with real mouse clicks and manipulation of the original Mewtwo sculpt. Release approval is now explicit; verify the published GitHub tag, ZIP and checksum after main CI succeeds. Confirm correct plane visual handles and lack of unexpected redraw during mouse interactions.
+1. Validate the published v0.2.0-alpha.2 plane-crash fix on a native Windows computer with actual mouse clicks and drags using the original Mewtwo sculpt. Confirm move, rotate, no crash, proper shaded geometry and correct handle appearance; record user-confirmed baseline.
 2. Smoke test a real sculpt mesh in the native application and verify printed fit.
 3. Implement secure user-consented download/install/rollback updater with release manifest and digest verification.
 4. Improve cut-plane gizmo, manual key manipulation, non-blocking processing, and robust per-piece multi-cut project history.
