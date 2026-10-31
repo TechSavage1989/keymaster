@@ -1,0 +1,97 @@
+name: Keymaster checks and Windows preview
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Geometry tests and source validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - run: python scripts/check_root.py --self-test
+      - run: python -m compileall -q src scripts tests
+
+  windows-portable:
+    name: Windows portable package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - run: python -c "import keymaster.app; import manifold3d; import pyvista; print('GUI modules imported')"
+      - name: Build stable named EXE
+        run: >-
+          pyinstaller --noconfirm --clean --onedir --windowed
+          --name Keymaster
+          --collect-all vtkmodules
+          --collect-all pyvista
+          --collect-all pyvistaqt
+          --hidden-import vtkmodules.vtkRenderingOpenGL2
+          --hidden-import vtkmodules.vtkInteractionStyle
+          scripts/launch.py
+      - name: Package ZIP and SHA256
+        shell: pwsh
+        run: |
+          if (!(Test-Path "dist/Keymaster/Keymaster.exe")) { throw "Missing Keymaster.exe" }
+          Compress-Archive -Path "dist/Keymaster" -DestinationPath "Keymaster_Windows_Portable.zip" -Force
+          $hash = (Get-FileHash "Keymaster_Windows_Portable.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  Keymaster_Windows_Portable.zip" | Out-File -FilePath "SHA256SUMS.txt" -Encoding ascii
+          if (!(Test-Path "SHA256SUMS.txt")) { throw "Missing digest" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keymaster-windows-preview
+          path: |
+            Keymaster_Windows_Portable.zip
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-approved-alpha:
+    name: Publish approved initial preview only
+    needs: [tests, windows-portable]
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      contains(github.event.head_commit.message, '[keymaster-alpha1-release-approved]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: keymaster-windows-preview
+          path: release-assets
+      - name: Verify release assets and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s release-assets/Keymaster_Windows_Portable.zip
+          test -s release-assets/SHA256SUMS.txt
+          (cd release-assets && sha256sum --check SHA256SUMS.txt)
+          gh release create v0.1.0-alpha.1 \
+            release-assets/Keymaster_Windows_Portable.zip \
+            release-assets/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Keymaster 0.1.0 alpha 1" \
+            --prerelease \
+            --notes-file docs/releases/0.1.0a1.md
