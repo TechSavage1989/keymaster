@@ -192,23 +192,34 @@ class KeymasterWindow(QtWidgets.QMainWindow):
     def _coordinate_changed(self, *_):
         self._dirty()
         if self.model is not None:
-            self._draw_original()
+            try:
+                self._draw_original()
+            except Exception as exc:
+                self._error(f"Could not update cut plane preview: {exc}")
 
     def _axis_index(self):
         return {"X": 0, "Y": 1, "Z": 2}[self.axis.currentText()]
 
     def _axis_changed(self, *_):
-        if self.model is not None:
-            self.coordinate.setValue(float(self.model.bounds[self._axis_index()].mean()))
         self._dirty()
         if self.model is not None:
-            self._draw_original()
+            try:
+                # Trimesh bounds have shape (2, 3): minima and maxima by XYZ.
+                # The selected axis is a COLUMN, never a row.
+                with QtCore.QSignalBlocker(self.coordinate):
+                    self.coordinate.setValue(
+                        float(self.model.bounds[:, self._axis_index()].mean())
+                    )
+                self._draw_original()
+            except Exception as exc:
+                self._error(f"Could not change cut plane axis: {exc}")
 
     def _plane(self):
         if self.model is None:
             raise GeometryError("Import a model first.")
         index = self._axis_index()
-        origin = np.array(self.model.bounds.mean(axis=1), dtype=float)
+        # Mean of the MIN and MAX rows yields the 3D bounding-box center.
+        origin = np.array(self.model.bounds.mean(axis=0), dtype=float)
         origin[index] = self.coordinate.value()
         normal = np.eye(3)[index]
         return CutPlane(tuple(origin), tuple(normal))
@@ -232,16 +243,24 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             self._error(exc)
             return
         self.model, self.source = mesh, Path(filename)
-        self.keys.clear()
-        self._refresh_table()
-        self._dirty()
-        self.coordinate.setValue(float(mesh.bounds[2].mean()))
-        self.axis.setCurrentText("Z")
-        self.model_label.setText(
-            f"{self.source.name}\n{len(mesh.faces):,} triangles | "
-            f"{mesh.extents[0]:.1f} x {mesh.extents[1]:.1f} x {mesh.extents[2]:.1f} model units"
-        )
-        self._draw_original()
+        try:
+            self.keys.clear()
+            self._refresh_table()
+            self._dirty()
+            # Keep signals blocked during initialization: otherwise the plane
+            # redraws against partially initialized coordinates, which can
+            # leave the UI in a confusing state after a successful mesh load.
+            with QtCore.QSignalBlocker(self.axis), QtCore.QSignalBlocker(self.coordinate):
+                self.axis.setCurrentText("Z")
+                self.coordinate.setValue(float(mesh.bounds[:, 2].mean()))
+            self.model_label.setText(
+                f"{self.source.name}\n{len(mesh.faces):,} triangles | "
+                f"{mesh.extents[0]:.1f} x {mesh.extents[1]:.1f} x {mesh.extents[2]:.1f} model units"
+            )
+            self._draw_original()
+        except Exception as exc:
+            self._error(f"Model was loaded but its preview could not be initialized: {exc}")
+            return
         self.statusBar().showMessage("Model imported. Move the cut plane and add keys.")
 
     def _draw_original(self):

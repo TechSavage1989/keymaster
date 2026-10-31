@@ -9,6 +9,7 @@ Read this file and DEVELOPMENT_HANDOFF.md before any edits.
 - Reject unsupported/non-manifold geometry rather than silently exporting corrupt shapes.
 - STL stores triangle-corner vertices independently. Import with topology processing to consolidate shared coordinates before validation; do not disable integrity checks to work around this.
 - Preserve user settings and a stable executable filename: Keymaster.exe.
+- Trimesh bounds are (2, 3) for minimum and maximum XYZ: axis values use bounds[:, axis], bounding-box center uses bounds.mean(axis=0); include a real UI import regression test.
 - Do not claim advanced automatic placement, remeshing, model repair, 3MF support, multicut history or automatic updater installation unless implemented and tested.
 
 ## Code map
