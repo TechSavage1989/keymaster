@@ -335,9 +335,9 @@ def test_click_to_select_one_detachable_section(window, tmp_path, monkeypatch):
     window.coordinate.setValue(0)
     window.analyze_sections()
     assert len(window._selected_sections()) == 2
-    centroid = window._section_candidates[0].centroid
-    window._picked_section(centroid)
+    surface_point = window._section_candidates[0].mesh.vertices[0]
+    window._picked_section(surface_point)
     assert not errors
     assert window._selected_sections() == (1,)
-    window._picked_section(centroid)
+    window._picked_section(surface_point)
     assert set(window._selected_sections()) == {0, 1}
