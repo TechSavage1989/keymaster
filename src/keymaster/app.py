@@ -78,7 +78,7 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         self.axis.addItems(["Z", "X", "Y"])
         self.axis.currentIndexChanged.connect(self._axis_changed)
         self.coordinate = _spin(0, -100000, 100000, 3)
-        self.coordinate.valueChanged.connect(self._dirty)
+        self.coordinate.valueChanged.connect(self._coordinate_changed)
         cut_layout.addRow("Plane normal", self.axis)
         cut_layout.addRow("Coordinate (mm)", self.coordinate)
         left.addWidget(cut_box)
@@ -188,6 +188,11 @@ class KeymasterWindow(QtWidgets.QMainWindow):
     def _dirty(self, *_):
         self.result = None
         self.export_button.setEnabled(False)
+
+    def _coordinate_changed(self, *_):
+        self._dirty()
+        if self.model is not None:
+            self._draw_original()
 
     def _axis_index(self):
         return {"X": 0, "Y": 1, "Z": 2}[self.axis.currentText()]
