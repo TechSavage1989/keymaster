@@ -63,12 +63,12 @@ jobs:
           retention-days: 30
 
   publish-approved-alpha:
-    name: Publish approved alpha 2 preview only
+    name: Publish approved alpha 3 preview only
     needs: [tests, windows-portable]
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      contains(github.event.head_commit.message, '[keymaster-alpha2-release-approved]')
+      contains(github.event.head_commit.message, '[keymaster-alpha3-release-approved]')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -87,11 +87,11 @@ jobs:
           test -s release-assets/Keymaster_Windows_Portable.zip
           test -s release-assets/SHA256SUMS.txt
           (cd release-assets && sha256sum --check SHA256SUMS.txt)
-          gh release create v0.1.0-alpha.2 \
+          gh release create v0.1.0-alpha.3 \
             release-assets/Keymaster_Windows_Portable.zip \
             release-assets/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Keymaster 0.1.0 alpha 2" \
+            --title "Keymaster 0.1.0 alpha 3" \
             --prerelease \
-            --notes-file docs/releases/0.1.0a2.md
+            --notes-file docs/releases/0.1.0a3.md

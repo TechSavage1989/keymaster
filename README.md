@@ -14,6 +14,7 @@ Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ me
 
 - Import an STL or OBJ model and inspect it in a rotatable 3D viewport.
 - Recognize shared vertices in standard STL exports before validating mesh watertightness.
+- Initialize the model preview and X/Y/Z cutting plane correctly after loading, and report preview errors.
 - Cut along an adjustable X, Y or Z plane.
 - Add round or square integrated pegs with matching recessed sockets.
 - Set diameter, insertion depth, radial fit clearance, extra socket depth and minimum edge margin per key.
@@ -28,7 +29,7 @@ Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ me
 
 Look for a **prerelease** build at the [GitHub releases page](https://github.com/TechSavage1989/keymaster/releases). The primary portable asset, when published, is named **Keymaster_Windows_Portable.zip**. Do not assume a build is published just because source exists.
 
-The current preview is **0.1.0 alpha 2**. There is no production-tested stable release. Alpha 2 corrects a false watertightness error when importing valid STL files.
+The current preview is **0.1.0 alpha 3**. There is no production-tested stable release. Alpha 2 corrected STL topology import; alpha 3 fixes the UI issue where an imported mesh could leave the label at "No model loaded" because of incorrect bounding-box indexing.
 
 ## Requirements
 
@@ -73,7 +74,7 @@ Window geometry is saved under the user's application configuration directory. N
 
 ## Troubleshooting
 
-- **Import rejected:** Upgrade to alpha 2 or later if alpha 1 incorrectly rejects valid exported STL files. Alpha 2 consolidates STL shared vertices before topology checks; genuinely open, inverted, or self-intersecting sculpt meshes may still need repair in an external tool.
+- **Import rejected:** Use alpha 2 or later for the repaired STL topology import fix. Alpha 3 also fixes a UI initialization issue that could make a validated model appear not to load. Actual open, inverted, or self-intersecting meshes may still require repair.
 - **Key does not fit:** Reduce diameter and/or margin, or reposition the key to a wider portion of the cut face.
 - **Unusable viewport:** Update the graphics driver or run on a system with supported OpenGL.
 - **Export refused:** Existing files are never replaced. Choose another output folder.
