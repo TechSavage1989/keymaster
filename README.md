@@ -17,24 +17,29 @@ Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ me
 - Drag a position slider to move the visible cut plane without doing a costly solid Boolean operation on every change.
 - Recognize shared vertices in standard STL exports before validating mesh watertightness.
 - Initialize the model preview and X/Y/Z cutting plane correctly after loading, and report preview errors.
-- Cut along an adjustable X, Y or Z plane.
-- Add round or square integrated pegs with matching recessed sockets.
+- Cut along an X, Y, or freely rotated plane using draggable and rotatable 3D handles (where the VTK viewport supports interactive plane widgets).
+- Inspect the actual intersection curve instead of guessing from a translucent plane.
+- Detect independently detachable positive-side solid sections and check or click which ones to detach; unselected sections stay attached to the retained body.
+- Apply an optional mating-face gap for fully selected cuts and independent peg/socket clearances.
+- Add round, square or tapered integral pegs and matching sockets; an experimental barbed snap option is provided for fit experimentation on compliant FDM materials.
+- Suggest multiple non-overlapping alignment keys automatically on a selected section's actual cut face.
 - Set diameter, insertion depth, radial fit clearance, extra socket depth and minimum edge margin per key.
 - Apply resin/FDM fit presets or adjust clearance manually; presets are suggested starting points, not guaranteed printer fits.
 - See translucent key markers before generating the closed cut geometry.
 - Manually enter key positions in the cut plane, click a model to project a point, or suggest a cut-face location.
-- Generate both solid parts, manage their visibility, and inspect an exploded preview.
+- Generate two or more printable parts and inspect an exploded preview. Section selections are preserved until the cutting plane changes.
+- Choose studio clay, lit solid, shaded edges, X-ray or wireframe rendering to reveal sculpt detail.
 - Keep orbit/zoom position when moving the plane; very dense models use a display-only simplified mesh, with exact original geometry retained for cutting.
-- Export two STL files without overwriting previous exports.
+- Export two or more STL files without overwriting previous exports.
 - Reject open/inverted meshes, keys outside the cut face, and overlapping keys.
 
-**Preview limitations:** One cutting plane per operation. Work with an exported piece again to create further cuts. Only integrated round and square keys are supported. STL/OBJ imports lose materials. Models must already be scaled in millimeters. Complex or self-intersecting sculpt meshes may require repair before they can be processed. Automatic placement is a suggestion, not a mechanical fit guarantee.
+**Preview limitations:** One cutting plane per operation. Selective detachment works only when the plane produces independently connected solids on its positive-normal side. Regions joined to one another above that cut cannot yet be detached independently. When unselected sections remain attached, face gap must be zero. Tapered and experimental snap shapes are not mechanically validated. STL/OBJ imports lose materials; models must already be scaled in millimeters. No production-grade snap-fit analysis or material simulation.
 
 ## Download
 
 Get the currently published **Windows prerelease** from the [GitHub releases page](https://github.com/TechSavage1989/keymaster/releases) and select **Keymaster_Windows_Portable.zip**. Keep the extracted Keymaster folder together; launch the stable filename **Keymaster.exe**.
 
-The current preview is **0.1.0 alpha 4**. There is no production-tested stable release. Alpha 4 modernizes the interface and reduces unnecessary bundled components; its published ZIP is 174.3 MB (166.3 MiB), approximately 6.1% smaller than Alpha 3. Prior STL import and UI fixes remain included.
+The current preview under development is **0.2.0 alpha 1**. There is no production-tested stable release. The prior stable preview baseline was Alpha 4 at 174.3 MB (166.3 MiB). This release adds selective section detachment, a 3D cutting-plane manipulator, enhanced lighting, automatic multi-key placement, and additional connector types. Verify the actual new ZIP size from the release assets.
 
 ## Requirements
 
@@ -49,9 +54,10 @@ The current preview is **0.1.0 alpha 4**. There is no production-tested stable r
 2. Extract the ZIP. Keep the contents of its **Keymaster** folder together.
 3. Start **Keymaster.exe** inside the extracted folder. The filename stays stable between updates.
 4. Use **Import STL / OBJ** to load a watertight model with dimensions in millimeters.
-5. Use the **Cut** panel to select an X/Y/Z axis and move the position slider or enter a precise coordinate.
-6. Use the **Keys** panel to choose a fit preset and place keys by clicking on the model, automatic suggestion, or manual U/V coordinates.
-7. Select **Preview cut**, inspect the parts and exploded view in **Parts**, then choose **Export STL**.
+5. Open **Cut** and drag the 3D plane widget to translate or rotate the cut freely. X/Y/Z reset an axis-aligned orientation. Watch the highlighted mesh-plane intersection.
+6. Select **Detect detachable sections**, then uncheck a listed section or use **Click a section in the 3D view** to toggle its separation. Only geometrically independent sections on the selected positive side are listed.
+7. Use **Keys** to select a connector shape, fit preset, diameter and automatic connector count. Choose **Auto-place** or place individual keys on the model. Snap latches are experimental.
+8. Configure optional **Mating face gap** for a complete cut. Select **Preview cut** to generate and inspect the parts before using **Export STL**.
 
 To run directly from source:
 
@@ -62,11 +68,11 @@ To run directly from source:
 
 ## How to use
 
-**Cut plane.** X, Y, or Z sets the plane normal in model coordinates. Move the slider or enter its coordinate; this immediately updates only the visual plane. Choose **Preview cut** when ready to run the more expensive geometry operation. Both pieces are capped along that plane. The negative side gets protruding pegs, while the positive side gets matching recessed sockets.
+**Cut plane.** Drag the 3D plane widget's handle to move it and rotate its normal. The plane becomes **Free** when manipulated directly; the X/Y/Z presets restore axis-aligned cutting. The highlighted orange intersection line shows the mesh region touched by the plane. Live movement updates the guide, not the expensive manifold Boolean. **Detect detachable sections** performs a deliberate analysis and lists positive-side connected solids. Uncheck sections to keep their original connection to the retained body. The opposite normal can be obtained by rotating the widget. A face gap is allowed only when all detected sections are detached; selective detachment with unselected sections uses zero face gap.
 
-**Key settings.** Choose a resin or FDM clearance preset, or select Custom to enter your own radial and axial clearances. U and V describe positions on the cutting plane relative to the model's projected bounding-box center; expand **Manual location** to enter them precisely. Click **Click to place** to project a visible point onto the plane, **Suggest** for a proposed location, or **Add at U / V** for manual entry. Existing keys retain their own settings. Click **Remove selected key** to delete a key.
+**Key settings.** Choose a resin or FDM clearance preset, or select Custom to enter independent radial and axial tolerances. U and V describe local cut-plane positions. **Auto-place** finds a spaced set of keys and, after section detection, scopes them to the first checked section. **Click to place** projects a selected visible point onto the plane. Connector types: round, square, tapered, and experimental snap/barbed latch. Snap hardware must be trial-printed on compliant FDM materials; it is not tested for resin and is not a structural joint. Existing keys retain their own settings.
 
-**Preview and export.** Geometry generation is deliberate and can take time on dense sculpts. Changing the plane or key list invalidates the prior export. The Parts panel can hide each generated half and adjust separation. The exploded preview is for inspection only: exported pieces keep their original assembly coordinates. Existing output files are never silently overwritten. Press Ctrl+O to import, Ctrl+G to preview, Ctrl+E to export, or F to frame the model.
+**Preview and export.** Geometry generation is deliberate and can take time on dense sculpts. Changing the plane or key list invalidates the prior export. A full cut produces two parts; selective analysis may produce additional independently detached parts. The Parts panel separates them in the viewport; exports retain original assembly coordinates. Existing files are never silently overwritten. Press Ctrl+O to import, Ctrl+G to preview, Ctrl+E to export, or F to frame the model.
 
 **Fit warning.** Clearances are in millimeters and depend on printer, resin/filament, orientation and post-processing. Test on a small sample before printing a large sculpture. Automated edge checks sample the footprint; they are not a complete structural or engineering strength analysis.
 
@@ -82,7 +88,9 @@ Window geometry is saved under the user's application configuration directory. N
 
 - **Import rejected:** Alpha 2 corrected the STL topology import issue; Alpha 3 corrected the UI initialization issue. Alpha 4 retains both fixes. Genuinely open, inverted, or self-intersecting meshes may still require repair.
 - **Key does not fit:** Reduce diameter and/or margin, or reposition the key to a wider portion of the cut face.
-- **Unusable viewport:** Update the graphics driver or run on a system with supported OpenGL.
+- **Unusable viewport:** Update the graphics driver or run on a system with supported OpenGL. Try Studio clay or Shaded edges for relief details. Native GPU rendering and plane widgets still require user testing.
+- **Only one detachable section:** Positive-side regions are still connected across this cut. Rotate/move the plane until the intended limbs are separate, then analyze again.
+- **Too many keys or snap fit fails:** Reduce key count/size and verify real-material clearance and compliance on a test print. Experimental snap connectors are not guaranteed to engage.
 - **Export refused:** Existing files are never replaced. Choose another output folder.
 - **Update check failed:** Internet access or GitHub's API may be temporarily unavailable. Use the releases page manually.
 

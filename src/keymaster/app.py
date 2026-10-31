@@ -1,4 +1,4 @@
-"""Keymaster 0.1.0a4: focused 3D workstation for cutting keyed prints.
+"""Keymaster 0.2.0a1: selective 3D print assembly workstation.
 
 The original manifold cutting engine remains untouched. UI previews never
 modify or overwrite the source model; exports remain explicit.
@@ -16,7 +16,10 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from . import __version__
 from .geometry import (
     CutPlane, GeometryError, KeySpec, cut_and_key, export_stl,
-    frame, load_model, suggest_key,
+    frame, load_model, suggest_key, suggest_keys,
+)
+from .segmentation import (
+    analyze_sections, cut_selected_sections, place_keys_on_cap,
 )
 from .theme import ACCENT, BLUE, COPPER, MUTED, STYLESHEET, button, icon_for
 from .updates import UpdateMonitor
@@ -89,6 +92,11 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         self._display_mode = "empty"
         self._key_marker_names: list[str] = []
         self._loading = False
+        self._section_candidates = ()
+        self._gizmo_widget = None
+        self._gizmo_origin = None
+        self._gizmo_normal = None
+        self._gizmo_callback_active = False
 
         root = QtWidgets.QWidget()
         root_layout = QtWidgets.QVBoxLayout(root)
@@ -178,10 +186,22 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         reset_button.clicked.connect(self._reset_camera)
         reset_button.setToolTip("Reset camera to fit the model (F)")
         viewport_tools.addWidget(reset_button)
+        viewport_tools.addSpacing(8)
+        viewport_tools.addWidget(_muted("Shading"))
+        self.shading_mode = QtWidgets.QComboBox()
+        self.shading_mode.addItems(["Studio clay", "Lit solid", "Shaded edges", "X-ray", "Wireframe"])
+        self.shading_mode.setToolTip("Choose lighting and edge modes for the sculpt viewport.")
+        self.shading_mode.currentIndexChanged.connect(self._refresh_shading)
+        viewport_tools.addWidget(self.shading_mode)
         viewport_layout.addLayout(viewport_tools)
         self.view = QtInteractor(viewport_panel)
         self.view.set_background("#151a20")
         self.view.add_axes()
+        if hasattr(self.view, "enable_lightkit"):
+            try:
+                self.view.enable_lightkit()
+            except (RuntimeError, AttributeError):
+                pass
         viewport_layout.addWidget(self.view, 1)
         self.viewport_hint = _muted(
             "Drop an STL or OBJ here, or select Import model.", "Hint"
@@ -282,7 +302,7 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         layout = self._page("Cut", "Move a visible plane through the model, then preview the split.")
         layout.addWidget(_muted("CUT ORIENTATION", "SectionHeading"))
         self.axis = QtWidgets.QComboBox()
-        self.axis.addItems(["Z", "X", "Y"])
+        self.axis.addItems(["Z", "X", "Y", "Free"])
         self.axis.setToolTip("Cut along a plane perpendicular to this axis.")
         self.axis.currentIndexChanged.connect(self._axis_changed)
         layout.addWidget(self.axis)
@@ -300,7 +320,46 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         self.range_hint = _muted("Load a model to enable the range.", "Hint")
         layout.addWidget(self.range_hint)
         layout.addWidget(_muted(
-            "The translucent plane is a live guide. Generating the finished solids happens only when you select Preview cut.",
+            "Drag the handles on the plane in the 3D view to move or rotate it. "
+            "The Free option allows any angle; X/Y/Z restore a straight cut.",
+            "Hint",
+        ))
+        self.face_gap = _spin(0.0, 0.0, 3.0, 3)
+        self.face_gap.setSingleStep(.05)
+        self.face_gap.valueChanged.connect(self._dirty)
+        self.face_gap.setToolTip("Optional gap removed between cut faces; measured in millimeters.")
+        layout.addWidget(_muted("MATING FACE GAP", "SectionHeading"))
+        layout.addWidget(self.face_gap)
+        layout.addWidget(_muted(
+            "This removes material from both sides of the plane. For selective "
+            "cuts with unselected sections left attached, keep the gap at zero.",
+            "Hint",
+        ))
+        layout.addWidget(_muted("DETACHABLE SECTIONS", "SectionHeading"))
+        self.analyze_button = button("Detect detachable sections")
+        self.analyze_button.setToolTip(
+            "Analyze solids created on the positive-normal side of the cutting plane.")
+        self.analyze_button.clicked.connect(self.analyze_sections)
+        layout.addWidget(self.analyze_button)
+        self.pick_section_button = button("Click a section in the 3D view")
+        self.pick_section_button.setToolTip(
+            "After detection, click a model section to toggle its separation.")
+        self.pick_section_button.clicked.connect(self.start_section_pick)
+        layout.addWidget(self.pick_section_button)
+        self.section_list = QtWidgets.QListWidget()
+        self.section_list.setMinimumHeight(128)
+        self.section_list.setMaximumHeight(225)
+        self.section_list.itemChanged.connect(self._candidate_checked)
+        self.section_list.currentRowChanged.connect(self._highlight_candidate)
+        layout.addWidget(self.section_list)
+        self.section_hint = _muted(
+            "Analyze the cut to identify separate parts. Uncheck sections you want to keep attached.",
+            "Hint",
+        )
+        layout.addWidget(self.section_hint)
+        layout.addWidget(_muted(
+            "The highlighted section is an actual detachable solid, not an arbitrary "
+            "selection of triangles. Regions connected on the chosen side cannot yet be detached independently.",
             "Hint",
         ))
         cut_preview = button("Generate cut preview", primary=True, icon="preview")
@@ -323,7 +382,7 @@ class KeymasterWindow(QtWidgets.QMainWindow):
 
         form = _form()
         self.shape = QtWidgets.QComboBox()
-        self.shape.addItems(["round", "square"])
+        self.shape.addItems(["round", "square", "tapered", "snap"])
         self.key_diameter = _spin(5, .2, 1000)
         self.key_depth = _spin(5, .2, 1000)
         self.radial = _spin(.25, 0, 10, 3)
@@ -336,6 +395,14 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         form.addRow("Extra socket depth", self.axial)
         form.addRow("Edge margin", self.margin)
         layout.addLayout(form)
+        self.shape.currentTextChanged.connect(self._connector_shape_changed)
+        self.snap_warning = _muted(
+            "Snap is an experimental barbed latch for compliant FDM materials only. "
+            "Print a calibration piece first; resin and brittle materials are not recommended.",
+            "Hint",
+        )
+        self.snap_warning.setVisible(False)
+        layout.addWidget(self.snap_warning)
         self.radial.valueChanged.connect(self._mark_custom_preset)
         self.axial.valueChanged.connect(self._mark_custom_preset)
         layout.addWidget(_muted(
@@ -357,11 +424,17 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         action_row = QtWidgets.QHBoxLayout()
         self.pick_button = button("Click to place", primary=True)
         self.pick_button.clicked.connect(self.start_pick)
-        self.auto_button = button("Suggest")
+        self.auto_button = button("Auto-place")
+        self.auto_button.setToolTip("Suggest multiple spaced key locations on the selected cut section.")
         self.auto_button.clicked.connect(self.auto_key)
         action_row.addWidget(self.pick_button, 1)
         action_row.addWidget(self.auto_button)
         layout.addLayout(action_row)
+        layout.addWidget(_muted("AUTOMATIC CONNECTOR COUNT", "SectionHeading"))
+        self.auto_count = QtWidgets.QSpinBox()
+        self.auto_count.setRange(1, 8)
+        self.auto_count.setValue(2)
+        layout.addWidget(self.auto_count)
         self.add_button = button("Add at U / V")
         self.add_button.clicked.connect(self.add_key)
         layout.addWidget(self.add_button)
@@ -427,11 +500,13 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             self.parts_label.setText("Settings changed. Preview the cut again to update the parts.")
 
     def _axis_index(self):
-        return {"X": 0, "Y": 1, "Z": 2}[self.axis.currentText()]
+        return {"X": 0, "Y": 1, "Z": 2}.get(self.axis.currentText(), 2)
 
     def _plane(self):
         if self.model is None:
             raise GeometryError("Import a model first.")
+        if self.axis.currentText() == "Free" and self._gizmo_origin is not None:
+            return CutPlane(self._gizmo_origin, self._gizmo_normal)
         index = self._axis_index()
         origin = np.array(self.model.bounds.mean(axis=0), dtype=float)
         origin[index] = self.coordinate.value()
@@ -441,6 +516,13 @@ class KeymasterWindow(QtWidgets.QMainWindow):
     def _update_plane_slider(self):
         if self.model is None:
             return
+        if self.axis.currentText() == "Free":
+            self.position_slider.setEnabled(False)
+            self.coordinate.setEnabled(False)
+            self.range_hint.setText("Free plane. Drag its handles to move or rotate.")
+            return
+        self.position_slider.setEnabled(True)
+        self.coordinate.setEnabled(True)
         lo, hi = (float(x) for x in self.model.bounds[:, self._axis_index()])
         self.range_hint.setText(f"Model extent: {lo:.2f} to {hi:.2f} mm")
         relative = (self.coordinate.value() - lo) / max(hi - lo, 1e-12)
@@ -449,6 +531,7 @@ class KeymasterWindow(QtWidgets.QMainWindow):
 
     def _coordinate_changed(self, *_):
         self._dirty()
+        self._invalidate_analysis()
         if self.model is not None:
             try:
                 self._update_plane_slider()
@@ -457,12 +540,13 @@ class KeymasterWindow(QtWidgets.QMainWindow):
                 self._error(f"Could not update cut plane preview: {exc}")
 
     def _position_slider_changed(self, value):
-        if self.model is None:
+        if self.model is None or self.axis.currentText() == "Free":
             return
         lo, hi = (float(x) for x in self.model.bounds[:, self._axis_index()])
         with QtCore.QSignalBlocker(self.coordinate):
             self.coordinate.setValue(lo + (hi - lo) * value / 1000.0)
         self._dirty()
+        self._invalidate_analysis()
         try:
             self._draw_original()
         except Exception as exc:
@@ -470,14 +554,24 @@ class KeymasterWindow(QtWidgets.QMainWindow):
 
     def _axis_changed(self, *_):
         self._dirty()
+        self._invalidate_analysis()
         if self.model is not None:
             try:
-                with QtCore.QSignalBlocker(self.coordinate):
-                    self.coordinate.setValue(
-                        float(self.model.bounds[:, self._axis_index()].mean())
-                    )
+                if self.axis.currentText() != "Free":
+                    self._gizmo_origin = None
+                    self._gizmo_normal = None
+                    with QtCore.QSignalBlocker(self.coordinate):
+                        self.coordinate.setValue(
+                            float(self.model.bounds[:, self._axis_index()].mean())
+                        )
+                elif self._gizmo_origin is None:
+                    origin, normal, _, _ = frame(CutPlane(
+                        tuple(self.model.bounds.mean(axis=0)), (0, 0, 1)
+                    ))
+                    self._gizmo_origin, self._gizmo_normal = tuple(origin), tuple(normal)
                 self._update_plane_slider()
                 self._draw_original()
+                self._enable_gizmo(reset=True)
             except Exception as exc:
                 self._error(f"Could not change cut plane axis: {exc}")
 
@@ -493,6 +587,226 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         if self.preset.currentText() != "Custom":
             with QtCore.QSignalBlocker(self.preset):
                 self.preset.setCurrentText("Custom")
+
+
+    def _invalidate_analysis(self):
+        self._section_candidates = ()
+        if hasattr(self, "section_list"):
+            with QtCore.QSignalBlocker(self.section_list):
+                self.section_list.clear()
+            self.section_hint.setText("Cut changed. Detect detachable sections again.")
+        if hasattr(self, "view") and hasattr(self.view, "remove_actor"):
+            self.view.remove_actor("candidate_highlight", reset_camera=False)
+
+    def _connector_shape_changed(self, name):
+        self.snap_warning.setVisible(name == "snap")
+
+    def _refresh_shading(self, *_):
+        if self.model is not None:
+            try:
+                if self._display_mode == "parts" and self.result is not None:
+                    # Avoid discarding a computed cut just to change lighting.
+                    for actor in self.actors:
+                        try:
+                            actor.GetProperty().SetInterpolationToPhong()
+                            actor.GetProperty().SetSpecular(.38)
+                            actor.GetProperty().SetSpecularPower(30)
+                        except AttributeError:
+                            pass
+                    self.view.render()
+                else:
+                    self._draw_original()
+            except Exception as exc:
+                self._error(f"Could not change viewport shading: {exc}")
+
+    def _material_options(self, *, part=False):
+        mode = self.shading_mode.currentText()
+        settings = dict(
+            smooth_shading=(mode != "Wireframe"),
+            lighting=(mode != "Wireframe"),
+            ambient=.22, diffuse=.80, specular=.36, specular_power=38,
+        )
+        if mode == "Shaded edges":
+            settings.update(show_edges=True, edge_color="#53616d")
+        elif mode == "Wireframe":
+            settings.update(style="wireframe", line_width=1.3)
+        elif mode == "X-ray":
+            settings.update(opacity=.48)
+        return settings
+
+    def _clear_gizmo(self):
+        self._gizmo_widget = None
+        if hasattr(self.view, "clear_plane_widgets"):
+            try:
+                self.view.clear_plane_widgets()
+            except (AttributeError, RuntimeError):
+                pass
+
+    def _enable_gizmo(self, *, reset=False):
+        """VTK interactive move/rotate plane handles; skip in headless tests."""
+        if self.model is None or not hasattr(self.view, "add_plane_widget"):
+            return
+        if self._gizmo_widget is not None and not reset:
+            try:
+                rep = self._gizmo_widget.GetRepresentation()
+                if not self._gizmo_callback_active:
+                    p = self._plane()
+                    rep.SetOrigin(*p.origin)
+                    rep.SetNormal(*p.normal)
+                    rep.BuildRepresentation()
+                return
+            except (AttributeError, RuntimeError):
+                self._clear_gizmo()
+        self._clear_gizmo()
+        p = self._plane()
+        bounds = self.model.bounds
+        pv_bounds = (float(bounds[0, 0]), float(bounds[1, 0]),
+                     float(bounds[0, 1]), float(bounds[1, 1]),
+                     float(bounds[0, 2]), float(bounds[1, 2]))
+        try:
+            self._gizmo_widget = self.view.add_plane_widget(
+                self._on_gizmo_move, normal=p.normal, origin=p.origin,
+                bounds=pv_bounds, color=COPPER, normal_rotation=True,
+                interaction_event="always", test_callback=False,
+            )
+        except Exception as exc:
+            self._gizmo_widget = None
+            self.statusBar().showMessage(f"Plane gizmo unavailable: {exc}", 10000)
+
+    def _on_gizmo_move(self, normal, origin):
+        if self.model is None or self._gizmo_callback_active:
+            return
+        try:
+            normal = np.asarray(normal, dtype=float)
+            origin = np.asarray(origin, dtype=float)
+            if not np.all(np.isfinite(origin)) or not np.all(np.isfinite(normal)):
+                return
+            normal /= np.linalg.norm(normal)
+            self._gizmo_origin = tuple(float(x) for x in origin)
+            self._gizmo_normal = tuple(float(x) for x in normal)
+            self._gizmo_callback_active = True
+            with QtCore.QSignalBlocker(self.axis):
+                self.axis.setCurrentText("Free")
+            self._update_plane_slider()
+            self._dirty()
+            self._invalidate_analysis()
+            self._draw_original()
+        except Exception as exc:
+            self.statusBar().showMessage(f"Plane manipulation failed: {exc}", 10000)
+        finally:
+            self._gizmo_callback_active = False
+
+    def analyze_sections(self):
+        if self.model is None:
+            return self._error("Import a model first.")
+        if self._loading:
+            return
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        self.analyze_button.setEnabled(False)
+        try:
+            candidates = analyze_sections(self.model, self._plane())
+            self._section_candidates = candidates
+            with QtCore.QSignalBlocker(self.section_list):
+                self.section_list.clear()
+                for c in candidates:
+                    item = QtWidgets.QListWidgetItem(
+                        f"Section {c.index + 1} | {c.volume:.1f} mm³")
+                    item.setData(QtCore.Qt.ItemDataRole.UserRole, c.index)
+                    item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+                    item.setCheckState(QtCore.Qt.CheckState.Checked)
+                    item.setToolTip(
+                        f"Center {tuple(round(n,1) for n in c.centroid)}\n"
+                        f"Cut face area {c.surface_area:.1f} mm²")
+                    self.section_list.addItem(item)
+            self.section_hint.setText(
+                f"{len(candidates)} detachable section(s) found. "
+                "Uncheck any that should remain attached to the body.")
+            self.section_list.setCurrentRow(0)
+            self.statusBar().showMessage(
+                f"Detected {len(candidates)} detachable sections. Select which to detach.")
+        except Exception as exc:
+            self._invalidate_analysis()
+            self._error(exc)
+        finally:
+            self.analyze_button.setEnabled(True)
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+    def start_section_pick(self):
+        if not self._section_candidates:
+            return self._error("First select Detect detachable sections.")
+        if not hasattr(self.view, "enable_surface_point_picking"):
+            return self._error("Viewport point picking is not available.")
+        self._clear_gizmo()
+        self.statusBar().showMessage(
+            "Click a section on the positive side of the plane to toggle separation.")
+        try:
+            self.view.enable_surface_point_picking(
+                callback=self._picked_section, show_message=False, left_clicking=True)
+        except Exception as exc:
+            self._enable_gizmo(reset=True)
+            self._error(f"Section selection is unavailable: {exc}")
+
+    def _picked_section(self, position):
+        try:
+            if position is None or not self._section_candidates:
+                return
+            xyz = np.asarray(position, dtype=float)
+            origin, normal, _, _ = frame(self._plane())
+            if float((xyz - origin) @ normal) < -max(.01, float(max(self.model.extents)) * .005):
+                self.statusBar().showMessage(
+                    "Choose geometry on the positive-normal side of the plane.", 7000)
+                return
+            scores = []
+            for row, candidate in enumerate(self._section_candidates):
+                bounds = candidate.mesh.bounds
+                outside = np.maximum(bounds[0] - xyz, 0) + np.maximum(xyz - bounds[1], 0)
+                vertices = candidate.mesh.vertices
+                stride = max(1, len(vertices) // 6000)
+                nearest = float(np.min(np.linalg.norm(vertices[::stride] - xyz, axis=1)))
+                scores.append((float(np.linalg.norm(outside)), nearest, row))
+            _, nearest_distance, row = min(scores)
+            if nearest_distance > max(6.0, float(max(self.model.extents)) * .06):
+                self.statusBar().showMessage(
+                    "That position is not near a detachable section.", 7000)
+                return
+            item = self.section_list.item(row)
+            item.setCheckState(
+                QtCore.Qt.CheckState.Unchecked
+                if item.checkState() == QtCore.Qt.CheckState.Checked
+                else QtCore.Qt.CheckState.Checked
+            )
+            self.section_list.setCurrentRow(row)
+            state = "Detach" if item.checkState() == QtCore.Qt.CheckState.Checked else "Keep attached"
+            self.statusBar().showMessage(f"Section {row + 1}: {state}")
+        finally:
+            if hasattr(self.view, "disable_picking"):
+                self.view.disable_picking()
+            self._enable_gizmo(reset=True)
+
+    def _selected_sections(self):
+        return tuple(
+            int(self.section_list.item(i).data(QtCore.Qt.ItemDataRole.UserRole))
+            for i in range(self.section_list.count())
+            if self.section_list.item(i).checkState() == QtCore.Qt.CheckState.Checked
+        )
+
+    def _candidate_checked(self, *_):
+        self._dirty()
+
+    def _highlight_candidate(self, row):
+        if self.model is None or not hasattr(self.view, "remove_actor"):
+            return
+        try:
+            self.view.remove_actor("candidate_highlight", reset_camera=False)
+            if self._display_mode != "original" or row < 0:
+                return
+            candidate = self._section_candidates[row]
+            self.view.add_mesh(
+                _as_polydata(candidate.mesh), name="candidate_highlight",
+                color="#f3b56b", opacity=.40, lighting=True, pickable=False,
+            )
+        except (IndexError, ValueError):
+            return
 
     def _template(self):
         return KeySpec(
@@ -528,6 +842,9 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             return
         self.model, self.source = mesh, Path(filename)
         self._preview_polydata = preview_poly
+        self._gizmo_origin = None
+        self._gizmo_normal = None
+        self._invalidate_analysis()
         try:
             self.keys.clear()
             self._refresh_table()
@@ -548,7 +865,9 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             self.document_name.setToolTip(str(self.source))
             self.mesh_status.setText(f"{len(mesh.faces):,} triangles | Watertight")
             self.viewport_hint.setText("Drag to orbit | Scroll to zoom | Select Cut or Keys to edit")
+            self._clear_gizmo()
             self._draw_original(reset_camera=True)
+            self._enable_gizmo(reset=True)
             self._show_tool(1)
             self.statusBar().showMessage("Model imported. Move the cut plane or add keys.")
         except Exception as exc:
@@ -565,7 +884,7 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             and hasattr(self.view, "remove_actor")
         )
         if can_reuse:
-            for name in ("cut_plane", *self._key_marker_names):
+            for name in ("cut_plane", "cut_intersection", *self._key_marker_names):
                 self.view.remove_actor(name, reset_camera=False)
         else:
             camera = getattr(self.view, "camera_position", None) if not reset_camera else None
@@ -573,7 +892,9 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             self.view.add_axes()
             self.view.add_mesh(
                 self._preview_polydata if self._preview_polydata is not None else _as_polydata(self.model),
-                color="#a7b6c4", smooth_shading=True, name="original",
+                name="original",
+                color=("#becbd6" if self.shading_mode.currentText() == "Lit solid" else "#a7b6c4"),
+                **self._material_options(),
             )
             if camera is not None:
                 self.view.camera_position = camera
@@ -584,6 +905,16 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             pv.Plane(center=origin, direction=normal, i_size=scale, j_size=scale),
             color=COPPER, opacity=0.24, name="cut_plane", pickable=False,
         )
+        # Mark the true mesh-plane intersection in a contrasting bright color.
+        if hasattr(self.view, "add_plane_widget") and self._preview_polydata is not None:
+            try:
+                outline = self._preview_polydata.slice(normal=normal, origin=origin)
+                if outline.n_cells:
+                    self.view.add_mesh(outline, name="cut_intersection",
+                        color="#f8c482", line_width=3.5,
+                        lighting=False, pickable=False)
+            except Exception:
+                pass
         self._key_marker_names.clear()
         for i, key in enumerate(self.keys):
             name = f"key_marker_{i}"
@@ -600,6 +931,9 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             self.view.reset_camera()
         self._display_mode = "original"
         self.actors = ()
+        self._enable_gizmo()
+        if self._section_candidates and hasattr(self.view, "remove_actor"):
+            self._highlight_candidate(self.section_list.currentRow())
 
     def _refresh_table(self):
         self.table.setRowCount(len(self.keys))
@@ -623,12 +957,21 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         if self.model is None:
             return self._error("Import a model first.")
         try:
-            key = suggest_key(self.model, self._plane(), self._template(), self.keys)
-            self.keys.append(key)
+            count = self.auto_count.value()
+            if self._section_candidates:
+                selected = self._selected_sections()
+                if not selected:
+                    raise GeometryError("Choose a section before placing connectors.")
+                cap = next(c.cap for c in self._section_candidates if c.index == selected[0])
+                keys = place_keys_on_cap(cap, self._template(), count, self.keys)
+            else:
+                keys = suggest_keys(self.model, self._plane(), self._template(), count, self.keys)
+            self.keys.extend(keys)
             self._refresh_table()
             self._dirty()
             self._draw_original()
-            self.statusBar().showMessage("Suggested key placed. Inspect and generate the cut.")
+            self.statusBar().showMessage(
+                f"Placed {len(keys)} suggested connectors. Preview the cut to check fit.")
         except Exception as exc:
             self._error(exc)
 
@@ -637,24 +980,28 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             return self._error("Import a model first.")
         try:
             self._draw_original()
+            self._clear_gizmo()
             self.statusBar().showMessage("Click on the model to place a key on the cut plane.")
             self.view.enable_surface_point_picking(
                 callback=self._picked, show_message=False, left_clicking=True,
             )
         except Exception as exc:
+            self._enable_gizmo(reset=True)
             self._error(exc)
 
     def _picked(self, position):
-        if position is None:
-            return
         try:
+            if position is None:
+                return
             origin, _, u, v = frame(self._plane())
             relative = np.asarray(position) - origin
             self.key_u.setValue(float(relative @ u))
             self.key_v.setValue(float(relative @ v))
             self.add_key()
         finally:
-            self.view.disable_picking()
+            if hasattr(self.view, "disable_picking"):
+                self.view.disable_picking()
+            self._enable_gizmo(reset=True)
 
     def remove_key(self):
         rows = sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True)
@@ -674,29 +1021,50 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
         self.generate_button.setEnabled(False)
         try:
-            result = cut_and_key(self.model, self._plane(), self.keys)
+            self._clear_gizmo()
+            if self._section_candidates:
+                result = cut_selected_sections(
+                    self.model, self._plane(), self._selected_sections(),
+                    self.keys, self.face_gap.value(),
+                )
+            else:
+                result = cut_and_key(
+                    self.model, self._plane(), self.keys, self.face_gap.value(),
+                )
             self.view.clear()
             self.view.add_axes()
-            a = self.view.add_mesh(_as_polydata(result.peg_side), color=COPPER,
-                                   name="peg_piece", smooth_shading=True)
-            b = self.view.add_mesh(_as_polydata(result.socket_side), color=BLUE,
-                                   name="socket_piece", smooth_shading=True)
+            colors = (COPPER, BLUE, "#a99bd4", "#87bf9a", "#d68ba8")
+            actors = []
+            for index, part in enumerate(result.parts):
+                actor = self.view.add_mesh(
+                    _as_polydata(part), color=colors[index % len(colors)],
+                    name=f"print_part_{index+1}", **self._material_options(part=True))
+                actors.append(actor)
             self.result = result
-            self.actors = (a, b)
+            self.actors = tuple(actors)
             self._display_mode = "parts"
             self._separate()
             self.view.reset_camera()
             self.export_button.setEnabled(True)
             self.parts_label.setText(
-                f"Part A: {len(result.peg_side.faces):,} faces (pegs)\n"
-                f"Part B: {len(result.socket_side.faces):,} faces (sockets)\n"
-                f"Alignment keys: {len(self.keys)}"
+                f"{len(result.parts)} printable closed part(s) generated.\n"
+                + "\n".join(
+                    f"Part {i+1}: {len(part.faces):,} faces"
+                    for i, part in enumerate(result.parts)
+                )
+                + f"\nAlignment connectors: {len(self.keys)}"
             )
             self._show_tool(3)
-            self.statusBar().showMessage("Both closed parts generated. Inspect and export.")
+            self.statusBar().showMessage(
+                f"{len(result.parts)} closed parts generated. Inspect and export.")
         except Exception as exc:
             self._dirty()
             self._error(exc)
+            if self.model is not None:
+                try:
+                    self._draw_original()
+                except Exception:
+                    pass
         finally:
             self.generate_button.setEnabled(True)
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -706,14 +1074,16 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             return
         _, normal, _, _ = frame(self._plane())
         distance = max(float(max(self.model.extents)), 0.1) * self.explode.value() / 400
-        for actor, sign in zip(self.actors, (-1, +1)):
-            actor.SetPosition(*(normal * distance * sign))
+        center = (len(self.actors) - 1) / 2
+        for index, actor in enumerate(self.actors):
+            actor.SetPosition(*(normal * distance * (index - center) * 2))
         self.view.render()
 
     def _part_visibility_changed(self, *_):
         if self.actors:
-            for actor, visible in zip(self.actors, (self.part_a_visible.isChecked(), self.part_b_visible.isChecked())):
-                actor.SetVisibility(visible)
+            controls = (self.part_a_visible.isChecked(), self.part_b_visible.isChecked())
+            for i, actor in enumerate(self.actors):
+                actor.SetVisibility(controls[i] if i < 2 else True)
             self.view.render()
 
     def export(self):
@@ -724,7 +1094,7 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             return
         try:
             paths = export_stl(self.result, folder, self.source.stem)
-            self.statusBar().showMessage(f"Saved {paths[0].name} and {paths[1].name}.")
+            self.statusBar().showMessage(f"Saved {len(paths)} printable part(s).")
             QtWidgets.QMessageBox.information(self, "Export complete",
                 "Saved:\n" + "\n".join(str(path) for path in paths))
         except Exception as exc:
@@ -773,6 +1143,7 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         return super().event(event)
 
     def closeEvent(self, event):
+        self._clear_gizmo()
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("splitter", self.splitter.sizes())
         self.settings.sync()

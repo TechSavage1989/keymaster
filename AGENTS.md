@@ -12,10 +12,12 @@ Read this file and DEVELOPMENT_HANDOFF.md before any edits.
 - The UI is viewport-first: compact rail for Model/Cut/Keys/Parts, contextual inspector, drag-and-drop load, cut position slider and printer-fit presets. Maintain current UI tests and preserve camera orientation during plane edits.
 - Trim release dependencies carefully; no blanket VTK/PyVista collect-all without justification. PyInstaller must still bundle VTK OpenGL, Qt viewport, geometry engine and a compile-time embedded ICO resource. Compare release archive size to previous baseline.
 - Trimesh bounds are (2, 3) for minimum and maximum XYZ: axis values use bounds[:, axis], bounding-box center uses bounds.mean(axis=0); include a real UI import regression test.
-- Do not claim advanced automatic placement, remeshing, model repair, 3MF support, multicut history or automatic updater installation unless implemented and tested.
+- The 0.2 alpha 1 target includes connected-component-aware selective separation via segmentation.py, a VTK plane widget for free-angle manipulation, studio shading, auto connector placement and face tolerances. Do not confuse selective detachable components with arbitrary painted mesh regions. Snap connector is experimental and not guaranteed to function mechanically.
+- Do not claim production-grade placement, remeshing, model repair, 3MF support, multicut history or automatic updater installation unless implemented and tested.
 
 ## Code map
 - src/keymaster/geometry.py: mesh validation, plane basis, CSG, key placement and STL output.
+- src/keymaster/segmentation.py: candidate detection and selective rejoining of unselected cut components.
 - src/keymaster/app.py: Qt desktop interface and 3D viewport.
 - src/keymaster/theme.py: flat dark Qt stylesheet and drawn tool icons.
 - scripts/generate_icon.py: source for the original Windows ICO asset generated before compilation.
