@@ -7,6 +7,7 @@ Read this file and DEVELOPMENT_HANDOFF.md before any edits.
 - Current preview: one X/Y/Z planar cut, round or square integral alignment pegs and sockets with user-selected clearance, preview and STL export.
 - Preserve source geometry. Edits must not be applied to imported files in place.
 - Reject unsupported/non-manifold geometry rather than silently exporting corrupt shapes.
+- STL stores triangle-corner vertices independently. Import with topology processing to consolidate shared coordinates before validation; do not disable integrity checks to work around this.
 - Preserve user settings and a stable executable filename: Keymaster.exe.
 - Do not claim advanced automatic placement, remeshing, model repair, 3MF support, multicut history or automatic updater installation unless implemented and tested.
 

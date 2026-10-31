@@ -80,3 +80,44 @@ def test_export_no_overwrite(cube, plane, tmp_path):
     assert a.name == "Test_Model_A_peg.stl"
     with pytest.raises(GeometryError, match="already exists"):
         export_stl(parts, tmp_path, "Test Model")
+
+
+def test_stl_import_merges_shared_triangle_vertices(tmp_path, cube):
+    """Regression: exported STL is solid even when triangles have split vertices."""
+    from keymaster.geometry import load_model
+
+    path = tmp_path / "watertight.stl"
+    cube.export(path)
+    old_import = trimesh.load(path, force="mesh", process=False)
+    assert not old_import.is_watertight  # Negative control for Alpha 1 bug.
+
+    imported = load_model(path)
+    validate_mesh(imported)
+    assert imported.is_watertight
+    assert imported.is_winding_consistent
+    assert len(imported.faces) == len(cube.faces)
+    assert len(imported.vertices) == len(cube.vertices)
+    assert np.allclose(imported.extents, cube.extents)
+    assert np.isclose(imported.volume, cube.volume, rtol=1e-6)
+
+
+def test_stl_import_still_rejects_actual_open_mesh(tmp_path, cube):
+    """Processing must not mask a genuine missing triangle."""
+    from keymaster.geometry import load_model
+
+    missing_face = cube.copy()
+    missing_face.update_faces(np.arange(len(cube.faces) - 1))
+    path = tmp_path / "missing-face.stl"
+    missing_face.export(path)
+    with pytest.raises(GeometryError, match="closed"):
+        load_model(path)
+
+
+def test_obj_import_unchanged(tmp_path, cube):
+    from keymaster.geometry import load_model
+
+    path = tmp_path / "model.obj"
+    cube.export(path)
+    loaded = load_model(path)
+    assert loaded.is_watertight
+    assert np.isclose(loaded.volume, cube.volume)
