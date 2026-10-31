@@ -1,8 +1,13 @@
-"""Keymaster Windows GUI: import, plane cut, key, preview and STL export."""
+"""Keymaster 0.1.0a4: focused 3D workstation for cutting keyed prints.
+
+The original manifold cutting engine remains untouched. UI previews never
+modify or overwrite the source model; exports remain explicit.
+"""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+
 import numpy as np
 import pyvista as pv
 from pyvistaqt import QtInteractor
@@ -13,6 +18,7 @@ from .geometry import (
     CutPlane, GeometryError, KeySpec, cut_and_key, export_stl,
     frame, load_model, suggest_key,
 )
+from .theme import ACCENT, BLUE, COPPER, MUTED, STYLESHEET, button, icon_for
 from .updates import UpdateMonitor
 
 
@@ -22,6 +28,7 @@ def _spin(value: float, lo: float = -100000.0, hi: float = 100000.0, decimals: i
     widget.setDecimals(decimals)
     widget.setValue(value)
     widget.setSingleStep(0.1 if decimals else 1)
+    widget.setSuffix(" mm")
     return widget
 
 
@@ -30,137 +37,183 @@ def _as_polydata(mesh):
     return pv.PolyData(np.asarray(mesh.vertices), faces)
 
 
+def _heading(title: str, hint: str = ""):
+    label = QtWidgets.QLabel(title)
+    label.setObjectName("PageHeading")
+    if hint:
+        label.setToolTip(hint)
+    return label
+
+
+def _muted(text: str, name: str = "Muted"):
+    label = QtWidgets.QLabel(text)
+    label.setObjectName(name)
+    label.setWordWrap(True)
+    return label
+
+
+def _form():
+    form = QtWidgets.QFormLayout()
+    form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+    form.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+    form.setHorizontalSpacing(12)
+    form.setVerticalSpacing(11)
+    return form
+
+
 class KeymasterWindow(QtWidgets.QMainWindow):
+    """Viewport-first layout with contextual editing tools."""
+
+    PRESETS = {
+        "Resin - snug": (0.15, 0.20),
+        "Resin - easy": (0.25, 0.35),
+        "FDM - snug": (0.25, 0.30),
+        "FDM - easy": (0.40, 0.50),
+    }
+
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Keymaster {__version__} - Cut and key for 3D printing")
-        self.resize(1350, 820)
+        self.setWindowTitle(f"Keymaster {__version__} - 3D print assembly preparation")
+        self.setMinimumSize(920, 620)
+        self.resize(1360, 850)
+        self.setAcceptDrops(True)
+        self.setWindowIcon(icon_for("keys", color=ACCENT, size=48))
+
         self.model = None
         self.source = None
         self.result = None
         self.keys: list[KeySpec] = []
         self.actors = ()
         self.release_url = None
+        self._preview_polydata = None
+        self._display_mode = "empty"
+        self._key_marker_names: list[str] = []
+        self._loading = False
 
-        shell = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        self.setCentralWidget(shell)
-        scroll = QtWidgets.QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setMinimumWidth(320)
-        scroll.setMaximumWidth(450)
-        panel = QtWidgets.QWidget()
-        scroll.setWidget(panel)
-        left = QtWidgets.QVBoxLayout(panel)
-        shell.addWidget(scroll)
+        root = QtWidgets.QWidget()
+        root_layout = QtWidgets.QVBoxLayout(root)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+        self.setCentralWidget(root)
 
-        self.view = QtInteractor(shell)
-        self.view.set_background("#181b20")
-        self.view.add_axes()
-        shell.addWidget(self.view)
-        shell.setSizes([380, 970])
-
-        title = QtWidgets.QLabel("KEYMASTER")
-        title.setStyleSheet("font-size: 23px; font-weight: 700;")
-        left.addWidget(title)
-        subtitle = QtWidgets.QLabel("Plane cutting and alignment keys")
-        left.addWidget(subtitle)
-
-        self.import_button = QtWidgets.QPushButton("Import STL / OBJ")
+        # Flat top bar. The active file is always visible, independent of tool.
+        bar = QtWidgets.QFrame()
+        bar.setObjectName("TopBar")
+        bar_layout = QtWidgets.QHBoxLayout(bar)
+        bar_layout.setContentsMargins(17, 9, 17, 9)
+        bar_layout.setSpacing(10)
+        mark = QtWidgets.QLabel()
+        mark.setPixmap(icon_for("keys", ACCENT, 29).pixmap(29, 29))
+        bar_layout.addWidget(mark)
+        brand = QtWidgets.QLabel("KEYMASTER")
+        brand.setObjectName("Brand")
+        bar_layout.addWidget(brand)
+        bar_layout.addSpacing(12)
+        self.document_name = _muted("No model loaded", "Filename")
+        self.document_name.setMinimumWidth(120)
+        self.document_name.setMaximumWidth(330)
+        bar_layout.addWidget(self.document_name)
+        bar_layout.addStretch(1)
+        self.import_button = button("Import model", icon="open")
+        self.import_button.setToolTip("Import a watertight STL or OBJ. Drag-and-drop also works. (Ctrl+O)")
         self.import_button.clicked.connect(self.import_model)
-        left.addWidget(self.import_button)
-        self.model_label = QtWidgets.QLabel("No model loaded")
-        self.model_label.setWordWrap(True)
-        left.addWidget(self.model_label)
-
-        cut_box = QtWidgets.QGroupBox("1. Cut plane")
-        cut_layout = QtWidgets.QFormLayout(cut_box)
-        self.axis = QtWidgets.QComboBox()
-        self.axis.addItems(["Z", "X", "Y"])
-        self.axis.currentIndexChanged.connect(self._axis_changed)
-        self.coordinate = _spin(0, -100000, 100000, 3)
-        self.coordinate.valueChanged.connect(self._coordinate_changed)
-        cut_layout.addRow("Plane normal", self.axis)
-        cut_layout.addRow("Coordinate (mm)", self.coordinate)
-        left.addWidget(cut_box)
-
-        key_box = QtWidgets.QGroupBox("2. Create alignment keys")
-        key_layout = QtWidgets.QFormLayout(key_box)
-        self.key_u = _spin(0, decimals=2)
-        self.key_v = _spin(0, decimals=2)
-        self.key_diameter = _spin(5, .2, 1000)
-        self.key_depth = _spin(5, .2, 1000)
-        self.radial = _spin(.2, 0, 10, 3)
-        self.axial = _spin(.3, 0, 10, 3)
-        self.margin = _spin(.8, 0, 20, 3)
-        self.shape = QtWidgets.QComboBox()
-        self.shape.addItems(["round", "square"])
-        for label, widget in (
-            ("Cut-plane U (mm)", self.key_u),
-            ("Cut-plane V (mm)", self.key_v),
-            ("Peg diameter (mm)", self.key_diameter),
-            ("Insertion depth (mm)", self.key_depth),
-            ("Radial clearance / side (mm)", self.radial),
-            ("Extra socket depth (mm)", self.axial),
-            ("Min. edge margin (mm)", self.margin),
-            ("Shape", self.shape),
-        ):
-            key_layout.addRow(label, widget)
-        left.addWidget(key_box)
-
-        key_actions = QtWidgets.QHBoxLayout()
-        self.add_button = QtWidgets.QPushButton("Add key")
-        self.add_button.clicked.connect(self.add_key)
-        self.auto_button = QtWidgets.QPushButton("Auto place")
-        self.auto_button.clicked.connect(self.auto_key)
-        self.pick_button = QtWidgets.QPushButton("Pick on model")
-        self.pick_button.setToolTip("Select a visible point; it is projected to the cut plane.")
-        self.pick_button.clicked.connect(self.start_pick)
-        for button in (self.add_button, self.auto_button, self.pick_button):
-            key_actions.addWidget(button)
-        left.addLayout(key_actions)
-
-        self.table = QtWidgets.QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["U", "V", "Diameter", "Shape"])
-        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self.table.setMaximumHeight(130)
-        left.addWidget(self.table)
-        remove_button = QtWidgets.QPushButton("Remove selected key")
-        remove_button.clicked.connect(self.remove_key)
-        left.addWidget(remove_button)
-
-        preview_box = QtWidgets.QGroupBox("3. Preview and export")
-        preview_layout = QtWidgets.QVBoxLayout(preview_box)
-        self.generate_button = QtWidgets.QPushButton("Generate cut + keys")
+        bar_layout.addWidget(self.import_button)
+        self.generate_button = button("Preview cut", primary=True, icon="cut")
+        self.generate_button.setToolTip("Generate the two closed parts using the current cut plane and keys (Ctrl+G)")
         self.generate_button.clicked.connect(self.generate)
-        self.export_button = QtWidgets.QPushButton("Export both STL pieces")
+        bar_layout.addWidget(self.generate_button)
+        self.export_button = button("Export STL", icon="export")
         self.export_button.setEnabled(False)
+        self.export_button.setToolTip("Export the current pair of parts as separate STL files (Ctrl+E)")
         self.export_button.clicked.connect(self.export)
-        preview_layout.addWidget(self.generate_button)
-        preview_layout.addWidget(self.export_button)
-        preview_layout.addWidget(QtWidgets.QLabel("Explode preview"))
-        self.explode = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.explode.setRange(0, 100)
-        self.explode.setValue(30)
-        self.explode.valueChanged.connect(self._separate)
-        preview_layout.addWidget(self.explode)
-        left.addWidget(preview_box)
+        bar_layout.addWidget(self.export_button)
+        root_layout.addWidget(bar)
 
-        self.update_frame = QtWidgets.QFrame()
-        self.update_frame.setVisible(False)
-        update_row = QtWidgets.QVBoxLayout(self.update_frame)
-        self.update_label = QtWidgets.QLabel("")
-        self.update_label.setWordWrap(True)
-        update_row.addWidget(self.update_label)
-        self.update_button = QtWidgets.QPushButton("View release / download")
-        self.update_button.clicked.connect(self._open_release)
-        update_row.addWidget(self.update_button)
-        left.addWidget(self.update_frame)
-        left.addStretch()
-        notice = QtWidgets.QLabel("Source mesh is unchanged. Verify fit and scale before printing.")
-        notice.setWordWrap(True)
-        left.addWidget(notice)
+        workspace = QtWidgets.QWidget()
+        workspace_layout = QtWidgets.QHBoxLayout(workspace)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(0)
+        root_layout.addWidget(workspace, 1)
+
+        rail = QtWidgets.QFrame()
+        rail.setObjectName("Rail")
+        rail.setFixedWidth(83)
+        rail_layout = QtWidgets.QVBoxLayout(rail)
+        rail_layout.setContentsMargins(2, 12, 2, 12)
+        rail_layout.setSpacing(4)
+        workspace_layout.addWidget(rail)
+
+        self.nav_group = QtWidgets.QButtonGroup(self)
+        self.nav_group.setExclusive(True)
+        self.nav_buttons = {}
+        for index, (key, label) in enumerate((
+            ("model", "Model"), ("cut", "Cut"), ("keys", "Keys"), ("parts", "Parts"),
+        )):
+            tool = QtWidgets.QToolButton()
+            tool.setObjectName("RailButton")
+            tool.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            tool.setIcon(icon_for(key, color="#c5d0da", size=27))
+            tool.setIconSize(QtCore.QSize(27, 27))
+            tool.setText(label)
+            tool.setCheckable(True)
+            tool.clicked.connect(lambda checked=False, index=index: self._show_tool(index))
+            rail_layout.addWidget(tool)
+            self.nav_group.addButton(tool)
+            self.nav_buttons[key] = tool
+        rail_layout.addStretch(1)
+
+        self.splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+        workspace_layout.addWidget(self.splitter, 1)
+
+        viewport_panel = QtWidgets.QFrame()
+        viewport_panel.setObjectName("ViewportPanel")
+        viewport_layout = QtWidgets.QVBoxLayout(viewport_panel)
+        viewport_layout.setContentsMargins(8, 8, 8, 4)
+        viewport_layout.setSpacing(6)
+        viewport_tools = QtWidgets.QHBoxLayout()
+        viewport_tools.addWidget(_muted("3D VIEWPORT", "SectionHeading"))
+        viewport_tools.addStretch(1)
+        reset_button = button("Frame model")
+        reset_button.clicked.connect(self._reset_camera)
+        reset_button.setToolTip("Reset camera to fit the model (F)")
+        viewport_tools.addWidget(reset_button)
+        viewport_layout.addLayout(viewport_tools)
+        self.view = QtInteractor(viewport_panel)
+        self.view.set_background("#151a20")
+        self.view.add_axes()
+        viewport_layout.addWidget(self.view, 1)
+        self.viewport_hint = _muted(
+            "Drop an STL or OBJ here, or select Import model.", "Hint"
+        )
+        self.viewport_hint.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        viewport_layout.addWidget(self.viewport_hint)
+        self.splitter.addWidget(viewport_panel)
+
+        inspector = QtWidgets.QFrame()
+        inspector.setObjectName("Inspector")
+        inspector.setMinimumWidth(318)
+        inspector.setMaximumWidth(420)
+        inspector_layout = QtWidgets.QVBoxLayout(inspector)
+        inspector_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QtWidgets.QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.stack = QtWidgets.QStackedWidget()
+        self.scroll.setWidget(self.stack)
+        inspector_layout.addWidget(self.scroll)
+        self.splitter.addWidget(inspector)
+        self.splitter.setSizes([960, 350])
+
+        self._build_model_page()
+        self._build_cut_page()
+        self._build_keys_page()
+        self._build_parts_page()
+        self._show_tool(1)
+
+        self.mesh_status = _muted("No model", "Muted")
+        self.statusBar().addPermanentWidget(self.mesh_status)
+        self.statusBar().showMessage("Ready. Import a watertight model sized in millimeters.")
 
         self.settings = QtCore.QSettings(
             str(Path(QtCore.QStandardPaths.writableLocation(
@@ -171,6 +224,12 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         previous = self.settings.value("geometry")
         if previous:
             self.restoreGeometry(previous)
+        sizes = self.settings.value("splitter")
+        if isinstance(sizes, list) and len(sizes) == 2:
+            try:
+                self.splitter.setSizes([int(x) for x in sizes])
+            except (ValueError, TypeError):
+                pass
 
         self.updates = UpdateMonitor(self)
         self.updates.available.connect(self._update_available)
@@ -179,7 +238,183 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         check_action = QtGui.QAction("Check for updates", self)
         check_action.triggered.connect(lambda: self.updates.check(min_interval=30))
         self.menuBar().addMenu("Help").addAction(check_action)
-        self.statusBar().showMessage("Import a watertight model sized in millimeters.")
+        self._shortcut("Ctrl+O", self.import_model)
+        self._shortcut("Ctrl+G", self.generate)
+        self._shortcut("Ctrl+E", self.export)
+        self._shortcut("F", self._reset_camera)
+
+    def _shortcut(self, key, callback):
+        action = QtGui.QAction(self)
+        action.setShortcut(QtGui.QKeySequence(key))
+        action.triggered.connect(callback)
+        self.addAction(action)
+
+    def _page(self, name, explanation):
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        layout.setContentsMargins(20, 22, 20, 20)
+        layout.setSpacing(13)
+        layout.addWidget(_heading(name))
+        layout.addWidget(_muted(explanation, "Hint"))
+        self.stack.addWidget(widget)
+        return layout
+
+    def _build_model_page(self):
+        layout = self._page("Model", "Inspect the source mesh and prepare it for cutting.")
+        layout.addWidget(_muted("IMPORTED FILE", "SectionHeading"))
+        self.model_label = _muted("No model loaded", "Filename")
+        self.model_label.setWordWrap(True)
+        layout.addWidget(self.model_label)
+        self.mesh_info = _muted("Triangles: -\nDimensions: -", "Muted")
+        layout.addWidget(self.mesh_info)
+        self.mesh_validation = _muted("Import a model to inspect its topology.", "StatusGood")
+        layout.addWidget(self.mesh_validation)
+        open_another = button("Choose STL or OBJ", icon="open")
+        open_another.clicked.connect(self.import_model)
+        layout.addWidget(open_another)
+        layout.addWidget(_muted(
+            "Your original model remains unchanged. Dimensions use the source file's units, assumed to be millimeters.",
+            "Hint",
+        ))
+        layout.addStretch(1)
+
+    def _build_cut_page(self):
+        layout = self._page("Cut", "Move a visible plane through the model, then preview the split.")
+        layout.addWidget(_muted("CUT ORIENTATION", "SectionHeading"))
+        self.axis = QtWidgets.QComboBox()
+        self.axis.addItems(["Z", "X", "Y"])
+        self.axis.setToolTip("Cut along a plane perpendicular to this axis.")
+        self.axis.currentIndexChanged.connect(self._axis_changed)
+        layout.addWidget(self.axis)
+        layout.addWidget(_muted("PLANE POSITION", "SectionHeading"))
+        self.coordinate = _spin(0, -100000, 100000, 3)
+        self.coordinate.setToolTip("Exact position along the selected model axis.")
+        self.coordinate.valueChanged.connect(self._coordinate_changed)
+        layout.addWidget(self.coordinate)
+        self.position_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.position_slider.setRange(0, 1000)
+        self.position_slider.setValue(500)
+        self.position_slider.setToolTip("Drag the cutting plane through the model.")
+        self.position_slider.valueChanged.connect(self._position_slider_changed)
+        layout.addWidget(self.position_slider)
+        self.range_hint = _muted("Load a model to enable the range.", "Hint")
+        layout.addWidget(self.range_hint)
+        layout.addWidget(_muted(
+            "The translucent plane is a live guide. Generating the finished solids happens only when you select Preview cut.",
+            "Hint",
+        ))
+        cut_preview = button("Generate cut preview", primary=True, icon="preview")
+        cut_preview.clicked.connect(self.generate)
+        layout.addWidget(cut_preview)
+        show_keys = button("Configure alignment keys", icon="keys")
+        show_keys.clicked.connect(lambda: self._show_tool(2))
+        layout.addWidget(show_keys)
+        layout.addStretch(1)
+
+    def _build_keys_page(self):
+        layout = self._page("Alignment keys", "Add matching pegs and sockets along the selected cut.")
+        layout.addWidget(_muted("FIT PRESET", "SectionHeading"))
+        self.preset = QtWidgets.QComboBox()
+        self.preset.addItems([*self.PRESETS.keys(), "Custom"])
+        self.preset.setCurrentText("Resin - easy")
+        self.preset.setToolTip("Starting point only. Real-world printer fit must be calibrated.")
+        self.preset.currentTextChanged.connect(self._apply_preset)
+        layout.addWidget(self.preset)
+
+        form = _form()
+        self.shape = QtWidgets.QComboBox()
+        self.shape.addItems(["round", "square"])
+        self.key_diameter = _spin(5, .2, 1000)
+        self.key_depth = _spin(5, .2, 1000)
+        self.radial = _spin(.25, 0, 10, 3)
+        self.axial = _spin(.35, 0, 10, 3)
+        self.margin = _spin(.8, 0, 20, 3)
+        form.addRow("Shape", self.shape)
+        form.addRow("Peg diameter", self.key_diameter)
+        form.addRow("Insertion depth", self.key_depth)
+        form.addRow("Radial clearance", self.radial)
+        form.addRow("Extra socket depth", self.axial)
+        form.addRow("Edge margin", self.margin)
+        layout.addLayout(form)
+        self.radial.valueChanged.connect(self._mark_custom_preset)
+        self.axial.valueChanged.connect(self._mark_custom_preset)
+        layout.addWidget(_muted(
+            "Radial clearance is per side. A 5 mm peg with 0.25 mm clearance uses a 5.5 mm socket.",
+            "Hint",
+        ))
+
+        placement = QtWidgets.QGroupBox("Manual location (cut-plane coordinates)")
+        placement.setCheckable(True)
+        placement.setChecked(False)
+        placement_form = _form()
+        self.key_u = _spin(0)
+        self.key_v = _spin(0)
+        placement_form.addRow("U", self.key_u)
+        placement_form.addRow("V", self.key_v)
+        placement.setLayout(placement_form)
+        layout.addWidget(placement)
+
+        action_row = QtWidgets.QHBoxLayout()
+        self.pick_button = button("Click to place", primary=True)
+        self.pick_button.clicked.connect(self.start_pick)
+        self.auto_button = button("Suggest")
+        self.auto_button.clicked.connect(self.auto_key)
+        action_row.addWidget(self.pick_button, 1)
+        action_row.addWidget(self.auto_button)
+        layout.addLayout(action_row)
+        self.add_button = button("Add at U / V")
+        self.add_button.clicked.connect(self.add_key)
+        layout.addWidget(self.add_button)
+
+        layout.addWidget(_muted("PLANNED KEYS", "SectionHeading"))
+        self.table = QtWidgets.QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["U", "V", "Ø", "Type"])
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.table.setAlternatingRowColors(True)
+        self.table.setMinimumHeight(150)
+        layout.addWidget(self.table)
+        remove_button = button("Remove selected key")
+        remove_button.clicked.connect(self.remove_key)
+        layout.addWidget(remove_button)
+        layout.addWidget(_muted(
+            "Pick a point on the model and Keymaster projects it onto the cut plane. Keys are checked when generating the cut.",
+            "Hint",
+        ))
+        layout.addStretch(1)
+
+    def _build_parts_page(self):
+        layout = self._page("Parts", "Inspect the separated pieces and export printable solids.")
+        self.parts_label = _muted("Generate a cut preview to create two parts.", "Muted")
+        layout.addWidget(self.parts_label)
+        layout.addWidget(_muted("EXPLODED VIEW", "SectionHeading"))
+        self.explode = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.explode.setRange(0, 100)
+        self.explode.setValue(25)
+        self.explode.valueChanged.connect(self._separate)
+        layout.addWidget(self.explode)
+        self.part_a_visible = QtWidgets.QCheckBox("Show peg-side part")
+        self.part_b_visible = QtWidgets.QCheckBox("Show socket-side part")
+        self.part_a_visible.setChecked(True)
+        self.part_b_visible.setChecked(True)
+        self.part_a_visible.toggled.connect(self._part_visibility_changed)
+        self.part_b_visible.toggled.connect(self._part_visibility_changed)
+        layout.addWidget(self.part_a_visible)
+        layout.addWidget(self.part_b_visible)
+        export_here = button("Export printable STL parts", primary=True, icon="export")
+        export_here.clicked.connect(self.export)
+        layout.addWidget(export_here)
+        layout.addWidget(_muted(
+            "Both exported parts retain their original assembled positions. The exploded view affects only the viewport.",
+            "Hint",
+        ))
+        layout.addStretch(1)
+
+    def _show_tool(self, index: int):
+        self.stack.setCurrentIndex(index)
+        keys = ["model", "cut", "keys", "parts"]
+        self.nav_buttons[keys[index]].setChecked(True)
 
     def _error(self, error):
         QtWidgets.QMessageBox.warning(self, "Keymaster", str(error))
@@ -188,41 +423,76 @@ class KeymasterWindow(QtWidgets.QMainWindow):
     def _dirty(self, *_):
         self.result = None
         self.export_button.setEnabled(False)
-
-    def _coordinate_changed(self, *_):
-        self._dirty()
-        if self.model is not None:
-            try:
-                self._draw_original()
-            except Exception as exc:
-                self._error(f"Could not update cut plane preview: {exc}")
+        if hasattr(self, "parts_label"):
+            self.parts_label.setText("Settings changed. Preview the cut again to update the parts.")
 
     def _axis_index(self):
         return {"X": 0, "Y": 1, "Z": 2}[self.axis.currentText()]
-
-    def _axis_changed(self, *_):
-        self._dirty()
-        if self.model is not None:
-            try:
-                # Trimesh bounds have shape (2, 3): minima and maxima by XYZ.
-                # The selected axis is a COLUMN, never a row.
-                with QtCore.QSignalBlocker(self.coordinate):
-                    self.coordinate.setValue(
-                        float(self.model.bounds[:, self._axis_index()].mean())
-                    )
-                self._draw_original()
-            except Exception as exc:
-                self._error(f"Could not change cut plane axis: {exc}")
 
     def _plane(self):
         if self.model is None:
             raise GeometryError("Import a model first.")
         index = self._axis_index()
-        # Mean of the MIN and MAX rows yields the 3D bounding-box center.
         origin = np.array(self.model.bounds.mean(axis=0), dtype=float)
         origin[index] = self.coordinate.value()
         normal = np.eye(3)[index]
         return CutPlane(tuple(origin), tuple(normal))
+
+    def _update_plane_slider(self):
+        if self.model is None:
+            return
+        lo, hi = (float(x) for x in self.model.bounds[:, self._axis_index()])
+        self.range_hint.setText(f"Model extent: {lo:.2f} to {hi:.2f} mm")
+        relative = (self.coordinate.value() - lo) / max(hi - lo, 1e-12)
+        with QtCore.QSignalBlocker(self.position_slider):
+            self.position_slider.setValue(int(np.clip(relative, 0, 1) * 1000))
+
+    def _coordinate_changed(self, *_):
+        self._dirty()
+        if self.model is not None:
+            try:
+                self._update_plane_slider()
+                self._draw_original()
+            except Exception as exc:
+                self._error(f"Could not update cut plane preview: {exc}")
+
+    def _position_slider_changed(self, value):
+        if self.model is None:
+            return
+        lo, hi = (float(x) for x in self.model.bounds[:, self._axis_index()])
+        with QtCore.QSignalBlocker(self.coordinate):
+            self.coordinate.setValue(lo + (hi - lo) * value / 1000.0)
+        self._dirty()
+        try:
+            self._draw_original()
+        except Exception as exc:
+            self._error(f"Could not update cut plane: {exc}")
+
+    def _axis_changed(self, *_):
+        self._dirty()
+        if self.model is not None:
+            try:
+                with QtCore.QSignalBlocker(self.coordinate):
+                    self.coordinate.setValue(
+                        float(self.model.bounds[:, self._axis_index()].mean())
+                    )
+                self._update_plane_slider()
+                self._draw_original()
+            except Exception as exc:
+                self._error(f"Could not change cut plane axis: {exc}")
+
+    def _apply_preset(self, name):
+        values = self.PRESETS.get(name)
+        if values is None:
+            return
+        with QtCore.QSignalBlocker(self.radial), QtCore.QSignalBlocker(self.axial):
+            self.radial.setValue(values[0])
+            self.axial.setValue(values[1])
+
+    def _mark_custom_preset(self, *_):
+        if self.preset.currentText() != "Custom":
+            with QtCore.QSignalBlocker(self.preset):
+                self.preset.setCurrentText("Custom")
 
     def _template(self):
         return KeySpec(
@@ -235,46 +505,107 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         filename, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open printable mesh", "", "Mesh models (*.stl *.obj)"
         )
-        if not filename:
+        if filename:
+            self._load_path(filename)
+
+    def _load_path(self, filename: str | Path):
+        if self._loading:
             return
+        self._loading = True
         try:
             mesh = load_model(filename)
+            preview_poly = _as_polydata(mesh)
+            if len(mesh.faces) > 250000:
+                try:
+                    # Display-only decimation. All geometry operations always use
+                    # the exact original mesh, never this accelerated display.
+                    preview_poly = preview_poly.decimate_pro(0.55, preserve_topology=True)
+                except Exception:
+                    pass
         except Exception as exc:
             self._error(exc)
+            self._loading = False
             return
         self.model, self.source = mesh, Path(filename)
+        self._preview_polydata = preview_poly
         try:
             self.keys.clear()
             self._refresh_table()
             self._dirty()
-            # Keep signals blocked during initialization: otherwise the plane
-            # redraws against partially initialized coordinates, which can
-            # leave the UI in a confusing state after a successful mesh load.
             with QtCore.QSignalBlocker(self.axis), QtCore.QSignalBlocker(self.coordinate):
                 self.axis.setCurrentText("Z")
                 self.coordinate.setValue(float(mesh.bounds[:, 2].mean()))
-            self.model_label.setText(
-                f"{self.source.name}\n{len(mesh.faces):,} triangles | "
-                f"{mesh.extents[0]:.1f} x {mesh.extents[1]:.1f} x {mesh.extents[2]:.1f} model units"
+            self._update_plane_slider()
+            dimensions = " x ".join(f"{size:.1f}" for size in mesh.extents)
+            self.model_label.setText(self.source.name)
+            self.mesh_info.setText(
+                f"Triangles: {len(mesh.faces):,}\n"
+                f"Vertices: {len(mesh.vertices):,}\n"
+                f"Dimensions: {dimensions} mm"
             )
-            self._draw_original()
+            self.mesh_validation.setText("Closed mesh | Consistent winding | Positive volume")
+            self.document_name.setText(self.source.name)
+            self.document_name.setToolTip(str(self.source))
+            self.mesh_status.setText(f"{len(mesh.faces):,} triangles | Watertight")
+            self.viewport_hint.setText("Drag to orbit | Scroll to zoom | Select Cut or Keys to edit")
+            self._draw_original(reset_camera=True)
+            self._show_tool(1)
+            self.statusBar().showMessage("Model imported. Move the cut plane or add keys.")
         except Exception as exc:
             self._error(f"Model was loaded but its preview could not be initialized: {exc}")
-            return
-        self.statusBar().showMessage("Model imported. Move the cut plane and add keys.")
+        finally:
+            self._loading = False
 
-    def _draw_original(self):
-        self.view.clear()
-        self.view.add_axes()
-        self.view.add_mesh(_as_polydata(self.model), color="#b5bfc9", smooth_shading=True, name="original")
+    def _draw_original(self, reset_camera=False):
+        if self.model is None:
+            return
+        can_reuse = (
+            self._display_mode == "original"
+            and not reset_camera
+            and hasattr(self.view, "remove_actor")
+        )
+        if can_reuse:
+            for name in ("cut_plane", *self._key_marker_names):
+                self.view.remove_actor(name, reset_camera=False)
+        else:
+            camera = getattr(self.view, "camera_position", None) if not reset_camera else None
+            self.view.clear()
+            self.view.add_axes()
+            self.view.add_mesh(
+                self._preview_polydata if self._preview_polydata is not None else _as_polydata(self.model),
+                color="#a7b6c4", smooth_shading=True, name="original",
+            )
+            if camera is not None:
+                self.view.camera_position = camera
         plane = self._plane()
-        origin, n, _, _ = frame(plane)
-        scale = float(max(self.model.extents)) * 1.2
-        self.view.add_mesh(pv.Plane(center=origin, direction=n, i_size=scale,
-                                    j_size=scale), color="#e0ac70", opacity=0.25,
-                           name="cut_plane", pickable=False)
-        self.view.reset_camera()
+        origin, normal, u, v = frame(plane)
+        scale = max(float(max(self.model.extents)) * 1.2, 1)
+        self.view.add_mesh(
+            pv.Plane(center=origin, direction=normal, i_size=scale, j_size=scale),
+            color=COPPER, opacity=0.24, name="cut_plane", pickable=False,
+        )
+        self._key_marker_names.clear()
+        for i, key in enumerate(self.keys):
+            name = f"key_marker_{i}"
+            self.view.add_mesh(
+                pv.Cylinder(
+                    center=origin + u * key.u + v * key.v + normal * (key.depth / 2),
+                    direction=normal, radius=key.diameter / 2,
+                    height=key.depth, resolution=24,
+                ),
+                name=name, color=BLUE, opacity=0.65, pickable=False,
+            )
+            self._key_marker_names.append(name)
+        if reset_camera:
+            self.view.reset_camera()
+        self._display_mode = "original"
         self.actors = ()
+
+    def _refresh_table(self):
+        self.table.setRowCount(len(self.keys))
+        for row, key in enumerate(self.keys):
+            for column, value in enumerate((f"{key.u:.1f}", f"{key.v:.1f}", f"{key.diameter:.1f}", key.shape)):
+                self.table.setItem(row, column, QtWidgets.QTableWidgetItem(str(value)))
 
     def add_key(self):
         if self.model is None:
@@ -282,6 +613,11 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         self.keys.append(self._template())
         self._refresh_table()
         self._dirty()
+        try:
+            self._draw_original()
+            self.statusBar().showMessage("Key placed. Preview the cut to validate its fit.")
+        except Exception as exc:
+            self._error(exc)
 
     def auto_key(self):
         if self.model is None:
@@ -291,14 +627,17 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             self.keys.append(key)
             self._refresh_table()
             self._dirty()
+            self._draw_original()
+            self.statusBar().showMessage("Suggested key placed. Inspect and generate the cut.")
         except Exception as exc:
             self._error(exc)
 
     def start_pick(self):
         if self.model is None:
             return self._error("Import a model first.")
-        self.statusBar().showMessage("Click the mesh near the desired cut-face position.")
         try:
+            self._draw_original()
+            self.statusBar().showMessage("Click on the model to place a key on the cut plane.")
             self.view.enable_surface_point_picking(
                 callback=self._picked, show_message=False, left_clicking=True,
             )
@@ -319,17 +658,15 @@ class KeymasterWindow(QtWidgets.QMainWindow):
 
     def remove_key(self):
         rows = sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True)
-        for i in rows:
-            del self.keys[i]
+        for index in rows:
+            del self.keys[index]
         if rows:
             self._refresh_table()
             self._dirty()
-
-    def _refresh_table(self):
-        self.table.setRowCount(len(self.keys))
-        for row, key in enumerate(self.keys):
-            for col, value in enumerate((key.u, key.v, key.diameter, key.shape)):
-                self.table.setItem(row, col, QtWidgets.QTableWidgetItem(str(value)))
+            try:
+                self._draw_original()
+            except Exception as exc:
+                self._error(exc)
 
     def generate(self):
         if self.model is None:
@@ -340,16 +677,23 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             result = cut_and_key(self.model, self._plane(), self.keys)
             self.view.clear()
             self.view.add_axes()
-            a = self.view.add_mesh(_as_polydata(result.peg_side), color="#e4b16b",
+            a = self.view.add_mesh(_as_polydata(result.peg_side), color=COPPER,
                                    name="peg_piece", smooth_shading=True)
-            b = self.view.add_mesh(_as_polydata(result.socket_side), color="#7fa8cd",
+            b = self.view.add_mesh(_as_polydata(result.socket_side), color=BLUE,
                                    name="socket_piece", smooth_shading=True)
             self.result = result
             self.actors = (a, b)
+            self._display_mode = "parts"
             self._separate()
             self.view.reset_camera()
             self.export_button.setEnabled(True)
-            self.statusBar().showMessage("Both solid pieces generated. Inspect before exporting.")
+            self.parts_label.setText(
+                f"Part A: {len(result.peg_side.faces):,} faces (pegs)\n"
+                f"Part B: {len(result.socket_side.faces):,} faces (sockets)\n"
+                f"Alignment keys: {len(self.keys)}"
+            )
+            self._show_tool(3)
+            self.statusBar().showMessage("Both closed parts generated. Inspect and export.")
         except Exception as exc:
             self._dirty()
             self._error(exc)
@@ -357,18 +701,24 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             self.generate_button.setEnabled(True)
             QtWidgets.QApplication.restoreOverrideCursor()
 
-    def _separate(self):
+    def _separate(self, *_):
         if self.model is None or not self.actors:
             return
-        _, n, _, _ = frame(self._plane())
-        delta = max(self.model.extents) * self.explode.value() / 400
+        _, normal, _, _ = frame(self._plane())
+        distance = max(float(max(self.model.extents)), 0.1) * self.explode.value() / 400
         for actor, sign in zip(self.actors, (-1, +1)):
-            actor.SetPosition(*(n * delta * sign))
+            actor.SetPosition(*(normal * distance * sign))
         self.view.render()
+
+    def _part_visibility_changed(self, *_):
+        if self.actors:
+            for actor, visible in zip(self.actors, (self.part_a_visible.isChecked(), self.part_b_visible.isChecked())):
+                actor.SetVisibility(visible)
+            self.view.render()
 
     def export(self):
         if self.result is None or self.source is None:
-            return self._error("Generate the pieces first.")
+            return self._error("Generate a cut preview before exporting.")
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose STL export folder")
         if not folder:
             return
@@ -380,13 +730,38 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         except Exception as exc:
             self._error(exc)
 
+    def _reset_camera(self):
+        if self.model is not None:
+            self.view.reset_camera()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() and any(
+            url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in (".stl", ".obj")
+            for url in event.mimeData().urls()
+        ):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in (".stl", ".obj"):
+                self._load_path(url.toLocalFile())
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
     def _update_available(self, version, url, notes):
         self.release_url = url
-        text = f"New Keymaster release: {version}"
-        if notes:
-            text += "\n" + notes
-        self.update_label.setText(text)
-        self.update_frame.setVisible(True)
+        self.statusBar().showMessage(f"New Keymaster release {version}. Open Help to view details.")
+        menu = self.menuBar().findChildren(QtWidgets.QMenu)
+        if menu:
+            existing = [a for a in menu[0].actions() if a.text().startswith("Open release")]
+            for action in existing:
+                menu[0].removeAction(action)
+            release_action = QtGui.QAction(f"Open release {version}", self)
+            release_action.triggered.connect(self._open_release)
+            menu[0].addAction(release_action)
 
     def _open_release(self):
         if self.release_url:
@@ -399,6 +774,7 @@ class KeymasterWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("splitter", self.splitter.sizes())
         self.settings.sync()
         self.view.close()
         super().closeEvent(event)
@@ -409,6 +785,11 @@ def main():
     application.setApplicationName("Keymaster")
     application.setOrganizationName("TechSavage3D")
     application.setStyle("Fusion")
+    application.setStyleSheet(STYLESHEET)
     window = KeymasterWindow()
     window.show()
     return application.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

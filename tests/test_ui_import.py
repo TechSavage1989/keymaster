@@ -88,7 +88,7 @@ def test_imported_stl_updates_ui_and_preview(window, source_stl, monkeypatch):
     assert window.source == source_stl
     assert source_stl.name in window.model_label.text()
     assert "No model loaded" not in window.model_label.text()
-    assert "12 triangles" in window.model_label.text()
+    assert "12" in window.mesh_info.text() and "Triangles" in window.mesh_info.text()
     assert window.axis.currentText() == "Z"
     assert window.coordinate.value() == pytest.approx(0.0)
     assert [options["name"] for _mesh, options in window.view.added] == ["original", "cut_plane"]
@@ -149,3 +149,71 @@ def test_import_after_axis_change_resets_to_z(window, source_stl, monkeypatch):
     assert window.axis.currentText() == "Z"
     assert window.coordinate.value() == pytest.approx(0)
     assert window.model_label.text().startswith(source_stl.name)
+
+
+
+def test_workstation_navigation_and_stable_controls(window):
+    assert set(window.nav_buttons) == {"model", "cut", "keys", "parts"}
+    window._show_tool(2)
+    assert window.stack.currentIndex() == 2
+    assert window.nav_buttons["keys"].isChecked()
+    window._show_tool(0)
+    assert window.stack.currentIndex() == 0
+    assert window.document_name.text() == "No model loaded"
+    assert window.export_button.isEnabled() is False
+
+
+def test_fit_presets_and_custom_clearance(window):
+    window.preset.setCurrentText("FDM - easy")
+    assert window.radial.value() == pytest.approx(0.40)
+    assert window.axial.value() == pytest.approx(0.50)
+    window.radial.setValue(0.33)
+    assert window.preset.currentText() == "Custom"
+    assert window._template().radial_clearance == pytest.approx(0.33)
+
+
+def test_live_cut_position_slider_keeps_plane_aligned(window, source_stl, monkeypatch):
+    monkeypatch.setattr(
+        app.QtWidgets.QFileDialog, "getOpenFileName",
+        lambda *_args, **_kw: (str(source_stl), ""),
+    )
+    errors = []
+    monkeypatch.setattr(window, "_error", errors.append)
+    window.import_model()
+    window.position_slider.setValue(800)
+    assert window.coordinate.value() == pytest.approx(15.0, abs=.1)
+    assert window._plane().origin[2] == pytest.approx(15.0, abs=.1)
+    assert window.view.added[-1][1]["name"] == "cut_plane"
+    assert window.result is None
+    assert not errors
+
+
+def test_direct_path_load_used_by_drop_flow(window, source_stl, monkeypatch):
+    errors = []
+    monkeypatch.setattr(window, "_error", errors.append)
+    window._load_path(source_stl)
+    assert errors == []
+    assert window.model_label.text() == source_stl.name
+    assert window.document_name.text() == source_stl.name
+    assert "Watertight" in window.mesh_status.text()
+
+
+def test_drop_event_imports_stl(window, source_stl, monkeypatch):
+    from PySide6 import QtGui
+    from PySide6.QtCore import QMimeData, QUrl, QPointF
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(source_stl))])
+    event = QtGui.QDropEvent(
+        QPointF(10.0, 10.0),
+        QtCore.Qt.DropAction.CopyAction,
+        mime,
+        QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.KeyboardModifier.NoModifier,
+    )
+    errors = []
+    monkeypatch.setattr(window, "_error", errors.append)
+    window.dropEvent(event)
+    assert event.isAccepted()
+    assert window.model is not None
+    assert window.model_label.text() == source_stl.name
+    assert not errors

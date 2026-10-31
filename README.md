@@ -12,14 +12,19 @@
 
 Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ meshes for printing in separate pieces.
 
-- Import an STL or OBJ model and inspect it in a rotatable 3D viewport.
+- Import an STL or OBJ by file dialog or drag-and-drop; inspect it in a large rotatable 3D viewport.
+- Use contextual Model, Cut, Keys, and Parts tools with a dark workstation interface.
+- Drag a position slider to move the visible cut plane without doing a costly solid Boolean operation on every change.
 - Recognize shared vertices in standard STL exports before validating mesh watertightness.
 - Initialize the model preview and X/Y/Z cutting plane correctly after loading, and report preview errors.
 - Cut along an adjustable X, Y or Z plane.
 - Add round or square integrated pegs with matching recessed sockets.
 - Set diameter, insertion depth, radial fit clearance, extra socket depth and minimum edge margin per key.
+- Apply resin/FDM fit presets or adjust clearance manually; presets are suggested starting points, not guaranteed printer fits.
+- See translucent key markers before generating the closed cut geometry.
 - Manually enter key positions in the cut plane, click a model to project a point, or suggest a cut-face location.
-- Generate both solid parts and inspect an exploded preview.
+- Generate both solid parts, manage their visibility, and inspect an exploded preview.
+- Keep orbit/zoom position when moving the plane; very dense models use a display-only simplified mesh, with exact original geometry retained for cutting.
 - Export two STL files without overwriting previous exports.
 - Reject open/inverted meshes, keys outside the cut face, and overlapping keys.
 
@@ -29,7 +34,7 @@ Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ me
 
 Look for a **prerelease** build at the [GitHub releases page](https://github.com/TechSavage1989/keymaster/releases). The primary portable asset, when published, is named **Keymaster_Windows_Portable.zip**. Do not assume a build is published just because source exists.
 
-The current preview is **0.1.0 alpha 3**. There is no production-tested stable release. Alpha 2 corrected STL topology import; alpha 3 fixes the UI issue where an imported mesh could leave the label at "No model loaded" because of incorrect bounding-box indexing.
+The current preview is **0.1.0 alpha 4**. There is no production-tested stable release. Alpha 4 modernizes the interface and reduces unnecessary bundled components; prior STL import and UI fixes remain included.
 
 ## Requirements
 
@@ -44,8 +49,9 @@ The current preview is **0.1.0 alpha 3**. There is no production-tested stable r
 2. Extract the ZIP. Keep the contents of its **Keymaster** folder together.
 3. Start **Keymaster.exe** inside the extracted folder. The filename stays stable between updates.
 4. Use **Import STL / OBJ** to load a watertight model with dimensions in millimeters.
-5. Choose the plane axis and coordinate; add one or more keys and set the desired fit.
-6. Select **Generate cut + keys**, inspect both pieces, then choose **Export both STL pieces**.
+5. Use the **Cut** panel to select an X/Y/Z axis and move the position slider or enter a precise coordinate.
+6. Use the **Keys** panel to choose a fit preset and place keys by clicking on the model, automatic suggestion, or manual U/V coordinates.
+7. Select **Preview cut**, inspect the parts and exploded view in **Parts**, then choose **Export STL**.
 
 To run directly from source:
 
@@ -56,11 +62,11 @@ To run directly from source:
 
 ## How to use
 
-**Cut plane.** X, Y, or Z sets the plane normal in model coordinates. The coordinate is its position in model units. Both pieces are capped along that plane. The negative side gets protruding pegs, while the positive side gets matching recessed sockets.
+**Cut plane.** X, Y, or Z sets the plane normal in model coordinates. Move the slider or enter its coordinate; this immediately updates only the visual plane. Choose **Preview cut** when ready to run the more expensive geometry operation. Both pieces are capped along that plane. The negative side gets protruding pegs, while the positive side gets matching recessed sockets.
 
-**Key settings.** U and V describe positions on the cutting plane, relative to the model's bounding-box center projected onto that plane. Set the peg diameter, insertion depth, radial clearance on each side, extra socket depth, minimum edge margin, and round/square shape before adding a key. Each added key retains its own settings. Click **Auto place** for a suggested location, or **Pick on model** to project a visible clicked location onto the plane. Click **Remove selected key** to delete an existing key.
+**Key settings.** Choose a resin or FDM clearance preset, or select Custom to enter your own radial and axial clearances. U and V describe positions on the cutting plane relative to the model's projected bounding-box center; expand **Manual location** to enter them precisely. Click **Click to place** to project a visible point onto the plane, **Suggest** for a proposed location, or **Add at U / V** for manual entry. Existing keys retain their own settings. Click **Remove selected key** to delete a key.
 
-**Preview and export.** Generate is a deliberate operation for performance. Changing the plane or key list invalidates the prior export. The exploded preview is for inspection only: the exported pieces keep their original assembly coordinates. The app refuses to silently replace STL files already present in the destination.
+**Preview and export.** Geometry generation is deliberate and can take time on dense sculpts. Changing the plane or key list invalidates the prior export. The Parts panel can hide each generated half and adjust separation. The exploded preview is for inspection only: exported pieces keep their original assembly coordinates. Existing output files are never silently overwritten. Press Ctrl+O to import, Ctrl+G to preview, Ctrl+E to export, or F to frame the model.
 
 **Fit warning.** Clearances are in millimeters and depend on printer, resin/filament, orientation and post-processing. Test on a small sample before printing a large sculpture. Automated edge checks sample the footprint; they are not a complete structural or engineering strength analysis.
 
@@ -74,7 +80,7 @@ Window geometry is saved under the user's application configuration directory. N
 
 ## Troubleshooting
 
-- **Import rejected:** Use alpha 2 or later for the repaired STL topology import fix. Alpha 3 also fixes a UI initialization issue that could make a validated model appear not to load. Actual open, inverted, or self-intersecting meshes may still require repair.
+- **Import rejected:** Alpha 2 corrected the STL topology import issue; Alpha 3 corrected the UI initialization issue. Alpha 4 retains both fixes. Genuinely open, inverted, or self-intersecting meshes may still require repair.
 - **Key does not fit:** Reduce diameter and/or margin, or reposition the key to a wider portion of the cut face.
 - **Unusable viewport:** Update the graphics driver or run on a system with supported OpenGL.
 - **Export refused:** Existing files are never replaced. Choose another output folder.
@@ -91,6 +97,6 @@ Source map: `src/keymaster/geometry.py` contains cutting and key operations; `sr
     python scripts/check_root.py --self-test
     python -m compileall -q src scripts tests
 
-A Windows CI job builds the portable ZIP with PyInstaller, verifies the file presence and produces SHA256SUMS.txt. A successful CI job does not replace hands-on testing on a real Windows computer.
+A Windows CI job builds the portable ZIP with PyInstaller using explicit VTK renderer imports, an original icon embedded at compile time, and only the required PySide6 distributions rather than the entire Qt metapackage. It verifies the file presence and produces SHA256SUMS.txt. The release archive size is measured; the size reduction is only claimed when verified against Alpha 3. A successful CI job does not replace hands-on testing on a real Windows computer.
 
 This project has no license file. Public visibility alone does not grant redistribution rights beyond what applicable law permits.
