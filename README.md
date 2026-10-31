@@ -40,7 +40,7 @@ Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ me
 
 Get the currently published **Windows prerelease** from the [GitHub releases page](https://github.com/TechSavage1989/keymaster/releases) and select **Keymaster_Windows_Portable.zip**. Keep the extracted Keymaster folder together; launch the stable filename **Keymaster.exe**.
 
-The latest published preview is **0.2.0 alpha 1**, available on the [verified prerelease page](https://github.com/TechSavage1989/keymaster/releases/tag/v0.2.0-alpha.1). Alpha 2 is an unreleased development fix for plane-click crashes and improved on-plane manipulation. The Windows portable ZIP is 174.4 MB (166.3 MiB). There is no production-tested stable release. This update includes selective section detachment, direct plane manipulation, improved shading, automatic multi-key placement and additional connector prototypes. Previous releases remain available.
+The next approved prerelease is **0.2.0 alpha 2**, following the [0.2.0 alpha 1 release](https://github.com/TechSavage1989/keymaster/releases/tag/v0.2.0-alpha.1). Use [GitHub Releases](https://github.com/TechSavage1989/keymaster/releases) to obtain only the published, verified ZIP. Alpha 2 addresses native plane-click crashes and improves on-plane move/rotate controls. The Windows portable ZIP is 174.4 MB (166.3 MiB). There is no production-tested stable release. This update includes selective section detachment, direct plane manipulation, improved shading, automatic multi-key placement and additional connector prototypes. Previous releases remain available.
 
 ## Requirements
 
@@ -89,7 +89,7 @@ Window geometry is saved under the user's application configuration directory. N
 
 - **Import rejected:** Alpha 2 corrected the STL topology import issue; Alpha 3 corrected the UI initialization issue. Alpha 4 retains both fixes. Genuinely open, inverted, or self-intersecting meshes may still require repair.
 - **Key does not fit:** Reduce diameter and/or margin, or reposition the key to a wider portion of the cut face.
-- **Unusable viewport or plane click crash:** Try a version newer than alpha 1. The alpha 2 development fix separates VTK mouse callbacks from scene modifications. As an immediate workaround, turn off **Show interactive plane handles** and use the axis/position slider. For graphic instability, update the GPU driver. Real mouse/GPU validation remains outstanding.
+- **Unusable viewport or plane click crash:** Try a version newer than alpha 1. Alpha 2 separates VTK mouse callbacks from scene modifications. As an immediate workaround, turn off **Show interactive plane handles** and use the axis/position slider. For graphic instability, update the GPU driver. Real mouse/GPU validation remains outstanding.
 - **Only one detachable section:** Positive-side regions are still connected across this cut. Rotate/move the plane until the intended limbs are separate, then analyze again.
 - **Too many keys or snap fit fails:** Reduce key count/size and verify real-material clearance and compliance on a test print. Experimental snap connectors are not guaranteed to engage.
 - **Export refused:** Existing files are never replaced. Choose another output folder.
