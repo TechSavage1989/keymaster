@@ -19,7 +19,7 @@ Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ me
 - Initialize the model preview and X/Y/Z cutting plane correctly after loading, and report preview errors.
 - Cut along an X, Y, or freely rotated plane using draggable and rotatable 3D handles (where the VTK viewport supports interactive plane widgets).
 - Inspect the actual intersection curve instead of guessing from a translucent plane.
-- Detect independently detachable positive-side solid sections and check which ones to detach; unselected sections stay attached to the retained body.
+- Detect independently detachable positive-side solid sections and check or click which ones to detach; unselected sections stay attached to the retained body.
 - Apply an optional mating-face gap for fully selected cuts and independent peg/socket clearances.
 - Add round, square or tapered integral pegs and matching sockets; an experimental barbed snap option is provided for fit experimentation on compliant FDM materials.
 - Suggest multiple non-overlapping alignment keys automatically on a selected section's actual cut face.
@@ -55,7 +55,7 @@ The current preview under development is **0.2.0 alpha 1**. There is no producti
 3. Start **Keymaster.exe** inside the extracted folder. The filename stays stable between updates.
 4. Use **Import STL / OBJ** to load a watertight model with dimensions in millimeters.
 5. Open **Cut** and drag the 3D plane widget to translate or rotate the cut freely. X/Y/Z reset an axis-aligned orientation. Watch the highlighted mesh-plane intersection.
-6. Select **Detect detachable sections** and uncheck any sections you want to remain attached. Only geometrically independent sections on the selected positive side are listed.
+6. Select **Detect detachable sections**, then uncheck a listed section or use **Click a section in the 3D view** to toggle its separation. Only geometrically independent sections on the selected positive side are listed.
 7. Use **Keys** to select a connector shape, fit preset, diameter and automatic connector count. Choose **Auto-place** or place individual keys on the model. Snap latches are experimental.
 8. Configure optional **Mating face gap** for a complete cut. Select **Preview cut** to generate and inspect the parts before using **Export STL**.
 

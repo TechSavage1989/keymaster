@@ -198,7 +198,10 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         self.view.set_background("#151a20")
         self.view.add_axes()
         if hasattr(self.view, "enable_lightkit"):
-            self.view.enable_lightkit()
+            try:
+                self.view.enable_lightkit()
+            except (RuntimeError, AttributeError):
+                pass
         viewport_layout.addWidget(self.view, 1)
         self.viewport_hint = _muted(
             "Drop an STL or OBJ here, or select Import model.", "Hint"
@@ -338,6 +341,11 @@ class KeymasterWindow(QtWidgets.QMainWindow):
             "Analyze solids created on the positive-normal side of the cutting plane.")
         self.analyze_button.clicked.connect(self.analyze_sections)
         layout.addWidget(self.analyze_button)
+        self.pick_section_button = button("Click a section in the 3D view")
+        self.pick_section_button.setToolTip(
+            "After detection, click a model section to toggle its separation.")
+        self.pick_section_button.clicked.connect(self.start_section_pick)
+        layout.addWidget(self.pick_section_button)
         self.section_list = QtWidgets.QListWidget()
         self.section_list.setMinimumHeight(128)
         self.section_list.setMaximumHeight(225)
@@ -724,6 +732,58 @@ class KeymasterWindow(QtWidgets.QMainWindow):
         finally:
             self.analyze_button.setEnabled(True)
             QtWidgets.QApplication.restoreOverrideCursor()
+
+    def start_section_pick(self):
+        if not self._section_candidates:
+            return self._error("First select Detect detachable sections.")
+        if not hasattr(self.view, "enable_surface_point_picking"):
+            return self._error("Viewport point picking is not available.")
+        self._clear_gizmo()
+        self.statusBar().showMessage(
+            "Click a section on the positive side of the plane to toggle separation.")
+        try:
+            self.view.enable_surface_point_picking(
+                callback=self._picked_section, show_message=False, left_clicking=True)
+        except Exception as exc:
+            self._enable_gizmo(reset=True)
+            self._error(f"Section selection is unavailable: {exc}")
+
+    def _picked_section(self, position):
+        try:
+            if position is None or not self._section_candidates:
+                return
+            xyz = np.asarray(position, dtype=float)
+            origin, normal, _, _ = frame(self._plane())
+            if float((xyz - origin) @ normal) < -max(.01, float(max(self.model.extents)) * .005):
+                self.statusBar().showMessage(
+                    "Choose geometry on the positive-normal side of the plane.", 7000)
+                return
+            scores = []
+            for row, candidate in enumerate(self._section_candidates):
+                bounds = candidate.mesh.bounds
+                outside = np.maximum(bounds[0] - xyz, 0) + np.maximum(xyz - bounds[1], 0)
+                vertices = candidate.mesh.vertices
+                stride = max(1, len(vertices) // 6000)
+                nearest = float(np.min(np.linalg.norm(vertices[::stride] - xyz, axis=1)))
+                scores.append((float(np.linalg.norm(outside)), nearest, row))
+            _, nearest_distance, row = min(scores)
+            if nearest_distance > max(6.0, float(max(self.model.extents)) * .06):
+                self.statusBar().showMessage(
+                    "That position is not near a detachable section.", 7000)
+                return
+            item = self.section_list.item(row)
+            item.setCheckState(
+                QtCore.Qt.CheckState.Unchecked
+                if item.checkState() == QtCore.Qt.CheckState.Checked
+                else QtCore.Qt.CheckState.Checked
+            )
+            self.section_list.setCurrentRow(row)
+            state = "Detach" if item.checkState() == QtCore.Qt.CheckState.Checked else "Keep attached"
+            self.statusBar().showMessage(f"Section {row + 1}: {state}")
+        finally:
+            if hasattr(self.view, "disable_picking"):
+                self.view.disable_picking()
+            self._enable_gizmo(reset=True)
 
     def _selected_sections(self):
         return tuple(

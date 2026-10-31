@@ -325,3 +325,19 @@ def test_face_gap_edited_and_invalidates_export(window, source_stl, monkeypatch)
     window.face_gap.setValue(.3)
     assert not window.export_button.isEnabled()
     assert window.result is None
+
+
+
+def test_click_to_select_one_detachable_section(window, tmp_path, monkeypatch):
+    errors = []
+    monkeypatch.setattr(window, "_error", errors.append)
+    window._load_path(_build_branched_stl(tmp_path))
+    window.coordinate.setValue(0)
+    window.analyze_sections()
+    assert len(window._selected_sections()) == 2
+    centroid = window._section_candidates[0].centroid
+    window._picked_section(centroid)
+    assert not errors
+    assert window._selected_sections() == (1,)
+    window._picked_section(centroid)
+    assert set(window._selected_sections()) == {0, 1}
