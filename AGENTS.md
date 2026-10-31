@@ -9,12 +9,16 @@ Read this file and DEVELOPMENT_HANDOFF.md before any edits.
 - Reject unsupported/non-manifold geometry rather than silently exporting corrupt shapes.
 - STL stores triangle-corner vertices independently. Import with topology processing to consolidate shared coordinates before validation; do not disable integrity checks to work around this.
 - Preserve user settings and a stable executable filename: Keymaster.exe.
+- The UI is viewport-first: compact rail for Model/Cut/Keys/Parts, contextual inspector, drag-and-drop load, cut position slider and printer-fit presets. Maintain current UI tests and preserve camera orientation during plane edits.
+- Trim release dependencies carefully; no blanket VTK/PyVista collect-all without justification. PyInstaller must still bundle VTK OpenGL, Qt viewport, geometry engine and a compile-time embedded ICO resource. Compare release archive size to previous baseline.
 - Trimesh bounds are (2, 3) for minimum and maximum XYZ: axis values use bounds[:, axis], bounding-box center uses bounds.mean(axis=0); include a real UI import regression test.
 - Do not claim advanced automatic placement, remeshing, model repair, 3MF support, multicut history or automatic updater installation unless implemented and tested.
 
 ## Code map
 - src/keymaster/geometry.py: mesh validation, plane basis, CSG, key placement and STL output.
 - src/keymaster/app.py: Qt desktop interface and 3D viewport.
+- src/keymaster/theme.py: flat dark Qt stylesheet and drawn tool icons.
+- scripts/generate_icon.py: source for the original Windows ICO asset generated before compilation.
 - src/keymaster/updates.py: read-only GitHub Releases polling.
 - src/keymaster/__main__.py and scripts/launch.py: executable entry points.
 - tests/: geometry regression tests.
