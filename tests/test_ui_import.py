@@ -88,7 +88,7 @@ def test_imported_stl_updates_ui_and_preview(window, source_stl, monkeypatch):
     assert window.source == source_stl
     assert source_stl.name in window.model_label.text()
     assert "No model loaded" not in window.model_label.text()
-    assert "12 triangles" in window.model_label.text()
+    assert "12" in window.mesh_info.text() and "Triangles" in window.mesh_info.text()
     assert window.axis.currentText() == "Z"
     assert window.coordinate.value() == pytest.approx(0.0)
     assert [options["name"] for _mesh, options in window.view.added] == ["original", "cut_plane"]
