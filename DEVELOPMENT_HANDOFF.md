@@ -2,7 +2,7 @@
 
 ## Baseline
 - App: Keymaster, Windows-first portable GUI.
-- In-progress targeted release: v0.2.0-alpha.1 (0.2.0a1) on development/keymaster-0.2-selective-cut. Confirm main and release tag only after passing hosted checks. Prior published baseline: v0.1.0-alpha.4 from 8879fd3d45e4014ffbfc3658a49496768c87e9a7. Preserve all prior releases.
+- Current published preview: v0.2.0-alpha.1 (0.2.0a1), released October 31, 2026 from merged main commit dee9afd15be9e98c9f3c643808e4271c19260120. Development branch: development/keymaster-0.2-selective-cut. Prior published baseline: v0.1.0-alpha.4 at 8879fd3d45e4014ffbfc3658a49496768c87e9a7. Preserve earlier releases.
 - Repository: https://github.com/TechSavage1989/keymaster (public at task start).
 - Default branch: main. Original commit was 29b7c7baf0bfe9955d8c6146425104d5d197cbf8 with only README.md.
 - No previous app, existing icon, license, binary releases, or stable user-confirmed build existed at baseline.
@@ -35,6 +35,16 @@ Commands from the repository root:
 
 Windows packaging is defined in .github/workflows/ci.yml using Python 3.12 and PyInstaller on windows-latest. Archive format: one Keymaster/ folder with Keymaster.exe inside, plus SHA256SUMS.txt alongside the uploaded ZIP.
 
+## Alpha 0.2 alpha 1 release validation
+- Pull request: https://github.com/TechSavage1989/keymaster/pull/6, merged after hosted checks.
+- Published release: https://github.com/TechSavage1989/keymaster/releases/tag/v0.2.0-alpha.1
+- Hosted release build: https://github.com/TechSavage1989/keymaster/actions/runs/41180164567
+- Version tag points to main commit dee9afd15be9e98c9f3c643808e4271c19260120 and appears at the top of the prerelease feed.
+- Windows ZIP: Keymaster_Windows_Portable.zip, 174,422,534 bytes, SHA256 e4e70bd7a4060c969664e95cb435826266d201245c4f688ad28b24569034db68. SHA256SUMS.txt is published and the release workflow checked the checksum before publication.
+- Validation: 45 Windows tests on PR head, 14 Linux geometry tests, plus successful main-branch tests, Windows package build and release publication job.
+- Native GPU cut-plane interaction and physically printed connector strength/fit have not been tested. The snap connector remains an experimental barbed prototype, not a rated latch.
+- No private model assets or credentials were included in the public release.
+
 ## Alpha 4 release validation
 - Pull request: https://github.com/TechSavage1989/keymaster/pull/4, merged after final checks.
 - Release: https://github.com/TechSavage1989/keymaster/releases/tag/v0.1.0-alpha.4
@@ -59,7 +69,7 @@ Root allowlist: README.md, AGENTS.md, DEVELOPMENT_HANDOFF.md, pyproject.toml, .g
 On October 31, 2026, the user explicitly approved source/tests/build assets/documentation upload, public-source publication to this named repository, PR creation and ready-for-review, merge after checks, and tagging/asset release/publication for the initial task. The user subsequently approved alpha 2 and alpha 3 fixes, and the alpha 4 UI modernization. On October 31, 2026, they explicitly requested implementing and publishing the next phase of interactive selective cutting, shading, auto keys, snaps and tolerances; this grants publication for v0.2.0-alpha.1 in this named public repository after checks pass. Each approval is scoped to its task, not future releases. Each approval applies only to its named change. No standing consent for future releases; CI, repository protections and reviews remain binding.
 
 ## Next tasks
-1. Complete hosted v0.2.0-alpha.1 checks and publish the approved preview. Test native Windows VTK widget, real sculpt selection, face gaps, shading and connector fit. Record feedback and a confirmed baseline.
+1. Complete native Windows GPU and real sculpt acceptance tests for v0.2.0-alpha.1: draggable cut plane, shaded viewport, selecting detachable sections, face gaps, and connector exports. Record a user-confirmed baseline.
 2. Smoke test a real sculpt mesh in the native application and verify printed fit.
 3. Implement secure user-consented download/install/rollback updater with release manifest and digest verification.
 4. Improve cut-plane gizmo, manual key manipulation, non-blocking processing, and robust per-piece multi-cut project history.
