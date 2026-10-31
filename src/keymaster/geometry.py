@@ -61,7 +61,15 @@ def load_model(path: str | Path) -> trimesh.Trimesh:
         raise GeometryError("Only STL and OBJ imports are supported in this preview.")
     if not source.is_file():
         raise GeometryError(f"File not found: {source}")
-    mesh = trimesh.load(source, force="mesh", process=False)
+    # STL stores independent coordinates for every triangle. Consolidate shared
+    # vertex records before topology checks; otherwise a valid exported solid
+    # can appear to contain thousands of disconnected faces. Preserve the OBJ
+    # import behavior, and never use processing as a substitute for validation.
+    mesh = trimesh.load(
+        source,
+        force="mesh",
+        process=source.suffix.lower() == ".stl",
+    )
     validate_mesh(mesh)
     return mesh
 
