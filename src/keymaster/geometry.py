@@ -387,8 +387,8 @@ def export_stl(result: CutResult, destination: str | Path, stem: str) -> tuple[P
     folder.mkdir(parents=True, exist_ok=True)
     name = re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_") or "model"
     paths = [
-        folder / f"{name}_A_retained.stl",
-        folder / f"{name}_B_part_01.stl",
+        folder / f"{name}_A_peg.stl",
+        folder / f"{name}_B_socket.stl",
     ]
     paths.extend(
         folder / f"{name}_{chr(ord('C') + i)}_part_{i + 2:02d}.stl"
