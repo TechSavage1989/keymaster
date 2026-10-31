@@ -32,9 +32,9 @@ Keymaster is a Windows-first desktop preview for preparing closed STL and OBJ me
 
 ## Download
 
-Look for a **prerelease** build at the [GitHub releases page](https://github.com/TechSavage1989/keymaster/releases). The primary portable asset, when published, is named **Keymaster_Windows_Portable.zip**. Do not assume a build is published just because source exists.
+Get the currently published **Windows prerelease** from the [GitHub releases page](https://github.com/TechSavage1989/keymaster/releases) and select **Keymaster_Windows_Portable.zip**. Keep the extracted Keymaster folder together; launch the stable filename **Keymaster.exe**.
 
-The current preview is **0.1.0 alpha 4**. There is no production-tested stable release. Alpha 4 modernizes the interface and reduces unnecessary bundled components; prior STL import and UI fixes remain included.
+The current preview is **0.1.0 alpha 4**. There is no production-tested stable release. Alpha 4 modernizes the interface and reduces unnecessary bundled components; its published ZIP is 174.3 MB (166.3 MiB), approximately 6.1% smaller than Alpha 3. Prior STL import and UI fixes remain included.
 
 ## Requirements
 
