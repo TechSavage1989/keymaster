@@ -92,7 +92,7 @@ def test_imported_stl_updates_ui_and_preview(window, source_stl, monkeypatch):
     assert window.axis.currentText() == "Z"
     assert window.coordinate.value() == pytest.approx(0.0)
     assert [options["name"] for _mesh, options in window.view.added] == ["original", "cut_plane"]
-    assert len(window.view.added[0][0].faces) == len(window.model.faces)
+    assert window.view.added[0][0].n_cells == len(window.model.faces)
 
 
 def test_cut_plane_axes_and_coordinate_redraw(window, source_stl, monkeypatch):
