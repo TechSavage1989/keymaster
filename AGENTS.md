@@ -12,13 +12,16 @@ Read this file and DEVELOPMENT_HANDOFF.md before any edits.
 - The UI is viewport-first: compact rail for Model/Cut/Keys/Parts, contextual inspector, drag-and-drop load, cut position slider and printer-fit presets. Maintain current UI tests and preserve camera orientation during plane edits.
 - Trim release dependencies carefully; no blanket VTK/PyVista collect-all without justification. PyInstaller must still bundle VTK OpenGL, Qt viewport, geometry engine and a compile-time embedded ICO resource. Compare release archive size to previous baseline.
 - Trimesh bounds are (2, 3) for minimum and maximum XYZ: axis values use bounds[:, axis], bounding-box center uses bounds.mean(axis=0); include a real UI import regression test.
-- The 0.2 alpha 1 target includes connected-component-aware selective separation via segmentation.py, a VTK plane widget for free-angle manipulation, studio shading, auto connector placement and face tolerances. Do not confuse selective detachable components with arbitrary painted mesh regions. Snap connector is experimental and not guaranteed to function mechanically.
+- The 0.2 alpha 2 development fix addresses a real user-reported crash when clicking the native plane widget. Use end-of-interaction events and defer any VTK scene edits through PlaneInteractionBridge; no synchronous VTK modifications inside the callback, including actor removals or rep.BuildRepresentation. Keep the on-plane move center/frame and rotate arrow controls and the handles-disable fallback.
+- The 0.2 alpha 1 baseline includes connected-component-aware selective separation via segmentation.py, a VTK plane widget for free-angle manipulation, studio shading, auto connector placement and face tolerances. Do not confuse selective detachable components with arbitrary painted mesh regions. Snap connector is experimental and not guaranteed to function mechanically.
 - Do not claim production-grade placement, remeshing, model repair, 3MF support, multicut history or automatic updater installation unless implemented and tested.
 
 ## Code map
 - src/keymaster/geometry.py: mesh validation, plane basis, CSG, key placement and STL output.
 - src/keymaster/segmentation.py: candidate detection and selective rejoining of unselected cut components.
 - src/keymaster/app.py: Qt desktop interface and 3D viewport.
+- src/keymaster/plane_interaction.py: deferred native widget pose bridge, with a Qt timer. Never update VTK actors or widget representation in a native VTK mouse callback.
+- scripts/smoke_plane_widget.py: Windows offscreen real Qt/VTK widget lifecycle smoke. Distinguish this from manual mouse/GPU acceptance testing.
 - src/keymaster/theme.py: flat dark Qt stylesheet and drawn tool icons.
 - scripts/generate_icon.py: source for the original Windows ICO asset generated before compilation.
 - src/keymaster/updates.py: read-only GitHub Releases polling.
