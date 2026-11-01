@@ -170,6 +170,41 @@ console.log('torus knot: many regions, components, selective cut');
   check('re-cut of a keyed part closed', allClosed(r3.parts) && r3.parts.length >= 2, r3.parts.length);
 }
 
+console.log('area labels');
+{
+  const k = K.prepareMesh(K.torusKnot());
+  const b = K.bounds(k.positions);
+  const F = K.frameFromNormal([1, 0, 0.1], b.center);
+  const cfg = cfgOf({ type: 'peg' });
+  const an = K.analyzePlane(k.positions, k.indices, F, cfg, 100);
+  const sec = an.base;
+  const keys = K.autoPlaceKeys(an, cfg, 1, new Set());
+  const avoid = K.keyGeometrySpec(cfg).outer + cfg.margin;
+  let inside = true, clearOfKeys = true;
+  sec.regions.forEach((reg, ri) => {
+    const pt = K.pickLabelPoint(K.regionSamples(sec, ri), keys, avoid);
+    if (K.regionAt(sec, pt.x, pt.y) !== ri) inside = false;
+    for (const key of keys) if (Math.hypot(pt.x - key.x, pt.y - key.y) < avoid) clearOfKeys = false;
+  });
+  check('each label sits inside its own area', inside);
+  check('labels stay clear of keys', clearOfKeys);
+  // a ring-shaped area: the label must land on the ring, not in the hole, and away from a key
+  const sq = (s) => [-s, -s, s, -s, s, s, -s, s];
+  const sec2 = {
+    loops: [{ xy: sq(10), area: 400, bbox: [-10, -10, 10, 10] }, { xy: sq(4).reverse(), area: -64, bbox: [-4, -4, 4, 4] }],
+    regions: [{ outer: 0, holes: [1], area: 336, bbox: [-10, -10, 10, 10] }],
+  };
+  const samples = K.regionSamples(sec2, 0);
+  check('ring samples avoid the hole', samples.length > 0 && samples.every(s => K.regionAt(sec2, s.x, s.y) === 0));
+  const pt = K.pickLabelPoint(samples, [{ x: 7, y: 7 }], 3);
+  check('ring label lands on the ring', K.regionAt(sec2, pt.x, pt.y) === 0 && Math.max(Math.abs(pt.x), Math.abs(pt.y)) > 4, pt);
+  check('ring label avoids the key', Math.hypot(pt.x - 7, pt.y - 7) >= 3, pt);
+  // a sliver thinner than the sampling grid still gets a spot
+  const sec3 = { loops: [{ xy: [0, 0, 100, 0, 100, 0.01, 0, 0.01], area: 1, bbox: [0, 0, 100, 0.01] }], regions: [{ outer: 0, holes: [], area: 1, bbox: [0, 0, 100, 0.01] }] };
+  const s3 = K.regionSamples(sec3, 0);
+  check('sliver area still gets a label spot', s3.length >= 1 && isFinite(s3[0].x) && isFinite(s3[0].y), s3[0]);
+}
+
 console.log('separate shells stay with their piece');
 {
   const body = uvSphere(20, 48, 32), eye = uvSphere(2, 16, 12, [0, 0, 12]);
@@ -224,6 +259,11 @@ console.log('performance on a dense mesh');
   const ta = Date.now() - t; t = Date.now();
   const keys = K.autoPlaceKeys(an, cfg, 2, new Set());
   const tk = Date.now() - t; t = Date.now();
+  const samples = an.base.regions.map((reg, ri) => K.regionSamples(an.base, ri));
+  const tl = Date.now() - t;
+  console.log(`    outline points: ${an.base.loops[an.base.regions[0].outer].xy.length / 2}, label spots ${tl}ms`);
+  check('label spots found quickly on a dense outline', tl < 250 && samples.every(s => s.length > 0), tl);
+  t = Date.now();
   const r = K.cutMesh(big.positions, big.indices, F, { scale: 100, cfg, keys });
   const tc = Date.now() - t; t = Date.now();
   const disp = K.creasedArrays(r.parts[0].positions, r.parts[0].indices, 40);

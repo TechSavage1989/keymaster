@@ -808,6 +808,48 @@ const KMCore = (() => {
     for (const h of r.holes) d = Math.min(d, distToRing(loops[h].xy, x, y));
     return d;
   }
+  // Grid of points inside one area, each with its distance to the area's edge. Computed once per analysis
+  // so the label spot can be re-picked cheaply whenever keys move.
+  function regionSamples(sec, ri, target = 500) {
+    const reg = sec.regions[ri];
+    const [x0, y0, x1, y1] = reg.bbox;
+    const w = x1 - x0, hgt = y1 - y0;
+    const h = Math.max(1e-9, Math.sqrt((w * hgt) / target));
+    // a label doesn't need exact clearance, so measure it against thinned-out outlines (dense sculpts can have tens of thousands of points)
+    const thin = (xy) => {
+      const n = xy.length / 2, step = Math.ceil(n / 1500);
+      if (step <= 1) return xy;
+      const o = [];
+      for (let i = 0; i < n; i += step) o.push(xy[2 * i], xy[2 * i + 1]);
+      return o;
+    };
+    const rings = [reg.outer, ...reg.holes].map(li => thin(sec.loops[li].xy));
+    const out = [];
+    for (let x = x0 + h / 2; x < x1; x += h) for (let y = y0 + h / 2; y < y1; y += h) {
+      if (!regionContains(sec.loops, reg, x, y)) continue;
+      let clear = Infinity;
+      for (const r of rings) clear = Math.min(clear, distToRing(r, x, y));
+      out.push({ x, y, clear });
+    }
+    if (!out.length) {
+      // a sliver thinner than the grid: fall back to the midpoint of its outline's longest chord through the first vertex
+      const xy = sec.loops[reg.outer].xy, n = xy.length / 2;
+      let bx = xy[0], by = xy[1], bd = -1;
+      for (let i = 1; i < n; i++) { const d = Math.hypot(xy[2 * i] - xy[0], xy[2 * i + 1] - xy[1]); if (d > bd) { bd = d; bx = xy[2 * i]; by = xy[2 * i + 1]; } }
+      out.push({ x: (xy[0] + bx) / 2, y: (xy[1] + by) / 2, clear: 0 });
+    }
+    return out;
+  }
+  // The roomiest spot in an area, staying clear of keys (each treated as a disc of radius avoidR).
+  function pickLabelPoint(samples, keys, avoidR) {
+    let best = samples[0], bestS = -Infinity;
+    for (const s of samples) {
+      let score = s.clear;
+      for (const k of keys || []) score = Math.min(score, Math.hypot(s.x - k.x, s.y - k.y) - avoidR);
+      if (score > bestS) { bestS = score; best = s; }
+    }
+    return { x: best.x, y: best.y };
+  }
   function section(P, I, F, scale) {
     const s = computeSection(P, I, F, scale);
     if (s.error) return { error: s.error, loops: [], regions: [] };
@@ -1294,7 +1336,7 @@ const KMCore = (() => {
 
   return {
     parseSTL, parseOBJ, prepareMesh, fillHoles, edgeReport, volume, bounds, diag,
-    frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, keyGeometrySpec, KEY_DEFAULTS,
+    frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
 })();
