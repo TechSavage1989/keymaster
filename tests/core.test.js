@@ -303,6 +303,36 @@ console.log('keys with their own settings');
   check('the key type stays the same for the whole cut', K.keyCfg(cfg, { o: { type: 'magnet', diameter: 3 } }).type === 'peg' && K.keyCfg(cfg, { o: { type: 'magnet', diameter: 3 } }).diameter === 3);
 }
 
+console.log('keys sized to fit each area');
+{
+  const lad = (c) => K.sizeLadder(cfgOf(c)).map(([d]) => d);
+  check('filament sizes run from the largest set down to 2.5 mm', JSON.stringify(lad({ type: 'peg', diameter: 5, sizeMin: 2.5 })) === '[5,4.5,4,3.5,3,2.5]', lad({ type: 'peg', diameter: 5, sizeMin: 2.5 }));
+  check('resin sizes go down to 1 mm', lad({ type: 'peg', diameter: 5, printer: 'resin', sizeMin: 1 }).slice(-1)[0] === 1);
+  check('pegs are 1.2 times as long as wide, dowel pins 2.5 times', K.sizeLadder(cfgOf({ type: 'peg', diameter: 5, sizeMin: 5 }))[0][1] === 6 && K.sizeLadder(cfgOf({ type: 'dowel', diameter: 4, sizeMin: 4 }))[0][1] === 10);
+  check('magnets come in standard sizes', JSON.stringify(K.sizeLadder(cfgOf({ type: 'magnet', diameter: 6 }))) === '[[6,3],[5,2],[4,2],[3,1.5],[3,1],[2,1]]', K.sizeLadder(cfgOf({ type: 'magnet', diameter: 6 })));
+  // a bar W mm wide: a key fits when its width plus two gaps and two walls is under W
+  const barAt = (W) => { const m = K.prepareMesh({ positions: gridCube(3).positions.map((v, i) => v * [60, W, 30][i % 3]), indices: null }); const F = K.frameFromNormal([0, 0, 1], [30, W / 2, 15]); return { m, F }; };
+  const fit = (W, extra) => { const { m, F } = barAt(W), c = cfgOf({ type: 'peg', diameter: 5, length: 6, sizeMin: 2.5, ...extra }); const an = K.analyzePlane(m.positions, m.indices, F, c, 70); return { keys: K.autoFitKeys(an, c, 1, new Set()), an, c, m, F }; };
+  const wide = fit(20, {});
+  check('a roomy area gets the largest size', wide.keys.length === 1 && wide.keys[0].a.diameter === 5 && wide.keys[0].a.length === 6, wide.keys);
+  const mid = fit(6, {}); // 6 - 0.4 gap - 2.4 wall leaves 3.2 mm
+  check('a 6 mm bar gets a 3 mm key', mid.keys.length === 1 && mid.keys[0].a.diameter === 3 && mid.keys[0].a.length === 3.5, mid.keys);
+  check('the fitted key passes its checks', K.evaluateKeys(mid.an, mid.keys, mid.c, new Set()).every(e => e.ok));
+  const rm = K.cutMesh(mid.m.positions, mid.m.indices, mid.F, { scale: 70, cfg: mid.c, keys: mid.keys });
+  check('cutting with a fitted key gives sealed parts', rm.parts.length === 2 && allClosed(rm.parts));
+  const thinF = fit(3, {}); // filament can't go below 2.5 mm, which needs 5.3 mm
+  check('a 3 mm bar has no room for a filament key, and says it tried the smallest', thinF.keys.length === 0 && thinF.keys.empty.length === 1 && thinF.keys.empty[0].smallest, thinF.keys.empty);
+  const thinR = fit(3.2, { printer: 'resin', sizeMin: 1, clearance: 0.1, margin: 0.8 }); // 3.2 - 0.2 - 1.6 leaves 1.4: room for 1.2, not 1.6
+  check('a 3.2 mm bar takes a 1.2 mm resin key', thinR.keys.length === 1 && thinR.keys[0].a.diameter === 1.2, thinR.keys);
+  const mag = fit(9, { type: 'magnet', diameter: 10 }); // 9 - 0.4 - 2.4 leaves 6.2 mm: a 6 × 3 mm magnet
+  check('a magnet pocket gets the biggest standard magnet that fits', mag.keys.length === 1 && mag.keys[0].a.diameter === 6 && mag.keys[0].a.length === 3, mag.keys);
+  const sturdy = fit(12, {}); // room for 8.8 mm, but half the 12 mm width is 6, so 5 (the largest allowed) is fine; at 8 mm wide, 4
+  const half = fit(8, { diameter: 8 });
+  check('a fitted key is at most half the area\u2019s width, for sturdy walls', half.keys.length === 1 && half.keys[0].a.diameter <= 4, half.keys);
+  // the owner's own size still wins over the fitted one
+  check('a key’s own size overrides the fitted size', K.keyCfg(cfgOf({}), { a: { diameter: 3, length: 3.5 }, o: { diameter: 2 } }).diameter === 2 && K.keyCfg(cfgOf({}), { a: { diameter: 3, length: 3.5 } }).length === 3.5);
+}
+
 console.log('keys in narrow areas');
 {
   // square pegs, 45% taper, 5 mm walls (an owner's report): the key fits only on a 0.3 mm strip down the middle of a bar
