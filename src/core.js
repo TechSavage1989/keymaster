@@ -1611,6 +1611,89 @@ const KMCore = (() => {
     return top.length > 1 ? top : [];
   }
 
+  /* ---------- surface regions ----------
+     Split the surface into regions wherever it turns sharply (a crease, a hem, a panel edge), like ZBrush's
+     auto polygroups: neighbouring triangles join when the angle between them is under `angle` degrees. Specks
+     smaller than `minFrac` of the total area (sculpted texture, noise) melt into the neighbour they share the
+     longest border with. These borders are the lines a curved cut will follow. */
+  function segmentSurface(P, I, opts = {}) {
+    const angle = opts.angle === undefined ? 35 : opts.angle, minFrac = opts.minFrac === undefined ? 0.003 : opts.minFrac;
+    const nt = I.length / 3, nv = P.length / 3;
+    const N = new Float64Array(nt * 3), A = new Float64Array(nt);
+    let total = 0;
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]);
+      const L = Math.hypot(n[0], n[1], n[2]);
+      A[t] = L / 2; total += L / 2;
+      if (L > 0) { N[3 * t] = n[0] / L; N[3 * t + 1] = n[1] / L; N[3 * t + 2] = n[2] / L; }
+    }
+    // triangle neighbours across each edge, with the edge's length
+    const first = new Map(), pairs = [];
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
+      const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a;
+      const f = first.get(key);
+      if (f === undefined) first.set(key, t);
+      else { first.delete(key); pairs.push(f, t, a, b); }
+    }
+    const par = new Int32Array(nt);
+    for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    const cosA = Math.cos((angle * Math.PI) / 180);
+    for (let i = 0; i < pairs.length; i += 4) {
+      const s = pairs[i], q = pairs[i + 1];
+      if (N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2] >= cosA) { const x = find(s), y = find(q); if (x !== y) par[x] = y; }
+    }
+    // melt specks into the neighbour they share the most border with, smallest first, until none are left
+    const minA = total * minFrac;
+    for (let pass = 0; pass < 12; pass++) {
+      const area = new Map();
+      for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
+      const border = new Map();
+      for (let i = 0; i < pairs.length; i += 4) {
+        const x = find(pairs[i]), y = find(pairs[i + 1]);
+        if (x === y) continue;
+        const a = 3 * pairs[i + 2], b = 3 * pairs[i + 3], len = Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]);
+        for (const [g, h] of [[x, y], [y, x]]) { if (!border.has(g)) border.set(g, new Map()); const m = border.get(g); m.set(h, (m.get(h) || 0) + len); }
+      }
+      const small = [...area.entries()].filter(([, a]) => a < minA).sort((a, b) => a[1] - b[1]);
+      if (!small.length) break;
+      let merged = 0;
+      for (const [g] of small) {
+        const r = find(g);
+        if (r !== g) continue; // already merged this pass
+        const m = border.get(g);
+        if (!m) continue;
+        let best = -1, bl = -1;
+        for (const [h, len] of m) { const hr = find(h); if (hr !== g && len > bl) { bl = len; best = hr; } }
+        if (best >= 0) { par[g] = best; merged++; }
+      }
+      if (!merged) break;
+    }
+    // number the regions, largest first
+    const area = new Map();
+    for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
+    const order = [...area.entries()].sort((a, b) => b[1] - a[1]);
+    const id = new Map(order.map(([r], i) => [r, i]));
+    const groupOf = new Int32Array(nt);
+    for (let t = 0; t < nt; t++) groupOf[t] = id.get(find(t));
+    const borders = [];
+    for (let i = 0; i < pairs.length; i += 4) if (groupOf[pairs[i]] !== groupOf[pairs[i + 1]]) borders.push(pairs[i], pairs[i + 1], pairs[i + 2], pairs[i + 3]);
+    return { groupOf, count: order.length, areas: order.map(([, a]) => a), borders: new Int32Array(borders) };
+  }
+  // Border edges as line segments, nudged a hair off the surface so they draw on top of it.
+  function regionBorderLines(P, I, seg, lift) {
+    const b = seg.borders, out = new Float32Array((b.length / 4) * 6), N = (t) => {
+      const a = 3 * I[3 * t], c = 3 * I[3 * t + 1], d = 3 * I[3 * t + 2];
+      return norm3(cross3([P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]], [P[d] - P[a], P[d + 1] - P[a + 1], P[d + 2] - P[a + 2]]));
+    };
+    for (let i = 0, o = 0; i < b.length; i += 4) {
+      const n0 = N(b[i]), n1 = N(b[i + 1]), n = norm3([n0[0] + n1[0], n0[1] + n1[1], n0[2] + n1[2]]);
+      for (const v of [b[i + 2], b[i + 3]]) { out[o++] = P[3 * v] + n[0] * lift; out[o++] = P[3 * v + 1] + n[1] * lift; out[o++] = P[3 * v + 2] + n[2] * lift; }
+    }
+    return out;
+  }
+
   /* ---------- the cut ---------- */
   // Every exported part must be a closed solid. Real sculpts carry microscopic defects (self-crossing folds,
   // near-duplicate points) that can still defeat the cap at one exact plane position, so check the result and,
@@ -2004,6 +2087,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
+    segmentSurface, regionBorderLines,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
 })();
