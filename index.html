@@ -220,6 +220,10 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .shape-grid button:hover { color: var(--ink); }
 .shape-grid button[aria-pressed="true"] { background: var(--field); color: var(--ink); border-color: color-mix(in srgb, var(--ink) 55%, var(--line)); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 .shape-help { margin-top: 8px; }
+.taper .slider { margin-top: 10px; }
+.taper .slider output { min-width: 44px; }
+.taper p { margin-top: 6px; }
+.taper .check + p { margin-top: 4px; }
 .direction .check { margin-top: 4px; }
 .direction .row { margin-top: 8px; }
 .areas { margin-top: 14px; }
@@ -1440,10 +1444,18 @@ const KMCore = (() => {
   };
   function keyGeometrySpec(cfg) {
     const r = cfg.diameter / 2, c = cfg.clearance, ca = cfg.clearance + 0.1;
-    const taper = cfg.type === 'peg' && cfg.taper ? 0.8 : 1;
+    // Taper (pegs only): percent the tip narrows, 0 straight to 100 a point (kept at 2% of the width so the tip
+    // stays a real, printable outline). Older settings stored it as on/off, which meant 20%.
+    const pct = cfg.type !== 'peg' ? 0 : typeof cfg.taper === 'number' ? Math.max(0, Math.min(100, cfg.taper)) : cfg.taper ? 20 : 0;
+    const taper = Math.max(0.02, 1 - pct / 100);
+    const match = pct > 0 && cfg.taperSocket !== false; // socket narrows with the peg, or stays straight
+    // The fit gap is meant at right angles to the wall: on a sloping wall, a gap c measured across is only c·cosθ
+    // at right angles, so grow a matching socket by c / cosθ, using the steepest slope of the shape.
+    const slope = cfg.length > 0 ? (r * (1 - taper)) / cfg.length : 0;
+    const cs = match ? c * Math.sqrt(1 + slope * slope) : c;
     const shape = shapeFor(cfg);
-    const res = profileRes(r + c);
-    const sock = keyProfile(shape, r, c, 0, res);
+    const res = profileRes(r + cs);
+    const sock = keyProfile(shape, r, cs, 0, res);
     let sockets; // [{side:-1|+1, depth}]
     if (cfg.type === 'peg') {
       const s = cfg.pegSide === 'above' ? -1 : +1; // socket goes into the side opposite the peg
@@ -1451,7 +1463,7 @@ const KMCore = (() => {
     } else if (cfg.type === 'dowel') sockets = [{ side: -1, depth: cfg.length / 2 + ca }, { side: +1, depth: cfg.length / 2 + ca }];
     else sockets = [{ side: -1, depth: cfg.length + ca }, { side: +1, depth: cfg.length + ca }];
     const fit = profileFit(sock);
-    return { r, c, ca, taper, sockets, shape, res, outer: shape === 'round' ? r + c : fit.outer, inner: shape === 'round' ? r + c : fit.inner };
+    return { r, c, cs, ca, taper, taperPct: pct, sockTip: match ? taper : 1, sockets, shape, res, outer: shape === 'round' ? r + cs : fit.outer, inner: shape === 'round' ? r + cs : fit.inner };
   }
 
   /* ---------- key shapes ----------
@@ -1535,7 +1547,7 @@ const KMCore = (() => {
   }
   // Outline points of a key's footprint (socket size), spaced evenly, for checking it against an area's edge.
   function footprintOf(spec, angle) {
-    const prof = keyProfile(spec.shape, spec.r, spec.c, angle, spec.res);
+    const prof = keyProfile(spec.shape, spec.r, spec.cs, angle, spec.res);
     let per = 0;
     for (let i = 0; i < prof.length; i++) { const a = prof[i], b = prof[(i + 1) % prof.length]; per += Math.hypot(b[0] - a[0], b[1] - a[1]); }
     const step = per / 40, pts = [];
@@ -1754,11 +1766,10 @@ const KMCore = (() => {
           let role, grow, depth, dir, tipR = spec.r;
           if (cfg.type === 'peg') {
             const pegSide = cfg.pegSide === 'above' ? +1 : -1;
-            if (side === pegSide) { role = 'peg'; grow = 0; depth = cfg.length; dir = -side; }
-            else { role = 'socket'; grow = spec.c; depth = cfg.length + spec.ca; dir = side; }
-            tipR = spec.r * spec.taper;
+            if (side === pegSide) { role = 'peg'; grow = 0; depth = cfg.length; dir = -side; tipR = spec.r * spec.taper; }
+            else { role = 'socket'; grow = spec.cs; depth = cfg.length + spec.ca; dir = side; tipR = spec.r * spec.sockTip; }
           } else {
-            role = 'socket'; grow = spec.c; dir = side;
+            role = 'socket'; grow = spec.cs; dir = side;
             depth = cfg.type === 'dowel' ? cfg.length / 2 + spec.ca : cfg.length + spec.ca;
           }
           const prof = keyProfile(spec.shape, spec.r, grow, k.angle, spec.res);
@@ -2082,7 +2093,7 @@ const KMCore = (() => {
     wire: false,
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: false, pegSide: 'below', perArea: 2, align: true, turn: 0 },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, pegSide: 'below', perArea: 2, align: true, turn: 0 },
     cut: { mode: 'translate', keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   const history = { past: [], future: [] };
@@ -2606,7 +2617,7 @@ const KMCore = (() => {
       const an = state.cut.analysis, sec = an && !an.base.error ? an.base : null;
       const ang = K.keyAngle(sec || { regions: [] }, sec ? K.regionAt(sec, k.x, k.y) : -1, cfg);
       const prof = (rr, dd) => K.keyProfile(spec.shape, rr, dd, ang, spec.res);
-      const disc = new THREE.Mesh(fanGeometry(prof(spec.r, spec.c), 0), new THREE.MeshBasicMaterial({ color: bad ? 0xe5484d : 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: active ? 0.95 : 0.78 }));
+      const disc = new THREE.Mesh(fanGeometry(prof(spec.r, spec.cs), 0), new THREE.MeshBasicMaterial({ color: bad ? 0xe5484d : 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: active ? 0.95 : 0.78 }));
       disc.position.z = z; disc.renderOrder = 5;
       g.add(disc);
       let z0, z1, tipR = spec.r;
@@ -3223,6 +3234,18 @@ const KMCore = (() => {
     return `<div class="shape-grid${shapes.length < 4 ? ' few' : ''}" role="group" aria-label="Key shape">${shapes.map(s =>
       `<button type="button" data-act="shape" data-value="${s}" aria-pressed="${s === cur}" title="${SHAPE_NAMES[s]}">${shapeIcon(s)}<span>${SHAPE_NAMES[s]}</span></button>`).join('')}</div>`;
   }
+  function taperField(c) {
+    const pct = K.keyGeometrySpec(c).taperPct;
+    const shape = K.keyGeometrySpec(c).shape;
+    const point = { round: 'a cone', square: 'a four-sided pyramid', hexagon: 'a six-sided pyramid', cross: 'a cross-shaped point', oval: 'an oval cone', slot: 'a wedge-like point', dshape: 'a cone with a flat side' }[shape];
+    const desc = pct === 0 ? 'Straight sides.' : pct >= 100 ? `Comes to a point, like ${point}.` : `The tip is ${100 - pct}% of the base width.`;
+    return `<div class="taper"><label class="slider"><span class="lbl">Taper</span>
+        <input type="range" id="taperPct" data-cfg="taper" min="0" max="100" step="5" value="${pct}" aria-describedby="taperDesc">
+        <output id="taperOut">${pct}%</output></label>
+      <p class="muted small" id="taperDesc">${desc} Tapered pegs find their way in more easily.</p>
+      ${pct > 0 ? `<label class="check"><input type="checkbox" data-cfg="taperSocket" ${c.taperSocket !== false ? 'checked' : ''}> Match the hole to the taper</label>
+      <p class="muted small">${c.taperSocket !== false ? 'The hole narrows with the peg for a snug, even fit.' : 'The hole stays straight, so the peg slides in easily but has more play.'}</p>` : ''}</div>`;
+  }
   function normTurn(v) { let a = ((Math.round(v) % 360) + 360) % 360; if (a > 180) a -= 360; return a; }
   function numField(field, label, value, opts = {}) {
     return `<label class="num"><span>${label}</span><span class="num-wrap"><input type="number" inputmode="decimal" data-cfg="${field}" value="${value}" step="${opts.step || 0.1}" min="${opts.min || 0}" ${opts.max ? `max="${opts.max}"` : ''}><em>${opts.unit || 'mm'}</em></span></label>`;
@@ -3346,7 +3369,7 @@ const KMCore = (() => {
         <label class="check"><input type="checkbox" data-cfg="align" ${c.align !== false ? 'checked' : ''}> Line up with each area’s long side</label>
         <div class="row two">${numField('turn', 'Turn by', c.turn || 0, { min: -180, max: 180, step: 15, unit: '°' })}</div></div>` : ''}
       ${c.type === 'peg' ? `<div class="field"><span class="lbl">Pegs go on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}
-        <label class="check"><input type="checkbox" data-cfg="taper" ${c.taper ? 'checked' : ''}> Taper the pegs for easier fitting</label></div>` : ''}
+        ${taperField(c)}</div>` : ''}
       <div class="row keyrow">
         <label class="num"><span>Keys per area</span><select data-cfg="perArea">${[1, 2, 3, 4].map(n => `<option ${n === c.perArea ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <button class="btn" data-act="auto-keys">${state.cut.auto ? 'Re-place keys' : 'Auto-place keys'}</button>
@@ -3439,6 +3462,10 @@ const KMCore = (() => {
       analysisTimer = setTimeout(() => { state.cut.skip.clear(); runAnalysis(); }, 220);
     } else if (t.id === 'explode') {
       state.explode = parseFloat(t.value); applyExplode();
+    } else if (t.id === 'taperPct') { // live preview while dragging; the change event re-checks the keys
+      state.cfg.taper = parseFloat(t.value);
+      const out = $('#taperOut'); if (out) out.textContent = `${Math.round(state.cfg.taper)}%`;
+      renderKeyMarkers();
     }
   });
 

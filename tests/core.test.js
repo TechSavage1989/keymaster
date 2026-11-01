@@ -200,6 +200,43 @@ console.log('key shapes');
     }
   }
 
+  // taper: any amount on any shape, with a matching or straight socket
+  check('old on/off taper setting still means 20%', K.keyGeometrySpec(cfgOf({ type: 'peg', taper: true })).taper === 0.8 && K.keyGeometrySpec(cfgOf({ type: 'peg', taper: false })).taper === 1);
+  check('dowels and magnets never taper', K.keyGeometrySpec(cfgOf({ type: 'dowel', taper: 60 })).taper === 1 && K.keyGeometrySpec(cfgOf({ type: 'magnet', taper: 60 })).sockTip === 1);
+  for (const shape of K.KEY_SHAPES) {
+    for (const [pct, match] of [[50, true], [100, true], [100, false]]) {
+      const cfg = cfgOf({ type: 'peg', shape, diameter: 5, length: 6, taper: pct, taperSocket: match });
+      const spec = K.keyGeometrySpec(cfg), tag = `${shape} ${pct}% ${match ? 'matching' : 'straight'} hole`;
+      const an = K.analyzePlane(s.positions, s.indices, F, cfg, 40);
+      const keys = K.autoPlaceKeys(an, cfg, 3, new Set());
+      const res = K.cutMesh(s.positions, s.indices, F, { scale: 40, cfg, keys });
+      const ang = K.keyAngle(an.base, 0, cfg), P = (rr, dd) => K.keyProfile(spec.shape, rr, dd, ang, spec.res);
+      const expect = V0 + keys.length * (prismatoid(P(spec.r, 0), P(spec.r * spec.taper, 0), 6) - prismatoid(P(spec.r, spec.cs), P(spec.r * spec.sockTip, spec.cs), 6 + spec.ca));
+      check(`${tag}: 3 keys, sealed parts, volume adds up`, keys.length === 3 && allClosed(res.parts) && Math.abs(sumVol(res.parts) - expect) / V0 < 1e-4, [keys.length, sumVol(res.parts), expect]);
+      // the gap, measured at right angles to the sloping wall, is never less than the setting at any height
+      let worst = Infinity;
+      const slope = (spec.r * (1 - spec.taper)) / 6;
+      for (const z of [0, 1.5, 3, 4.5, 6]) {
+        const pr = spec.r * (1 - (1 - spec.taper) * z / 6), sr = spec.r * (1 - (1 - spec.sockTip) * z / (6 + spec.ca));
+        const pg = K.keyProfile(spec.shape, pr, 0, 0, spec.res), sk = K.keyProfile(spec.shape, sr, spec.cs, 0, spec.res);
+        // a matching hole's wall slopes with the peg, so the true gap is the gap across times cosθ; a straight hole's wall is upright
+        worst = Math.min(worst, Math.min(polyDist(pg, sk), polyDist(sk, pg)) / (match ? Math.sqrt(1 + slope * slope) : 1));
+      }
+      check(`${tag}: gap at right angles to the wall is at least the setting`, worst >= 0.2 * 0.97, worst);
+    }
+  }
+  {
+    const cone = cfgOf({ type: 'peg', shape: 'round', diameter: 5, length: 6, taper: 100 });
+    const rc = K.cutMesh(s.positions, s.indices, F, { scale: 40, cfg: cone, keys: [{ x: 0, y: 0 }] });
+    const lower = rc.parts.find(p => p.side === 'below'), Pl = lower.positions;
+    let top = -Infinity; for (let i = 2; i < Pl.length; i += 3) top = Math.max(top, Pl[i]);
+    let w = 0; for (let i = 0; i < Pl.length; i += 3) if (Pl[i + 2] > top - 1e-4) w = Math.max(w, Math.hypot(Pl[i], Pl[i + 1]) * 2);
+    check('100% taper comes to a point (tip under 0.15 mm)', Math.abs(top - (1.3 + 6)) < 1e-3 && w < 0.15, [top, w]);
+    const half = K.cutMesh(s.positions, s.indices, F, { scale: 40, cfg: { ...cone, taper: 50 }, keys: [{ x: 0, y: 0 }] }).parts.find(p => p.side === 'below').positions;
+    let w2 = 0; for (let i = 0; i < half.length; i += 3) if (half[i + 2] > 1.3 + 6 - 1e-4) w2 = Math.max(w2, Math.hypot(half[i], half[i + 1]) * 2);
+    check('50% taper tip is half the width', Math.abs(w2 - 2.5) < 0.05, w2);
+  }
+
   // a slot lines up with a long narrow area and fits where a round key of the same length can't
   const bar = K.prepareMesh({ positions: gridCube(3).positions.map((v, i) => v * [60, 9, 20][i % 3]), indices: null });
   const Fb = K.frameFromNormal([0, 0, 1], [30, 4.5, 10]);
