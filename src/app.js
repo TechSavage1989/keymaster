@@ -27,7 +27,7 @@
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, pegSide: 'below', perArea: 2, align: true, turn: 0 },
-    cut: { keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
+    cut: { mode: 'translate', keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   const history = { past: [], future: [] };
   let uid = 1;
@@ -144,7 +144,16 @@
     rings[ax] = m;
     ringGroup.add(m);
   }
-  planeGroup.add(planeSheet, planeFrame, capMesh, regionGroup, keyGroup, ringGroup);
+  // Tilt mode: drag anywhere on the plane to tip it like the edge of a tray. Grips mark the edges; the hinge
+  // line shows what it pivots about while dragging.
+  const gripGroup = new THREE.Group();
+  const gripMat = new THREE.MeshBasicMaterial({ color: 0x2a2100 });
+  const gripGeom = new THREE.SphereGeometry(1, 16, 12);
+  for (let i = 0; i < 4; i++) { const g = new THREE.Mesh(gripGeom, gripMat); g.renderOrder = 6; gripGroup.add(g); }
+  gripGroup.visible = false;
+  const hinge = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x2a2100 }));
+  hinge.visible = false; hinge.renderOrder = 6;
+  planeGroup.add(planeSheet, planeFrame, capMesh, regionGroup, keyGroup, ringGroup, gripGroup, hinge);
 
   const clipBelow = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
   const clipAbove = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
@@ -289,7 +298,8 @@
     preview.stencil = makeStencilGroup(v.geom, clipBelow);
     scene.add(preview.ghost, preview.stencil);
     planeGroup.visible = true;
-    if (tc.object !== planeGroup) tc.attach(planeGroup);
+    if (state.cut.mode === 'translate') { if (tc.object !== planeGroup) tc.attach(planeGroup); }
+    else tc.detach();
     preview.partId = p.id;
   }
 
@@ -384,6 +394,8 @@
     const tile = Math.max(3, R / 9);
     hatch.repeat.set((R * 3.2) / tile, (R * 3.2) / tile);
     const h = s / 2;
+    const gr = Math.max(0.6, R * 0.035);
+    [[h, 0], [-h, 0], [0, h], [0, -h]].forEach(([x, y], i) => { const g = gripGroup.children[i]; g.position.set(x, y, 0); g.scale.set(gr, gr, gr); });
     const ringR = ringRadius(), tube = Math.max(0.18, R * 0.011);
     for (const ax of ['x', 'y']) {
       rings[ax].geometry.dispose();
@@ -395,14 +407,19 @@
     planeFrame.geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-h, -h, 0), new THREE.Vector3(h, -h, 0), new THREE.Vector3(h, h, 0), new THREE.Vector3(-h, h, 0)]);
   }
   function ringRadius() { return state.cut.R * 0.62; }
-  function attachGizmo() { // the arrow slides the plane; the rings tilt it
+  // Slide mode shows the arrow; Tilt mode hides it and lets you tip the plane by dragging it. The rings work in both.
+  function attachGizmo() {
+    const mode = state.cut.mode;
     tc.setMode('translate');
     tc.showX = false; tc.showY = false; tc.showZ = true;
-    if (selectedPart()) { if (tc.object !== planeGroup) tc.attach(planeGroup); }
+    if (mode === 'translate' && selectedPart()) { if (tc.object !== planeGroup) tc.attach(planeGroup); }
     else tc.detach();
+    planeSheet.material.opacity = mode === 'rotate' ? 0.17 : 0.08;
+    gripGroup.visible = mode === 'rotate';
     updateHint();
     markDirty();
   }
+  function setGizmoMode(mode) { state.cut.mode = mode; attachGizmo(); }
   tc.addEventListener('dragging-changed', (e) => {
     orbit.enabled = !e.value;
     if (e.value) { state.cut.stale = true; renderKeyMarkers(); }
@@ -541,7 +558,7 @@
   function placeAreaTags() {
     const tags = tagLayer.children;
     if (!tags.length) return;
-    const show = !!selectedPart() && !state.cut.stale && !ptr.ring && areaCount() > 1 && cameraOnClearSide();
+    const show = !!selectedPart() && !state.cut.stale && !ptr.ring && !ptr.tilt && areaCount() > 1 && cameraOnClearSide();
     tagLayer.hidden = !show;
     if (!show) return;
     planeGroup.updateMatrixWorld(true);
@@ -923,7 +940,7 @@
     const n = planeNormal();
     return n.dot(camera.position.clone().sub(planeGroup.position)) > 0;
   }
-  const ptr = { down: false, x: 0, y: 0, t: 0, dragKey: -1, ring: null, hoverRing: null };
+  const ptr = { down: false, x: 0, y: 0, t: 0, dragKey: -1, ring: null, hoverRing: null, tilt: null };
   function toScreen(v) {
     const r = canvas.getBoundingClientRect();
     const q = v.clone().project(camera);
@@ -1021,12 +1038,70 @@
   }
   // For the interface tests: where a tilt ring is on screen.
   window.KeymasterDebug = { ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
+  function startTilt(h, e) {
+    const L = Math.hypot(h.x, h.y);
+    const dir = L > 1e-6 ? { x: h.x / L, y: h.y / L } : { x: 1, y: 0 };
+    ptr.tilt = { dir, lever: Math.max(L, state.cut.R * 0.35), lastX: e.clientX, lastY: e.clientY };
+    orbit.enabled = false;
+    canvas.setPointerCapture(e.pointerId);
+    canvas.style.cursor = 'grabbing';
+    const half = state.cut.R * 1.15, z = Math.max(0.03, state.cut.R * 0.0009);
+    hinge.geometry.dispose();
+    hinge.geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(dir.y * half, -dir.x * half, z), new THREE.Vector3(-dir.y * half, dir.x * half, z)]);
+    hinge.visible = true;
+    state.cut.stale = true;
+    renderKeyMarkers();
+  }
+  function moveTilt(e) {
+    const t = ptr.tilt;
+    const dx = e.clientX - t.lastX, dy = e.clientY - t.lastY;
+    t.lastX = e.clientX; t.lastY = e.clientY;
+    if (!dx && !dy) return;
+    planeGroup.updateMatrixWorld(true);
+    camera.updateMatrixWorld();
+    const n = planeNormal();
+    const pw = planeGroup.localToWorld(new THREE.Vector3(t.dir.x * t.lever, t.dir.y * t.lever, 0));
+    const eps = t.lever * 0.05;
+    const a = toScreen(pw), b = toScreen(pw.clone().add(n.clone().multiplyScalar(eps)));
+    const sx = (b[0] - a[0]) / eps, sy = (b[1] - a[1]) / eps; // screen pixels per mm along the normal
+    const view = pw.clone().sub(camera.position).normalize();
+    let perp = new THREE.Vector3().crossVectors(view, n);
+    if (perp.lengthSq() < 1e-6) perp = new THREE.Vector3().crossVectors(view, new THREE.Vector3(1, 0, 0));
+    perp.normalize();
+    const c = toScreen(pw.clone().add(perp.multiplyScalar(eps)));
+    const pxPerMm = Math.max(1e-6, Math.hypot(c[0] - a[0], c[1] - a[1]) / eps);
+    const s2 = sx * sx + sy * sy;
+    // Move the grabbed edge along the normal by however far the mouse moved in that direction on screen.
+    const lift = s2 > Math.pow(pxPerMm * 0.25, 2) ? (dx * sx + dy * sy) / s2 : -dy / pxPerMm;
+    const theta = Math.atan2(lift, t.lever) * (e.shiftKey ? 0.25 : 1);
+    planeGroup.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(t.dir.y, -t.dir.x, 0), theta));
+    const ti = tiltInfo();
+    showDragChip(e, ti.deg < 0.05 ? `Square to ${ti.axis}` : `${ti.deg.toFixed(1)}° off ${ti.axis}`);
+    onPlaneMoved();
+  }
+  function endTilt() {
+    ptr.tilt = null;
+    hinge.visible = false;
+    orbit.enabled = true;
+    canvas.style.cursor = '';
+    showDragChip(null);
+    computeSliderRange();
+    state.cut.skip.clear();
+    scheduleAnalysis(40);
+    renderInspector();
+  }
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     if (tc.dragging || tc.axis) return;
-    ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = performance.now(); ptr.dragKey = -1; ptr.ring = null;
+    ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = performance.now(); ptr.dragKey = -1; ptr.ring = null; ptr.tilt = null;
     const ring = pickRing(e);
     if (ring) { startRing(ring, e); return; }
+    if (selectedPart() && state.cut.mode === 'rotate') {
+      const h = planeHit(e);
+      if (onSheet(h)) startTilt(h, e);
+      return;
+    }
     const k = pickKey(e);
     if (k >= 0) {
       ptr.dragKey = k;
@@ -1038,10 +1113,12 @@
   });
   canvas.addEventListener('pointermove', (e) => {
     if (ptr.ring) { moveRing(e); return; }
+    if (ptr.tilt) { moveTilt(e); return; }
     if (!ptr.down && selectedPart() && !tc.dragging) {
       const ring = tc.axis ? null : pickRing(e);
       setRingHover(ring ? ring.ax : null);
       if (ring) { canvas.style.cursor = 'grab'; return; }
+      if (state.cut.mode === 'rotate') { canvas.style.cursor = onSheet(planeHit(e)) ? 'grab' : ''; return; }
     }
     if (ptr.dragKey >= 0) {
       const h = planeHit(e);
@@ -1059,11 +1136,12 @@
     const ri = h ? K.regionAt(state.cut.analysis.base, h.x, h.y) : -1;
     return state.cut.skip.has(ri) ? ri : -1;
   }
-  canvas.addEventListener('pointercancel', () => { if (ptr.ring) endRing(); if (ptr.dragKey >= 0) { ptr.dragKey = -1; orbit.enabled = true; } ptr.down = false; });
+  canvas.addEventListener('pointercancel', () => { if (ptr.ring) endRing(); if (ptr.tilt) endTilt(); if (ptr.dragKey >= 0) { ptr.dragKey = -1; orbit.enabled = true; } ptr.down = false; });
   canvas.addEventListener('pointerup', (e) => {
     if (!ptr.down) return;
     ptr.down = false;
     if (ptr.ring) { endRing(); return; }
+    if (ptr.tilt) { endTilt(); return; }
     if (ptr.dragKey >= 0) {
       ptr.dragKey = -1;
       orbit.enabled = true;
@@ -1079,6 +1157,7 @@
   });
   function handleClick(e) {
     const p = selectedPart();
+    if (p && state.cut.mode === 'rotate' && onSheet(planeHit(e))) return;
     if (p && cameraOnClearSide() && state.cut.analysis && !state.cut.stale) {
       const h = planeHit(e);
       if (h) {
@@ -1126,6 +1205,8 @@
       case 'Enter': if (p) { e.preventDefault(); doCut(); } break;
       case 'Delete': case 'Backspace': if (p && state.cut.active >= 0) { e.preventDefault(); removeKey(state.cut.active); } break;
       case 'f': case 'F': frameAll(p || undefined); break;
+      case 'w': case 'W': if (p) { setGizmoMode('translate'); renderInspector(); } break;
+      case 'e': case 'E': if (p) { setGizmoMode('rotate'); renderInspector(); } break;
       case 'x': case 'X': if (p) alignPlane('x'); break;
       case 'y': case 'Y': if (p) alignPlane('y'); break;
       case 'z': case 'Z': if (p) alignPlane('z'); break;
@@ -1164,6 +1245,7 @@
     const p = selectedPart();
     if (!state.parts.length) t = '';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
+    else if (state.cut.mode === 'rotate') t = coarse ? 'Drag the yellow plane or a blue ring to tip it. Tap Slide to move it instead.' : 'Drag the yellow plane or a blue ring to tip it. Hold Shift for fine control. Press W to slide.';
     else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
     else if (state.cfg.type === 'none') t = 'Drag the arrow to slide the cut, or a blue ring to tilt it. Then press Enter to cut.';
     else t = coarse ? 'Drag the arrow to slide, or a ring to tilt. Tap the cut face to add a key, drag keys to move them.' : 'Drag the arrow to slide, or a ring to tilt. Click the cut face to add a key, drag keys to move them, right-click to remove.';
@@ -1355,7 +1437,10 @@
     </div>
     <div class="ins-section">
       <h3>Cut plane</h3>
-      <p class="muted small mode-help">Drag the arrow to slide the cut. Drag a blue ring to tilt it${coarse ? '' : ', and hold Shift to snap to 5° steps'}. Or type exact values below.</p>
+      ${seg('gizmo', state.cut.mode, [['translate', 'Slide'], ['rotate', 'Tilt']])}
+      <p class="muted small mode-help">${state.cut.mode === 'rotate'
+        ? `Drag anywhere on the yellow plane to tip it. The edge you grab rises or falls, like lifting the edge of a tray${coarse ? '' : '. Hold Shift for fine control'}. The blue rings and the values below work too.`
+        : `Drag the arrow to slide the cut. Drag a blue ring to tilt it${coarse ? '' : ', and hold Shift to snap to 5° steps'}. Or type exact values below.`}</p>
       <div class="row align">
         <span class="lbl">Align</span>
         ${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="align" data-value="${a}" title="Press ${a.toUpperCase()}">${a.toUpperCase()}</button>`).join('')}
@@ -1430,6 +1515,7 @@
       case 'align': alignPlane(val); break;
       case 'flip': flipPlane(); break;
       case 'straighten': straighten(); break;
+      case 'gizmo': setGizmoMode(val); renderInspector(); updateHint(); break;
       case 'keytype': {
         if (c.type === val) break;
         c.type = val;
