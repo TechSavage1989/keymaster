@@ -1363,6 +1363,254 @@ const KMCore = (() => {
     return keys;
   }
 
+  /* ---------- cut suggestions ----------
+     Three kinds, all pure geometry so they can run in a worker later:
+     - narrow points (wrists, ankles, necks, tails): slice along many directions, follow each limb from slice to
+       slice, and look for a cross-section that pinches in between wider ones, then tilt the plane to sit square
+       across the narrowest spot;
+     - panel lines and seams: sharp inward creases that lie together on one plane;
+     - separate pieces: solids that don't touch, which can be split apart without cutting. */
+  function sweepDirections(P) {
+    const dirs = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, -1, 0], [1, 0, 1], [1, 0, -1], [0, 1, 1], [0, 1, -1], [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1]].map(norm3);
+    for (const a of principalAxes(P)) if (dirs.every(d => Math.abs(d[0] * a[0] + d[1] * a[1] + d[2] * a[2]) < 0.97)) dirs.push(a);
+    return dirs;
+  }
+  function principalAxes(P) { // eigenvectors of the vertex covariance, by power iteration with deflation
+    const n = P.length / 3, step = Math.max(1, Math.floor(n / 20000));
+    let mx = 0, my = 0, mz = 0, c = 0;
+    for (let i = 0; i < n; i += step) { mx += P[3 * i]; my += P[3 * i + 1]; mz += P[3 * i + 2]; c++; }
+    mx /= c; my /= c; mz /= c;
+    const C = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < n; i += step) {
+      const d = [P[3 * i] - mx, P[3 * i + 1] - my, P[3 * i + 2] - mz];
+      for (let r = 0; r < 3; r++) for (let q = 0; q < 3; q++) C[3 * r + q] += d[r] * d[q];
+    }
+    const out = [];
+    for (let k = 0; k < 2; k++) {
+      let v = k ? [0.3, 1, 0.2] : [1, 0.4, 0.2];
+      for (let it = 0; it < 60; it++) {
+        let w = [C[0] * v[0] + C[1] * v[1] + C[2] * v[2], C[3] * v[0] + C[4] * v[1] + C[5] * v[2], C[6] * v[0] + C[7] * v[1] + C[8] * v[2]];
+        for (const u of out) { const d = w[0] * u[0] + w[1] * u[1] + w[2] * u[2]; w = [w[0] - d * u[0], w[1] - d * u[1], w[2] - d * u[2]]; }
+        const L = Math.hypot(w[0], w[1], w[2]);
+        if (L < 1e-12) break;
+        v = [w[0] / L, w[1] / L, w[2] / L];
+      }
+      out.push(v);
+    }
+    out.push(norm3(cross3(out[0], out[1])));
+    return out;
+  }
+  function regionCentroid(sec, reg) { // area centroid of an area (outline minus holes), in the plane's 2D coords
+    let A = 0, cx = 0, cy = 0;
+    for (const li of [reg.outer, ...reg.holes]) {
+      const xy = sec.loops[li].xy, n = xy.length / 2;
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const c = xy[2 * j] * xy[2 * i + 1] - xy[2 * i] * xy[2 * j + 1];
+        A += c; cx += (xy[2 * j] + xy[2 * i]) * c; cy += (xy[2 * j + 1] + xy[2 * i + 1]) * c;
+      }
+    }
+    return Math.abs(A) > 1e-12 ? [cx / (3 * A), cy / (3 * A)] : [sec.loops[reg.outer].xy[0], sec.loops[reg.outer].xy[1]];
+  }
+  const planePoint = (F, x, y) => [F.o[0] + F.u[0] * x + F.v[0] * y, F.o[1] + F.u[1] * x + F.v[1] * y, F.o[2] + F.u[2] * x + F.v[2] * y];
+  // One direction's sweep: the narrow points found while following areas from slice to slice.
+  function neckSweep(P, I, dir, scale, slices = 36) {
+    const n = P.length / 3;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < n; i++) { const s = P[3 * i] * dir[0] + P[3 * i + 1] * dir[1] + P[3 * i + 2] * dir[2]; if (s < lo) lo = s; if (s > hi) hi = s; }
+    const step = (hi - lo) / slices, minA = Math.pow(0.025 * scale, 2) * Math.PI / 4;
+    const layers = [];
+    for (let k = 1; k < slices; k++) {
+      const s = lo + step * k;
+      const F = frameFromNormal(dir, [dir[0] * s, dir[1] * s, dir[2] * s]);
+      const sec = section(P, I, F, scale);
+      const L = [];
+      if (!sec.error) for (const reg of sec.regions) {
+        if (reg.nested || reg.inverted || reg.area < minA * 0.25) continue;
+        const [cx, cy] = regionCentroid(sec, reg);
+        L.push({ area: reg.area, c: planePoint(F, cx, cy), chain: -1 });
+      }
+      layers.push(L);
+    }
+    // follow each area to the nearest area in the next slice; at a fork the closest branch carries on
+    const chains = [];
+    for (let k = 0; k < layers.length; k++) {
+      const prev = k ? layers[k - 1] : [];
+      const claims = new Map();
+      for (const r of layers[k]) {
+        let best = -1, bd = Infinity;
+        prev.forEach((q, j) => {
+          const d = Math.hypot(r.c[0] - q.c[0], r.c[1] - q.c[1], r.c[2] - q.c[2]);
+          if (d < 0.5 * (Math.sqrt(r.area) + Math.sqrt(q.area)) + step && d < bd) { bd = d; best = j; }
+        });
+        if (best >= 0 && (!claims.has(best) || claims.get(best).d > bd)) claims.set(best, { r, d: bd });
+      }
+      for (const [j, { r }] of claims) r.chain = prev[j].chain;
+      for (const r of layers[k]) {
+        if (r.chain < 0) { r.chain = chains.length; chains.push([]); }
+        chains[r.chain].push(r);
+      }
+    }
+    const found = [];
+    for (const ch of chains) {
+      if (ch.length < 5) continue;
+      for (let m = 2; m < ch.length - 2; m++) {
+        const a = ch[m].area;
+        if (a < minA || a > ch[m - 1].area || a > ch[m + 1].area) continue;
+        let before = 0, after = 0;
+        for (let q = Math.max(0, m - 10); q < m; q++) before = Math.max(before, ch[q].area);
+        for (let q = m + 1; q < Math.min(ch.length, m + 11); q++) after = Math.max(after, ch[q].area);
+        const pinch = a / Math.min(before, after);
+        if (pinch < 0.6) found.push({ kind: 'neck', normal: dir.slice(), point: ch[m].c, area: a, pinch });
+      }
+    }
+    return found;
+  }
+  // The area of the cut face that contains point p, for a plane through p with normal nrm (or null).
+  function areaAt(P, I, nrm, p, scale) {
+    const F = frameFromNormal(nrm, p);
+    const sec = section(P, I, F, scale);
+    if (sec.error) return null;
+    const ri = regionAt(sec, 0, 0);
+    if (ri < 0) return null;
+    const [cx, cy] = regionCentroid(sec, sec.regions[ri]);
+    return { area: sec.regions[ri].area, point: planePoint(F, cx, cy) };
+  }
+  // Merge narrow points found from several directions and tilt each plane until it sits square across the neck.
+  function refineNecks(P, I, found, scale, limit = 8) {
+    found.sort((a, b) => a.area - b.area);
+    const groups = [];
+    for (const f of found) {
+      const g = groups.find(g => Math.hypot(f.point[0] - g.point[0], f.point[1] - g.point[1], f.point[2] - g.point[2]) < 0.8 * Math.sqrt(Math.max(f.area, g.area)));
+      if (g) { g.votes++; g.pinch = Math.min(g.pinch, f.pinch); } else groups.push({ ...f, votes: 1 });
+    }
+    const out = [];
+    for (const g of groups) {
+      let nrm = g.normal, p = g.point, area = g.area;
+      for (const deg of [12, 6, 3, 1.5]) {
+        let improved = true, guard = 0;
+        while (improved && guard++ < 4) {
+          improved = false;
+          const F = frameFromNormal(nrm, p), r = (deg * Math.PI) / 180;
+          for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const t = norm3([nrm[0] * Math.cos(r) + (F.u[0] * a + F.v[0] * b) * Math.sin(r), nrm[1] * Math.cos(r) + (F.u[1] * a + F.v[1] * b) * Math.sin(r), nrm[2] * Math.cos(r) + (F.u[2] * a + F.v[2] * b) * Math.sin(r)]);
+            const res = areaAt(P, I, t, p, scale);
+            if (res && res.area < area * 0.999 && res.area > area * 0.3) { nrm = t; p = res.point; area = res.area; improved = true; break; }
+          }
+        }
+      }
+      out.push({ kind: 'neck', normal: nrm, point: p, area, width: 2 * Math.sqrt(area / Math.PI), score: (1 - g.pinch) * Math.min(1, 0.5 + 0.1 * g.votes) });
+    }
+    out.sort((a, b) => b.score - a.score);
+    // two groups can settle on the same neck after tilting
+    // and a long even neck (a bar, a forearm) is narrow all along it: keep one spot per neck
+    const sameNeck = (o, u) => {
+      const d = [o.point[0] - u.point[0], o.point[1] - u.point[1], o.point[2] - u.point[2]], len = Math.hypot(d[0], d[1], d[2]);
+      if (len < 0.6 * Math.sqrt(Math.max(o.area, u.area))) return true;
+      const par = Math.abs(o.normal[0] * u.normal[0] + o.normal[1] * u.normal[1] + o.normal[2] * u.normal[2]) > 0.985;
+      const along = Math.abs(d[0] * u.normal[0] + d[1] * u.normal[1] + d[2] * u.normal[2]);
+      const off = Math.sqrt(Math.max(0, len * len - along * along));
+      return par && off < 0.5 * Math.sqrt(Math.min(o.area, u.area)) && Math.abs(o.area - u.area) < 0.2 * Math.max(o.area, u.area);
+    };
+    const uniq = [];
+    for (const o of out) if (!uniq.some(u => sameNeck(o, u))) uniq.push(o);
+    return uniq.slice(0, limit);
+  }
+  // Sharp inward creases (valleys between faces), as short segments.
+  function creaseEdges(P, I, minDeg = 30) {
+    const nt = I.length / 3, first = new Map(), out = [];
+    const nrm = (t) => {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      return norm3(cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]));
+    };
+    const cosMin = Math.cos((minDeg * Math.PI) / 180), nv = P.length / 3;
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
+      const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], w = I[3 * t + (k + 2) % 3];
+      const key = a < b ? a * nv + b : b * nv + a;
+      const f = first.get(key);
+      if (f === undefined) { first.set(key, t * 3 + k); continue; }
+      first.delete(key);
+      const t0 = Math.floor(f / 3), n0 = nrm(t0), n1 = nrm(t);
+      if (n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2] > cosMin) continue;
+      // a valley: this triangle's far corner sits above the other triangle's plane
+      const up = (P[3 * w] - P[3 * a]) * n0[0] + (P[3 * w + 1] - P[3 * a + 1]) * n0[1] + (P[3 * w + 2] - P[3 * a + 2]) * n0[2];
+      if (up <= 0) continue;
+      const d = [P[3 * b] - P[3 * a], P[3 * b + 1] - P[3 * a + 1], P[3 * b + 2] - P[3 * a + 2]], len = Math.hypot(d[0], d[1], d[2]);
+      if (len > 0) out.push({ mid: [(P[3 * a] + P[3 * b]) / 2, (P[3 * a + 1] + P[3 * b + 1]) / 2, (P[3 * a + 2] + P[3 * b + 2]) / 2], dir: [d[0] / len, d[1] / len, d[2] / len], len });
+    }
+    return out;
+  }
+  // Planes that many crease segments lie in, scored by how much of the cut outline there runs along creases.
+  function creasePlanes(P, I, dirs, scale, edges, limit = 6) {
+    const bin = Math.max(0.2, scale * 0.0015), out = [];
+    const b = bounds(P);
+    for (const d of dirs) {
+      const hist = new Map();
+      for (const e of edges) {
+        if (Math.abs(e.dir[0] * d[0] + e.dir[1] * d[1] + e.dir[2] * d[2]) > 0.12) continue;
+        const s = e.mid[0] * d[0] + e.mid[1] * d[1] + e.mid[2] * d[2], k = Math.round(s / bin);
+        const h = hist.get(k) || { w: 0, sw: 0 };
+        h.w += e.len; h.sw += e.len * s; hist.set(k, h);
+      }
+      let lo = Infinity, hi = -Infinity;
+      for (const x of [b.min[0], b.max[0]]) for (const y of [b.min[1], b.max[1]]) for (const z of [b.min[2], b.max[2]]) { const s = x * d[0] + y * d[1] + z * d[2]; lo = Math.min(lo, s); hi = Math.max(hi, s); }
+      const peaks = [...hist.entries()].filter(([k, h]) => h.w >= 0.08 * scale && h.w >= (hist.get(k - 1) || { w: 0 }).w && h.w >= (hist.get(k + 1) || { w: 0 }).w).sort((a, c) => c[1].w - a[1].w).slice(0, 4);
+      for (const [k, h] of peaks) {
+        let w = h.w, sw = h.sw;
+        for (const j of [k - 1, k + 1]) { const g = hist.get(j); if (g) { w += g.w; sw += g.sw; } }
+        const s = sw / w;
+        if (s < lo + 0.05 * (hi - lo) || s > hi - 0.05 * (hi - lo)) continue; // a cut at the very end only trims a sliver
+        const c = b.center, cs = c[0] * d[0] + c[1] * d[1] + c[2] * d[2];
+        const F = frameFromNormal(d, [c[0] + d[0] * (s - cs), c[1] + d[1] * (s - cs), c[2] + d[2] * (s - cs)]);
+        const sec = section(P, I, F, scale);
+        if (sec.error || !sec.loops.length) continue;
+        let per = 0;
+        for (const l of sec.loops) { const xy = l.xy, n = xy.length / 2; for (let i = 0, j = n - 1; i < n; j = i++) per += Math.hypot(xy[2 * i] - xy[2 * j], xy[2 * i + 1] - xy[2 * j + 1]); }
+        const coverage = Math.min(1, w / per);
+        if (coverage < 0.25) continue;
+        // pin it on the model: the area-weighted centre of the cut face
+        let A = 0, px = 0, py = 0;
+        for (const reg of sec.regions) { if (reg.nested || reg.inverted) continue; const [cx, cy] = regionCentroid(sec, reg); A += reg.area; px += cx * reg.area; py += cy * reg.area; }
+        const ri = regionAt(sec, px / (A || 1), py / (A || 1));
+        let pin = planePoint(F, px / (A || 1), py / (A || 1));
+        if (ri < 0 && sec.regions.length) { const big = sec.regions[0], c = regionCentroid(sec, big); pin = planePoint(F, c[0], c[1]); }
+        out.push({ kind: 'crease', normal: d.slice(), point: pin, length: w, coverage, score: coverage });
+      }
+    }
+    out.sort((a, c) => c.score - a.score);
+    const uniq = [];
+    for (const o of out) {
+      const same = uniq.some(u => Math.abs(o.normal[0] * u.normal[0] + o.normal[1] * u.normal[1] + o.normal[2] * u.normal[2]) > 0.98 &&
+        Math.abs((o.point[0] - u.point[0]) * u.normal[0] + (o.point[1] - u.point[1]) * u.normal[1] + (o.point[2] - u.point[2]) * u.normal[2]) < 2 * bin);
+      if (!same) uniq.push(o);
+    }
+    return uniq.slice(0, limit);
+  }
+  // Solids that don't touch each other. Shells sitting inside another (eyes, inner parts) stay with it.
+  function separateShells(P, I) {
+    const nv = P.length / 3, nt = I.length / 3, par = new Int32Array(nv);
+    for (let i = 0; i < nv; i++) par[i] = i;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let t = 0; t < nt; t++) { const a = find(I[3 * t]), b = find(I[3 * t + 1]), c = find(I[3 * t + 2]); par[a] = b; par[find(c)] = b; }
+    const groups = new Map();
+    for (let t = 0; t < nt; t++) { const r = find(I[3 * t]); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(t); }
+    if (groups.size < 2) return [];
+    let shells = [...groups.values()].map(tris => {
+      const idx = new Uint32Array(tris.length * 3), map = new Map(), pos = [];
+      tris.forEach((t, k) => { for (let j = 0; j < 3; j++) { const v = I[3 * t + j]; let w = map.get(v); if (w === undefined) { w = pos.length / 3; map.set(v, w); pos.push(P[3 * v], P[3 * v + 1], P[3 * v + 2]); } idx[3 * k + j] = w; } });
+      const positions = new Float32Array(pos);
+      return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions) };
+    });
+    shells.sort((a, b) => b.volume - a.volume);
+    const inside = (a, b) => a.bbox.min.every((v, i) => v >= b.bbox.min[i] - 1e-6) && a.bbox.max.every((v, i) => v <= b.bbox.max[i] + 1e-6);
+    const top = [];
+    for (const s of shells) {
+      const host = top.filter(h => inside(s, h)).sort((a, b) => a.volume - b.volume)[0];
+      if (host) { const m = mergeMeshes([host, s]); host.positions = m.positions; host.indices = m.indices; host.volume += s.volume; }
+      else top.push(s);
+    }
+    return top.length > 1 ? top : [];
+  }
+
   /* ---------- the cut ---------- */
   // Every exported part must be a closed solid. Real sculpts carry microscopic defects (self-crossing folds,
   // near-duplicate points) that can still defeat the cap at one exact plane position, so check the result and,
@@ -1755,6 +2003,7 @@ const KMCore = (() => {
     parseSTL, parseOBJ, prepareMesh, fillHoles, edgeReport, volume, bounds, diag,
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle,
+    sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
 })();

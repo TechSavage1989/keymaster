@@ -8,6 +8,33 @@ from playwright.sync_api import sync_playwright
 
 errors = []
 results = []
+
+def dumbbell_stl(path):
+    # two 12 mm balls joined by a 5 mm bar, tipped at an odd angle, as a binary STL
+    import math, struct
+    ax = [0.55, 0.3, 0.78]; L = math.sqrt(sum(v * v for v in ax)); ax = [v / L for v in ax]
+    u = [ax[1], -ax[0], 0]; L = math.sqrt(sum(v * v for v in u)); u = [v / L for v in u]
+    v = [ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]]
+    def r(z):
+        ball = lambda c: math.sqrt(max(0, 144 - (z - c) ** 2)) if abs(z - c) < 12 else 0
+        return max(ball(12), ball(48), 2.5 if 6 < z < 54 else 0, 0.05)
+    seg, rings = 40, 100
+    pt = lambda z, a, rr: [ax[k] * z + u[k] * math.cos(a) * rr + v[k] * math.sin(a) * rr for k in range(3)]
+    grid = [[pt(60 * i / rings, 2 * math.pi * j / seg, r(60 * i / rings)) for j in range(seg)] for i in range(1, rings)]
+    tris = []
+    a0, a1 = pt(0, 0, 0), pt(60, 0, 0)
+    for j in range(seg):
+        k = (j + 1) % seg
+        tris.append((a0, grid[0][k], grid[0][j]))
+        tris.append((a1, grid[-1][j], grid[-1][k]))
+        for i in range(rings - 2):
+            tris.append((grid[i][j], grid[i][k], grid[i + 1][k])); tris.append((grid[i][j], grid[i + 1][k], grid[i + 1][j]))
+    with open(path, 'wb') as f:
+        f.write(b'dumbbell'.ljust(80, b' ')); f.write(struct.pack('<I', len(tris)))
+        for tri in tris:
+            f.write(struct.pack('<3f', 0, 0, 0))
+            for p_ in tri: f.write(struct.pack('<3f', *p_))
+            f.write(b'\0\0')
 def check(name, cond, extra=''):
     results.append((name, bool(cond)))
     print(('  ok  ' if cond else '  FAIL ') + name + (('  ' + str(extra)) if extra and not cond else ''))
@@ -359,6 +386,42 @@ with sync_playwright() as p:
     pg.locator('#partList li[data-id] [data-act=select]').nth(1).click()
     pg.wait_for_timeout(500)
     pg.screenshot(path=str(OUT / 'shot_dark.png'))
+    # cut suggestions on a dumbbell: the bar is found as a narrow point, and clicking it puts the cut there
+    pg.set_viewport_size({'width': 1440, 'height': 900})
+    dumbbell_stl(str(OUT / 'dumbbell.stl'))
+    pg.set_input_files('#fileInput', str(OUT / 'dumbbell.stl'))
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1 && document.querySelector('#partList .part-name').innerText.includes('dumbbell')", timeout=20000)
+    pg.click('#partList li[data-id] [data-act=select]')
+    pg.wait_for_selector('[data-act=find-cuts]')
+    check('suggestions start with a find button and an explanation', 'narrow points like wrists' in pg.inner_text('#inspector'))
+    pg.click('[data-act=find-cuts]')
+    pg.wait_for_timeout(50)
+    pg.wait_for_selector('.suggest-list, .suggest p:has-text("No clear")', timeout=30000)
+    items = pg.locator('.suggest-list [data-act=suggest]')
+    print('    suggestions:', [s.replace('\n', ' ') for s in items.all_inner_texts()])
+    texts = items.all_inner_texts()
+    neck = next((i for i, s in enumerate(texts) if 'Narrow point' in s), -1)
+    check('the bar is found as a narrow point about 5 mm across', neck >= 0 and 'About 5' in texts[neck], texts)
+    check('the seams where the bar meets the balls are found too', sum('Seam or panel line' in s for s in texts) >= 2, texts)
+    check('each suggestion has a pin on the model', pg.locator('#suggestPins .suggest-pin').count() == items.count())
+    before = pg.inner_text('#tiltOut')
+    pg.locator('#suggestPins .suggest-pin').nth(max(neck, 0)).click()
+    pg.wait_for_timeout(700)
+    after = pg.inner_text('#tiltOut')
+    print('    cut after choosing it:', after)
+    check('choosing a suggestion moves the cut there', after != before and items.nth(max(neck, 0)).get_attribute('aria-pressed') == 'true', (before, after))
+    ins = pg.inner_text('#inspector')
+    check('keys checked at the suggested cut', 'ready' in ins or 'No room' in ins, ins[-300:])
+    pg.click('[data-act=cut]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
+    check('cutting at the narrow point gives the two halves', pg.locator('#partList li[data-id]').count() == 2)
+    pg.locator('#partList li[data-id] [data-act=select]').first.click()
+    pg.wait_for_selector('[data-act=find-cuts]')
+    check('each piece gets its own suggestions', pg.locator('.suggest-list').count() == 0)
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.locator('#partList li[data-id] [data-act=select]').first.click(); pg.wait_for_timeout(400)
+    check('suggestions are remembered for the part', pg.locator('.suggest-list [data-act=suggest]').count() == items.count())
+    pg.screenshot(path=str(OUT / 'shot_suggest.png'))
     b.close()
 
 print('\nconsole errors:', errors if errors else 'none')

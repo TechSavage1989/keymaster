@@ -236,6 +236,25 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .taper .check + p { margin-top: 4px; }
 .direction .check { margin-top: 4px; }
 .direction .row { margin-top: 8px; }
+.progress { height: 6px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; margin-top: 4px; }
+.progress span { display: block; height: 100%; background: var(--ink); transition: width .2s; }
+.suggest .btn { margin-top: 10px; }
+.suggest-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; }
+.suggest-list button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--field); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.suggest-list button:hover { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
+.suggest-list button[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.suggest-list b { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--ink); color: var(--panel); font-size: 12px; font-variant-numeric: tabular-nums; }
+.suggest-list span { display: grid; gap: 1px; min-width: 0; }
+.suggest-list strong { font-weight: 600; font-size: 13.5px; }
+.suggest-list em { font-style: normal; font-size: 12.5px; color: var(--muted); }
+.suggest-pins { position: absolute; inset: 0; pointer-events: none; }
+.suggest-pin {
+  position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--ink); opacity: .9;
+  background: var(--panel); color: var(--ink); font: inherit; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  display: grid; place-items: center; padding: 0; cursor: pointer; pointer-events: auto; box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+.suggest-pin:hover, .suggest-pin.is-active { background: var(--ink); color: var(--panel); }
+@media (pointer: coarse) { .suggest-pin { width: 32px; height: 32px; } }
 .areas { margin-top: 14px; }
 .areas ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
 .areas label { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 2px 4px; margin: 0 -4px; border-radius: 5px; }
@@ -328,6 +347,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
       </div>
       <div class="area-tags" id="areaTags" aria-label="Areas on the cut face"></div>
       <div class="drag-chip" id="dragChip" hidden></div>
+      <div class="suggest-pins" id="suggestPins" aria-label="Suggested cut spots"></div>
       <p class="hint" id="hint" hidden></p>
       <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
       <div class="busy" id="busy" hidden><span>Working</span></div>
