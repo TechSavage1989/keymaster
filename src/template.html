@@ -220,6 +220,7 @@ h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 }
 .mode-help { margin-top: 8px; }
 input[type=range] { width: 100%; accent-color: var(--ink); }
+.version { margin-left: 8px; font-size: 11.5px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .shape-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 2px; }
 .shape-grid.few { grid-template-columns: repeat(2, 1fr); }
 .shape-grid button {
@@ -405,6 +406,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
+      <span class="version" id="appVersion" title="Keymaster version __VERSION__, build __BUILD__. After an update, refresh the page and check this changes.">v__VERSION__ · __BUILD__</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>

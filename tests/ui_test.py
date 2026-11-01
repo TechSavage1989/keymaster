@@ -9,6 +9,25 @@ from playwright.sync_api import sync_playwright
 errors = []
 results = []
 
+def lathe_stl(path, radius, length, seg=48, rings=160):
+    # a solid of revolution along z, radius(z), closed at both ends, as a binary STL
+    import math, struct
+    pt = lambda z, a, r: [math.cos(a) * r, math.sin(a) * r, z]
+    grid = [[pt(length * i / rings, 2 * math.pi * j / seg, radius(length * i / rings)) for j in range(seg)] for i in range(1, rings)]
+    a0, a1 = [0, 0, 0], [0, 0, length]
+    tris = []
+    for j in range(seg):
+        k = (j + 1) % seg
+        tris.append((a0, grid[0][k], grid[0][j])); tris.append((a1, grid[-1][j], grid[-1][k]))
+        for i in range(rings - 2):
+            tris.append((grid[i][j], grid[i][k], grid[i + 1][k])); tris.append((grid[i][j], grid[i + 1][k], grid[i + 1][j]))
+    with open(path, 'wb') as f:
+        f.write(b'lathe'.ljust(80, b' ')); f.write(struct.pack('<I', len(tris)))
+        for tri in tris:
+            f.write(struct.pack('<3f', 0, 0, 0))
+            for p_ in tri: f.write(struct.pack('<3f', *p_))
+            f.write(b'\0\0')
+
 def dumbbell_stl(path):
     # two 12 mm balls joined by a 5 mm bar, tipped at an odd angle, as a binary STL
     import math, struct
@@ -47,6 +66,9 @@ with sync_playwright() as p:
     pg.goto(PAGE)
     pg.wait_for_timeout(300)
     check('empty state visible', pg.is_visible('#empty'))
+    ver = pg.inner_text('#appVersion')
+    expected = (HERE.parent / 'VERSION').read_text().strip()
+    check('the version shows next to the name', ver.startswith('v' + expected + ' · ') and len(ver.split(' · ')[1]) == 6, ver)
     check('intro in inspector', 'printable pieces' in pg.inner_text('#inspector'))
     pg.screenshot(path=str(OUT / 'shot_empty.png'))
 
@@ -523,6 +545,23 @@ with sync_playwright() as p:
     count = pg.inner_text('#regionsCount')
     print('    surface regions:', count)
     check('showing surface regions counts them', pg.get_attribute('#regionsBtn', 'aria-pressed') == 'true' and 'region' in count and int(count.split()[0]) >= 3, count)
+    # the hidden cut plane can't be grabbed: a drag where it would be orbits the view instead of tilting it
+    if pg.locator('[data-act=cut]').count() == 0:
+        pg.locator('#partList li[data-id] [data-act=select]').first.click(); pg.wait_for_timeout(400)
+    if pg.is_visible('#regionsPanel'):
+        pg.click('#regionsBtn'); pg.wait_for_timeout(300)
+    a0 = pg.evaluate("[...document.querySelectorAll('[data-angle]')].map(e => e.value).join(',')")
+    pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000)
+    cx0, cy0 = pg.evaluate("KeymasterDebug.sheetScreenPoint(0.6, 0.2)")
+    pg.mouse.move(cx0, cy0); pg.mouse.down()
+    for i in range(1, 10): pg.mouse.move(cx0, cy0 - 9 * i)
+    chip = pg.is_visible('#dragChip')
+    pg.mouse.up(); pg.wait_for_timeout(300)
+    check('with regions showing, dragging where the plane was does not tilt it', not chip and not pg.is_visible('#planeBar'), chip)
+    pg.click('#regionsBtn'); pg.wait_for_timeout(300)
+    a1 = pg.evaluate("[...document.querySelectorAll('[data-angle]')].map(e => e.value).join(',')")
+    check('…and the plane is where it was, with its toolbar back', pg.is_visible('#planeBar') and a1 == a0, (a0, a1))
+    pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000)
     check('the cut preview steps aside while regions show', not pg.is_visible('#areaTags [data-area-tag]') or pg.locator('#areaTags[hidden]').count() == 1)
     pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 80; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
     pg.wait_for_timeout(500)
@@ -570,8 +609,44 @@ with sync_playwright() as p:
     pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam})"); pg.wait_for_timeout(100)
     pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
     check('Esc drops the picked line', pg.locator('[data-act=cut-line]').count() == 0)
-    pg.screenshot(path=str(OUT / 'shot_curved.png'))
+    # keys on a curved cut: an arm in a sleeve, cut at the hem, gets pegs sized to fit
+    import math as _m
+    def arm_r(z):
+        if z < 2: return max(0.3, z * 4)
+        if z < 40: return 8
+        if z < 41: return 8 - (z - 40) * 2.5
+        if z < 78: return 5.5
+        return max(0.3, 5.5 * _m.sqrt(max(0, 1 - ((z - 78) / 2) ** 2)))
+    lathe_stl(str(OUT / 'sleeve.stl'), arm_r, 80)
+    pg.set_input_files('#fileInput', str(OUT / 'sleeve.stl'))
+    pg.wait_for_function("document.querySelector('#partList .part-name') && document.querySelector('#partList .part-name').innerText.includes('sleeve')", timeout=20000)
+    if not pg.is_visible('#regionsPanel'):
+        pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000)
+    pg.wait_for_timeout(300)
+    res = pg.evaluate("KeymasterDebug.pickCutLineAt(0, [8, 0, 40])")
+    pg.wait_for_timeout(200)
+    info = pg.inner_text('#cutLineInfo')
+    print('    sleeve hem:', res, info.replace('\n', ' ')[:160])
+    check('the hem line comes with pegs sized to fit', bool(res) and res['ok'] and 'sized to fit' in info and ' peg' in info, info)
+    pg.click('[data-act=cut-line]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
+    check('cutting along the hem with keys gives the sleeve and the arm', pg.locator('#partList li[data-id]').count() == 2)
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.click('#regionsBtn'); pg.wait_for_timeout(200)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
+    pg.click('[data-act=keytype][data-value=dowel]'); pg.wait_for_timeout(300)
+    pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000)
+    pg.evaluate("KeymasterDebug.pickCutLineAt(0, [8, 0, 40])"); pg.wait_for_timeout(200)
+    check('dowels on a curved cut', 'dowel' in pg.inner_text('#cutLineInfo') and 'sized to fit' in pg.inner_text('#cutLineInfo'), pg.inner_text('#cutLineInfo'))
+    pg.click('[data-act=cut-line]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length > 2", timeout=15000)
+    check('a curved cut with dowels makes the pins too', any('pin' in n_ for n_ in pg.locator('#partList .part-name').all_inner_texts()) and 'dowel pins' in pg.inner_text('#toast'))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.click('#regionsBtn'); pg.wait_for_timeout(200)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
+    pg.click('[data-act=keytype][data-value=peg]'); pg.wait_for_timeout(200)
+    pg.screenshot(path=str(OUT / 'shot_curved.png'))
+    pg.keyboard.press('Escape')
     b.close()
 
 print('\nconsole errors:', errors if errors else 'none')

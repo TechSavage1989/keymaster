@@ -643,6 +643,40 @@ console.log('curved cuts along a border');
   const cw = K.cutAlongLoop(sp.positions, sp.indices, loopsW[0]);
   check('cutting along a wavy border gives two sealed pieces', cw.parts.length === 2 && allClosed(cw.parts), cw.parts.map(q => K.edgeReport(q.indices)));
   check('wavy cut keeps the volume', Math.abs(sumVol(cw.parts) - sp.report.volume) / sp.report.volume < 1e-6, [sumVol(cw.parts), sp.report.volume]);
+  // keys on curved cuts: on a flat face on the line's best-fit plane, joined to the line by a thin band
+  const prismK = (A0, A1, h) => { const mid = A0.map((q, i) => [(q[0] + A1[i][0]) / 2, (q[1] + A1[i][1]) / 2]); return h / 6 * (K.profileArea(A0) + 4 * K.profileArea(mid) + K.profileArea(A1)); };
+  const keyVol = (an, cfg, keys) => { // pegs added minus sockets removed, key by key
+    let dv = 0;
+    for (const k of keys) {
+      const kc = K.keyCfg(cfg, k), sp = K.keyGeometrySpec(kc), ang = K.keyAngle(an.base, 0, kc), Pr = (rr, dd) => K.keyProfile(sp.shape, rr, dd, ang, sp.res);
+      if (cfg.type === 'peg') dv += prismK(Pr(sp.r, 0), Pr(sp.r * sp.taper, 0), kc.length) - prismK(Pr(sp.r, sp.cs), Pr(sp.r * sp.sockTip, sp.cs), kc.length + sp.ca);
+      else dv -= 2 * prismK(Pr(sp.r, sp.cs), Pr(sp.r, sp.cs), cfg.type === 'dowel' ? kc.length / 2 + sp.ca : kc.length + sp.ca);
+    }
+    return dv;
+  };
+  for (const [name, c] of [['pegs', cfgOf({ type: 'peg', diameter: 5, length: 6, taper: 30 })], ['dowels', cfgOf({ type: 'dowel', diameter: 4, length: 12 })], ['magnets', cfgOf({ type: 'magnet', diameter: 6, length: 3 })], ['square pegs fitted', cfgOf({ type: 'peg', shape: 'square', diameter: 5, length: 6 })]]) {
+    const anL = K.analyzeLoop(arm.positions, arm.indices, hem.loop, c, 90);
+    const ks = name.includes('fitted') ? K.autoFitKeys(anL, { ...c, sizeMin: 2.5 }, 2, new Set()) : K.autoPlaceKeys(anL, c, 2, new Set());
+    const ev = K.evaluateKeys(anL, ks, c, new Set());
+    const r = K.cutAlongLoop(arm.positions, arm.indices, hem.loop, { cfg: c, keys: ks });
+    const total = sumVol(r.parts) + sumVol(r.pins);
+    const expect = arm.report.volume + keyVol(anL, c, ks) + sumVol(r.pins);
+    check(`curved cut at the hem with ${name}: keys fit, sealed, volume adds up`, anL.curved.flatEnough && ks.length >= 1 && ev.every(e => e.ok) && allClosed(r.parts) && allClosed(r.pins) && Math.abs(total - expect) / arm.report.volume < 1e-4, [ks.length, ev.filter(e => !e.ok), r.parts.map(q => K.edgeReport(q.indices)), total, expect]);
+    if (name === 'dowels') check('dowel pins come with a curved cut', r.pins.length === ks.length);
+  }
+  // the wavy border bends 4 mm either way, little for a 40 mm sphere: keys go on, and both pieces are sealed
+  const anW = K.analyzeLoop(sp.positions, sp.indices, loopsW[0], cfgOf({ type: 'peg' }), 40);
+  const kW = K.autoPlaceKeys(anW, cfgOf({ type: 'peg' }), 3, new Set());
+  const rW = K.cutAlongLoop(sp.positions, sp.indices, loopsW[0], { cfg: cfgOf({ type: 'peg' }), keys: kW });
+  check('pegs on a wavy curved cut: sealed, volume adds up', anW.curved.flatEnough && kW.length >= 2 && allClosed(rW.parts) && Math.abs(sumVol(rW.parts) - (sp.report.volume + keyVol(anW, cfgOf({ type: 'peg' }), kW))) / sp.report.volume < 1e-4, [kW.length, sumVol(rW.parts)]);
+  // a line that swoops 14 mm up and down on a 20 mm sphere is too bent for keys: refused with a reason, but it still cuts without them
+  const gB = new Int32Array(ntS);
+  for (let q = 0; q < ntS; q++) { let x = 0, y = 0, z = 0; for (let k = 0; k < 3; k++) { const v = 3 * sp.indices[3 * q + k]; x += sp.positions[v]; y += sp.positions[v + 1]; z += sp.positions[v + 2]; } gB[q] = z / 3 > 14 * Math.sin(2 * Math.atan2(y, x)) ? 1 : 0; }
+  const lB = K.borderLoops(sp.positions, K.bordersFromGroups(sp.positions, sp.indices, gB)).filter(l => l.closed)[0];
+  const anB = K.analyzeLoop(sp.positions, sp.indices, lB, cfgOf({ type: 'peg' }), 40);
+  let msgB = ''; try { K.cutAlongLoop(sp.positions, sp.indices, lB, { cfg: cfgOf({ type: 'peg' }), keys: [{ x: 0, y: 0 }] }); } catch (e) { msgB = e.message; }
+  check('a strongly bent line is too bent for keys, and says so', !anB.curved.flatEnough && /bends too far/.test(msgB), [anB.curved, msgB]);
+  check('…but it still cuts without keys', allClosed(K.cutAlongLoop(sp.positions, sp.indices, lB).parts));
   // borders that can't split the part are refused with a reason
   const tower = (() => {
     const pos = [], idx = [];

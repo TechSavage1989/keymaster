@@ -220,6 +220,7 @@ h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 }
 .mode-help { margin-top: 8px; }
 input[type=range] { width: 100%; accent-color: var(--ink); }
+.version { margin-left: 8px; font-size: 11.5px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .shape-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 2px; }
 .shape-grid.few { grid-template-columns: repeat(2, 1fr); }
 .shape-grid button {
@@ -405,6 +406,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.14, build 2c6ad6. After an update, refresh the page and check this changes.">v1.14 · 2c6ad6</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -2333,7 +2335,42 @@ const KMCore = (() => {
     const loop = closed[0] || through[0];
     return loop ? { loop, distance: bd, edge: best } : null;
   }
-  function cutAlongLoop(P, I, loop) {
+  // A cut line's best-fit (Newell) plane, its points flattened onto it, and how far the line strays from it.
+  function loopFrame(P, ring) {
+    const n = ring.length;
+    let nx = 0, ny = 0, nz = 0, cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < n; i++) {
+      const p = 3 * ring[i], q = 3 * ring[(i + 1) % n];
+      nx += (P[p + 1] - P[q + 1]) * (P[p + 2] + P[q + 2]); ny += (P[p + 2] - P[q + 2]) * (P[p] + P[q]); nz += (P[p] - P[q]) * (P[p + 1] + P[q + 1]);
+      cx += P[p]; cy += P[p + 1]; cz += P[p + 2];
+    }
+    const F = frameFromNormal(norm3([nx, ny, nz]), [cx / n, cy / n, cz / n]);
+    const xy = new Float64Array(2 * n);
+    let dev = 0;
+    for (let i = 0; i < n; i++) {
+      const p = 3 * ring[i], d = [P[p] - F.o[0], P[p + 1] - F.o[1], P[p + 2] - F.o[2]];
+      xy[2 * i] = d[0] * F.u[0] + d[1] * F.u[1] + d[2] * F.u[2]; xy[2 * i + 1] = d[0] * F.v[0] + d[1] * F.v[1] + d[2] * F.v[2];
+      dev = Math.max(dev, Math.abs(d[0] * F.n[0] + d[1] * F.n[1] + d[2] * F.n[2]));
+    }
+    return { F, xy, dev, centre: [cx / n, cy / n, cz / n] };
+  }
+  /* Keys on a curved cut sit on a flat face on the line's best-fit plane, joined to the line by a thin band, so
+     they're placed and checked like keys on a flat cut. The analysis looks like analyzePlane's, with the area
+     inside the line as the cut face. A line that strays from its plane by more than about a third of the area's
+     width would need too tall a band, so it is marked not flat enough for keys. */
+  function analyzeLoop(P, I, loop, cfg, scale) {
+    const { F, xy, dev } = loopFrame(P, loop.verts);
+    const L = makeLoop(loop.verts, [], xy);
+    const base = { error: null, loops: [L], regions: buildRegions([L]) };
+    let room = 0;
+    for (const s of regionSamples(base, 0)) room = Math.max(room, s.clear);
+    const depth = [];
+    if (cfg.type !== 'none') for (const d of depthPlan(cfg)) depth.push({ ...d, sec: section(P, I, shiftFrame(F, d.side * d.depth), scale) });
+    const an = { frame: F, base, depth, curved: { deviation: dev, flatEnough: dev <= Math.max(0.35 * room, 0.5) } };
+    Object.defineProperty(an, '_src', { value: { P, I, F, scale, cfg, cache: new Map() } });
+    return an;
+  }
+  function cutAlongLoop(P, I, loop, opts = {}) {
     if (!loop.closed) throw new Error('This border doesn’t go all the way round, so it can’t split the part. Pick one that circles a limb or the edge of a sleeve.');
     const nv = P.length / 3, nt = I.length / 3, ring = loop.verts, n = ring.length;
     const cutEdge = new Set();
@@ -2373,15 +2410,7 @@ const KMCore = (() => {
       tris[s].push(a, b, c);
     }
     // the cap: the border projected on its best-fit plane, triangulated with the same safeguards as flat cuts
-    let nx = 0, ny = 0, nz = 0, cx = 0, cy = 0, cz = 0;
-    for (let i = 0; i < n; i++) {
-      const p = 3 * ring[i], q = 3 * ring[(i + 1) % n];
-      nx += (P[p + 1] - P[q + 1]) * (P[p + 2] + P[q + 2]); ny += (P[p + 2] - P[q + 2]) * (P[p] + P[q]); nz += (P[p] - P[q]) * (P[p + 1] + P[q + 1]);
-      cx += P[p]; cy += P[p + 1]; cz += P[p + 2];
-    }
-    const F = frameFromNormal(norm3([nx, ny, nz]), [cx / n, cy / n, cz / n]);
-    const xy = new Float64Array(2 * n);
-    for (let i = 0; i < n; i++) { const p = 3 * ring[i], d = [P[p] - F.o[0], P[p + 1] - F.o[1], P[p + 2] - F.o[2]]; xy[2 * i] = d[0] * F.u[0] + d[1] * F.u[1] + d[2] * F.u[2]; xy[2 * i + 1] = d[0] * F.v[0] + d[1] * F.v[1] + d[2] * F.v[2]; }
+    const lf = loopFrame(P, ring), F = lf.F, xy = lf.xy, [cxn, cyn, czn] = lf.centre, cx = cxn * n, cy = cyn * n, cz = czn * n;
     const ringXY = new Map(ring.map((v, i) => [v, [xy[2 * i], xy[2 * i + 1]]]));
     const keep = untangledRing(xy), flat = [], ids = [];
     for (const k of keep) { ids.push(ring[k]); flat.push(xy[2 * k], xy[2 * k + 1]); }
@@ -2406,7 +2435,14 @@ const KMCore = (() => {
     for (let i = 0; i < tris[1].length; i += 3) for (let k = 0; k < 3; k++) { const a = tris[1][i + k], b = tris[1][i + (k + 1) % 3]; surf.add(a < b ? a * (nv + n + 2) + b : b * (nv + n + 2) + a); }
     let clash = keep.length < n;
     for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) { const a = cap[i + k], b = cap[i + (k + 1) % 3]; if (surf.has(a < b ? a * (nv + n + 2) + b : b * (nv + n + 2) + a)) { clash = true; break; } }
-    if (clash) {
+    const cfg = opts.cfg || { type: 'none' };
+    const keys = cfg.type === 'none' ? [] : (opts.keys || []).filter(k => regionAt({ loops: [makeLoop(ring, [], xy)], regions: buildRegions([makeLoop(ring, [], xy)]) }, k.x, k.y) === 0);
+    let V = null, pins = [];
+    if (keys.length) {
+      const a = analyzeLoop(P, I, loop, { type: 'none' }, 1);
+      if (!a.curved.flatEnough) throw new Error('This line bends too far out of flat for keys. Cut it without keys (set Keys to None), or use a flat cut here.');
+      ({ V, pins } = keyedLoopCap(pos, tris, ring, copy, xy, F, wantCCW, keys, cfg));
+    } else if (clash) {
       const c1 = nv + n, c2 = nv + n + 1;
       for (const c of [c1, c2]) { pos[3 * c] = cx / n; pos[3 * c + 1] = cy / n; pos[3 * c + 2] = cz / n; }
       cap.length = 0;
@@ -2417,9 +2453,10 @@ const KMCore = (() => {
       tris[1].push(...cap);
       for (let i = 0; i < cap.length; i += 3) tris[2].push(copy.get(cap[i]), copy.get(cap[i + 2]), copy.get(cap[i + 1])); // the same cap, facing the other piece
     }
+    const src = V || pos;
     const build = (list) => {
       const map = new Map(), out = [], idx = new Uint32Array(list.length);
-      for (let i = 0; i < list.length; i++) { const v = list[i]; let w = map.get(v); if (w === undefined) { w = out.length / 3; map.set(v, w); out.push(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]); } idx[i] = w; }
+      for (let i = 0; i < list.length; i++) { const v = list[i]; let w = map.get(v); if (w === undefined) { w = out.length / 3; map.set(v, w); out.push(src[3 * v], src[3 * v + 1], src[3 * v + 2]); } idx[i] = w; }
       const positions = new Float32Array(out);
       return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions) };
     };
@@ -2440,7 +2477,85 @@ const KMCore = (() => {
       throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
     for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
     parts.sort((x, y) => y.volume - x.volume);
-    return { parts, length: loop.length };
+    return { parts, pins, length: loop.length, frame: F };
+  }
+  // The keyed cap for a curved cut. For each side: a band from the cut line to its copy flattened on the plane,
+  // then the flat face with holes for the keys, then each key's peg or socket, built as on a flat cut.
+  function keyedLoopCap(pos, tris, ring, copy, xy, F, wantCCW1, keys, cfg) {
+    const V = Array.from(pos), n = ring.length;
+    const addV = (q) => { V.push(q[0], q[1], q[2]); return V.length / 3 - 1; };
+    const at = (x, y, z) => [F.o[0] + F.u[0] * x + F.v[0] * y + F.n[0] * z, F.o[1] + F.u[1] * x + F.v[1] * y + F.n[1] * z, F.o[2] + F.u[2] * x + F.v[2] * y + F.n[2] * z];
+    const posOf = (i) => [V[3 * i], V[3 * i + 1], V[3 * i + 2]];
+    const sec = { loops: [makeLoop(ring, [], xy)] }; sec.regions = buildRegions(sec.loops);
+    const pins = [];
+    for (const k of keys) { k.cfg = keyCfg(cfg, k); k.spec = keyGeometrySpec(k.cfg); k.angle = keyAngle(sec, 0, k.cfg); }
+    for (const s of [1, 2]) {
+      const T = tris[s], id = (v) => (s === 1 ? v : copy.get(v)), wantCCW = s === 1 ? wantCCW1 : !wantCCW1;
+      const push3 = (a, b, c) => T.push(a, b, c);
+      const pushOriented = (a, b, c, e) => {
+        const A = posOf(a), B = posOf(b), C = posOf(c);
+        const nn = cross3([B[0] - A[0], B[1] - A[1], B[2] - A[2]], [C[0] - A[0], C[1] - A[1], C[2] - A[2]]);
+        if (nn[0] * e[0] + nn[1] * e[1] + nn[2] * e[2] < 0) push3(a, c, b); else push3(a, b, c);
+      };
+      // the band: side 1 runs along the line (a to b), so its band and face run the other way; side 2 mirrors it
+      const proj = ring.map((v, i) => addV(at(xy[2 * i], xy[2 * i + 1], 0)));
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n, a = id(ring[i]), b = id(ring[j]);
+        if (s === 1) { push3(b, a, proj[i]); push3(b, proj[i], proj[j]); } else { push3(b, proj[i], a); push3(b, proj[j], proj[i]); }
+      }
+      // the flat face, with a hole per key
+      const flat = [], ids = [], holes = [], rings = [], ringXY = new Map();
+      const pushRing = (ringIds, rxy, outer) => {
+        rings.push(ringIds);
+        for (let q = 0; q < ringIds.length; q++) ringXY.set(ringIds[q], [rxy[2 * q], rxy[2 * q + 1]]);
+        if (!outer) holes.push(ids.length);
+        for (const q of outer ? untangledRing(rxy) : rxy.map((_, i) => i).filter(i => i % 2 === 0).map(i => i / 2)) { ids.push(ringIds[q]); flat.push(rxy[2 * q], rxy[2 * q + 1]); }
+      };
+      pushRing(proj, Array.from(xy), true);
+      const sg = wantCCW ? -1 : +1; // the side whose face points along the plane's normal is "below", as on flat cuts
+      const tubes = [];
+      for (const k of keys) {
+        const ks = k.spec, kc = k.cfg;
+        let role, grow, depth, dir, tipR = ks.r;
+        if (cfg.type === 'peg') {
+          const pegSide = cfg.pegSide === 'above' ? +1 : -1;
+          if (sg === pegSide) { role = 'peg'; grow = 0; depth = kc.length; dir = -sg; tipR = ks.r * ks.taper; }
+          else { role = 'socket'; grow = ks.cs; depth = kc.length + ks.ca; dir = sg; tipR = ks.r * ks.sockTip; }
+        } else { role = 'socket'; grow = ks.cs; dir = sg; depth = cfg.type === 'dowel' ? kc.length / 2 + ks.ca : kc.length + ks.ca; }
+        const prof = keyProfile(ks.shape, ks.r, grow, k.angle, ks.res), prof1 = keyProfile(ks.shape, tipR, grow, k.angle, ks.res);
+        const kr = [], kxy = [];
+        for (const [px, py] of prof) { kr.push(addV(at(k.x + px, k.y + py, 0))); kxy.push(k.x + px, k.y + py); }
+        pushRing(kr, kxy, false);
+        tubes.push({ k, role, prof1, depth, dir, ring: kr });
+      }
+      const loc = earcut(flat, holes);
+      let sum = 0; for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
+      const flip = wantCCW ? sum < 0 : sum > 0, cap = [];
+      for (let i = 0; i < loc.length; i += 3) { if (flip) cap.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]); else cap.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]); }
+      for (const r of rings) fixTJunctions(cap, r);
+      const xyOf = (v) => ringXY.get(v);
+      splitThroughPoints(cap, rings, xyOf);
+      patchCap(cap, rings, xyOf, wantCCW);
+      T.push(...cap);
+      const nrm = F.n;
+      for (const tb of tubes) {
+        const z = tb.dir * tb.depth;
+        const ring1 = tb.prof1.map(([px, py]) => addV(at(tb.k.x + px, tb.k.y + py, z)));
+        const center = addV(at(tb.k.x, tb.k.y, z)), axis0 = at(tb.k.x, tb.k.y, 0), m = tb.ring.length;
+        for (let i = 0; i < m; i++) {
+          const a = tb.ring[i], b = tb.ring[(i + 1) % m], c = ring1[(i + 1) % m], d = ring1[i];
+          const A = posOf(a), C = posOf(c), mid = [(A[0] + C[0]) / 2, (A[1] + C[1]) / 2, (A[2] + C[2]) / 2];
+          const along = (mid[0] - axis0[0]) * nrm[0] + (mid[1] - axis0[1]) * nrm[1] + (mid[2] - axis0[2]) * nrm[2];
+          let rx = mid[0] - axis0[0] - nrm[0] * along, ry = mid[1] - axis0[1] - nrm[1] * along, rz = mid[2] - axis0[2] - nrm[2] * along;
+          if (tb.role === 'socket') { rx = -rx; ry = -ry; rz = -rz; }
+          pushOriented(a, b, c, [rx, ry, rz]); pushOriented(a, c, d, [rx, ry, rz]);
+          const e = tb.role === 'peg' ? [nrm[0] * tb.dir, nrm[1] * tb.dir, nrm[2] * tb.dir] : [-nrm[0] * tb.dir, -nrm[1] * tb.dir, -nrm[2] * tb.dir];
+          pushOriented(center, ring1[i], ring1[(i + 1) % m], e);
+        }
+      }
+    }
+    if (cfg.type === 'dowel') for (const k of keys) pins.push(makePin(at, k, k.spec, k.cfg.length));
+    return { V, pins };
   }
 
 
@@ -2851,7 +2966,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
 })();
@@ -4098,6 +4213,7 @@ const KMCore = (() => {
     if (tc.dragging || tc.axis) return;
     ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = performance.now(); ptr.dragKey = -1; ptr.ring = null; ptr.tilt = null; ptr.sheet = null;
     if (e.altKey) return; // Alt-drag always orbits
+    if (state.regions.on) return; // the cut plane is hidden while surface regions show: drags orbit, clicks pick lines
     const ring = pickRing(e);
     if (ring) { startRing(ring, e); return; }
     const k = pickKey(e);
@@ -4122,6 +4238,7 @@ const KMCore = (() => {
       moveTilt(e);
       return;
     }
+    if (state.regions.on) { if (!ptr.down) canvas.style.cursor = ''; return; } // nothing on the hidden plane to grab
     if (!ptr.down && selectedPart() && !tc.dragging) {
       const ring = tc.axis ? null : pickRing(e);
       setRingHover(ring ? ring.ax : null);
@@ -4409,10 +4526,10 @@ const KMCore = (() => {
     }
     const p = selectedPart();
     el.innerHTML = p ? cutPanel(p) : modelPanel();
-    planeBar.hidden = !p;
-    planeBar.innerHTML = p ? planeBarHTML() : '';
+    planeBar.hidden = !p || state.regions.on; // it works the cut plane, which steps aside while regions show
+    planeBar.innerHTML = p && !state.regions.on ? planeBarHTML() : '';
     suggestPanel.innerHTML = p ? suggestSection() : '';
-    stage.style.setProperty('--bar-h', p ? `${planeBar.offsetHeight}px` : '0px');
+    stage.style.setProperty('--bar-h', p && !state.regions.on ? `${planeBar.offsetHeight}px` : '0px');
     updatePositionReadout();
   }
   // The cut plane's controls, in a toolbar along the bottom of the view.
@@ -4714,8 +4831,28 @@ const KMCore = (() => {
     clearPick();
     const near = K.borderLoopNear(p.positions, regionsFor(p), linesFor(p), point);
     if (!near || near.distance > K.diag(p.bbox) * 0.03) { toast('Click on or next to one of the dark border lines to cut along it.'); renderPick(); return; }
-    const pick = { partId: p.id, loop: near.loop };
-    try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop); } catch (err) { pick.error = err.message; }
+    const pick = { partId: p.id, loop: near.loop, keys: [] };
+    // keys: placed and checked like a flat cut's, on the flat face at the line's best-fit plane
+    const cfg = coreCfg();
+    if (near.loop.closed && cfg.type !== 'none') {
+      try {
+        const an = K.analyzeLoop(p.positions, p.indices, near.loop, cfg, K.diag(p.bbox));
+        pick.frame = an.frame;
+        if (!an.curved.flatEnough) pick.noKeys = 'This line bends too far out of flat for keys, so it will be cut without them.';
+        else {
+          const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, cfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, cfg, state.cfg.perArea, new Set());
+          const ok = K.evaluateKeys(an, keys, cfg, new Set());
+          pick.keys = keys.filter((k, i) => ok[i].ok);
+          if (!pick.keys.length) pick.noKeys = 'No room for keys inside this line at these settings, so it will be cut without them.';
+        }
+      } catch (err) { pick.noKeys = 'Keys couldn’t be placed on this line, so it will be cut without them.'; }
+    }
+    try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { cfg, keys: pick.keys }); }
+    catch (err) {
+      if (pick.keys.length) { // still offer the cut, without keys
+        try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop); pick.keys = []; pick.noKeys = 'Keys didn’t fit cleanly here, so it will be cut without them.'; } catch (e2) { pick.error = e2.message; }
+      } else pick.error = err.message;
+    }
     state.regions.pick = pick;
     const v = views.get(p.id);
     if (v) {
@@ -4724,36 +4861,70 @@ const KMCore = (() => {
         : new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xe5484d, depthTest: false }));
       line.renderOrder = 9;
       v.pickLine = line; v.mesh.add(line);
+      if (pick.keys.length && pick.frame) { v.pickKeys = curvedKeyMarkers(pick.keys, pick.frame); v.mesh.add(v.pickKeys); }
     }
     renderPick();
     markDirty();
   }
+  function curvedKeyMarkers(keys, F) {
+    const g = new THREE.Group(), cfg = state.cfg;
+    const world = (geom) => { // plane coordinates (u, v, n) to the part's coordinates
+      for (const name of ['position', 'normal']) {
+        const att = geom.attributes[name];
+        if (!att) continue;
+        const a = att.array, o = name === 'position' ? F.o : [0, 0, 0];
+        for (let i = 0; i < a.length; i += 3) { const x = a[i], y = a[i + 1], z = a[i + 2]; for (let k = 0; k < 3; k++) a[i + k] = o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z; }
+      }
+      return geom;
+    };
+    const sec = { regions: [] };
+    for (const k of keys) {
+      const kc = K.keyCfg(cfg, k), ks = K.keyGeometrySpec(kc), ang = K.keyAngle(sec, -1, kc) + 0;
+      const prof = (rr, dd) => K.keyProfile(ks.shape, rr, dd, k.angle !== undefined ? k.angle : ang, ks.res).map(([x, y]) => [x + k.x, y + k.y]);
+      let z0, z1, tipR = ks.r;
+      if (cfg.type === 'peg') { z0 = 0; z1 = (cfg.pegSide === 'above' ? -1 : 1) * kc.length; tipR = ks.r * ks.taper; }
+      else if (cfg.type === 'dowel') { z0 = -kc.length / 2; z1 = kc.length / 2; }
+      else { z0 = -kc.length; z1 = kc.length; }
+      const disc = new THREE.Mesh(world(fanGeometry(prof(ks.r, ks.cs), 0.02)), new THREE.MeshBasicMaterial({ color: 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: 0.8, depthTest: false }));
+      const body = new THREE.Mesh(world(prismGeometry(prof(ks.r, 0), prof(tipR, 0), z0, z1)), new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.4 }));
+      disc.renderOrder = 8; body.renderOrder = 8;
+      g.add(disc, body);
+    }
+    return g;
+  }
   function clearPick() {
-    for (const v of views.values()) if (v.pickLine) { v.mesh.remove(v.pickLine); v.pickLine.geometry.dispose(); v.pickLine.material.dispose(); v.pickLine = null; }
+    for (const v of views.values()) {
+      if (v.pickLine) { v.mesh.remove(v.pickLine); v.pickLine.geometry.dispose(); v.pickLine.material.dispose(); v.pickLine = null; }
+      if (v.pickKeys) { v.mesh.remove(v.pickKeys); clearGroup(v.pickKeys); v.pickKeys = null; }
+    }
     state.regions.pick = null;
   }
   function renderPick() {
     const el = $('#cutLineInfo'), pick = state.regions.pick;
     if (!el) return;
-    if (!pick) { el.innerHTML = `<p class="muted small">Click a dark border line to cut along it. Curved cuts don’t add keys yet.</p>`; return; }
+    if (!pick) { el.innerHTML = `<p class="muted small">Click a dark border line to cut along it. Keys use your key settings.</p>`; return; }
     const len = `${fmt(pick.loop.length)} mm`;
     if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>`; return; }
     const cm3 = (v) => (v / 1000 >= 10 ? Math.round(v / 1000) : (v / 1000).toFixed(1));
-    el.innerHTML = `<p class="status ok">${ICONS.check}<span>A ${len} line all the way round. It splits the part into pieces of ${cm3(pick.result.parts[0].volume)} and ${cm3(pick.result.parts[1].volume)} cm³.</span></p>
-      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>Cut along this line</span></button>
-      <p class="muted small">Curved cuts don’t add keys yet.</p>`;
+    const nk = pick.keys.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
+    const keyLine = nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
+    el.innerHTML = `<p class="status ok">${ICONS.check}<span>A ${len} line all the way round. It splits the part into pieces of ${cm3(pick.result.parts[0].volume)} and ${cm3(pick.result.parts[1].volume)} cm³.${keyLine}</span></p>
+      ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
+      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>Cut along this line</span></button>`;
   }
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);
     if (!p || !pick.result) return;
     const made = pick.result.parts.map((c, i) => makePart({ name: `${p.name} ${i ? 'B' : 'A'}`, color: i ? nextColor() : p.color, positions: c.positions, indices: c.indices }));
+    (pick.result.pins || []).forEach((pin, i) => made.push(makePart({ name: `${p.name} pin ${i + 1}`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' })));
     const idx = state.parts.indexOf(p);
     clearPick();
     commit(state.parts.slice(0, idx).concat(made, state.parts.slice(idx + 1)), 'the curved cut');
     if (state.selectedId === p.id) state.selectedId = null;
     syncScene();
     renderPick();
-    toast(`Cut along the line into 2 pieces. Click another line to keep cutting.`);
+    const pinsMade = (pick.result.pins || []).length;
+    toast(`Cut along the line into 2 pieces${pinsMade ? ` and ${pinsMade} dowel pins` : ''}. Click another line to keep cutting.`);
   }
   regionsPanel.addEventListener('click', (e) => { if (e.target.closest('[data-act=cut-line]')) cutAlongPick(); });
   function applyRegions() {
@@ -4789,7 +4960,7 @@ const KMCore = (() => {
     state.regions.on = on;
     applyRegions();
     updatePreview();
-    placeAreaTags(); placeSuggestPins(); updateHint();
+    placeAreaTags(); placeSuggestPins(); updateHint(); renderInspector();
     markDirty();
   }
   $('#regionsBtn').addEventListener('click', () => {

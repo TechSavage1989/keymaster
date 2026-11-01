@@ -1863,7 +1863,42 @@ const KMCore = (() => {
     const loop = closed[0] || through[0];
     return loop ? { loop, distance: bd, edge: best } : null;
   }
-  function cutAlongLoop(P, I, loop) {
+  // A cut line's best-fit (Newell) plane, its points flattened onto it, and how far the line strays from it.
+  function loopFrame(P, ring) {
+    const n = ring.length;
+    let nx = 0, ny = 0, nz = 0, cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < n; i++) {
+      const p = 3 * ring[i], q = 3 * ring[(i + 1) % n];
+      nx += (P[p + 1] - P[q + 1]) * (P[p + 2] + P[q + 2]); ny += (P[p + 2] - P[q + 2]) * (P[p] + P[q]); nz += (P[p] - P[q]) * (P[p + 1] + P[q + 1]);
+      cx += P[p]; cy += P[p + 1]; cz += P[p + 2];
+    }
+    const F = frameFromNormal(norm3([nx, ny, nz]), [cx / n, cy / n, cz / n]);
+    const xy = new Float64Array(2 * n);
+    let dev = 0;
+    for (let i = 0; i < n; i++) {
+      const p = 3 * ring[i], d = [P[p] - F.o[0], P[p + 1] - F.o[1], P[p + 2] - F.o[2]];
+      xy[2 * i] = d[0] * F.u[0] + d[1] * F.u[1] + d[2] * F.u[2]; xy[2 * i + 1] = d[0] * F.v[0] + d[1] * F.v[1] + d[2] * F.v[2];
+      dev = Math.max(dev, Math.abs(d[0] * F.n[0] + d[1] * F.n[1] + d[2] * F.n[2]));
+    }
+    return { F, xy, dev, centre: [cx / n, cy / n, cz / n] };
+  }
+  /* Keys on a curved cut sit on a flat face on the line's best-fit plane, joined to the line by a thin band, so
+     they're placed and checked like keys on a flat cut. The analysis looks like analyzePlane's, with the area
+     inside the line as the cut face. A line that strays from its plane by more than about a third of the area's
+     width would need too tall a band, so it is marked not flat enough for keys. */
+  function analyzeLoop(P, I, loop, cfg, scale) {
+    const { F, xy, dev } = loopFrame(P, loop.verts);
+    const L = makeLoop(loop.verts, [], xy);
+    const base = { error: null, loops: [L], regions: buildRegions([L]) };
+    let room = 0;
+    for (const s of regionSamples(base, 0)) room = Math.max(room, s.clear);
+    const depth = [];
+    if (cfg.type !== 'none') for (const d of depthPlan(cfg)) depth.push({ ...d, sec: section(P, I, shiftFrame(F, d.side * d.depth), scale) });
+    const an = { frame: F, base, depth, curved: { deviation: dev, flatEnough: dev <= Math.max(0.35 * room, 0.5) } };
+    Object.defineProperty(an, '_src', { value: { P, I, F, scale, cfg, cache: new Map() } });
+    return an;
+  }
+  function cutAlongLoop(P, I, loop, opts = {}) {
     if (!loop.closed) throw new Error('This border doesn’t go all the way round, so it can’t split the part. Pick one that circles a limb or the edge of a sleeve.');
     const nv = P.length / 3, nt = I.length / 3, ring = loop.verts, n = ring.length;
     const cutEdge = new Set();
@@ -1903,15 +1938,7 @@ const KMCore = (() => {
       tris[s].push(a, b, c);
     }
     // the cap: the border projected on its best-fit plane, triangulated with the same safeguards as flat cuts
-    let nx = 0, ny = 0, nz = 0, cx = 0, cy = 0, cz = 0;
-    for (let i = 0; i < n; i++) {
-      const p = 3 * ring[i], q = 3 * ring[(i + 1) % n];
-      nx += (P[p + 1] - P[q + 1]) * (P[p + 2] + P[q + 2]); ny += (P[p + 2] - P[q + 2]) * (P[p] + P[q]); nz += (P[p] - P[q]) * (P[p + 1] + P[q + 1]);
-      cx += P[p]; cy += P[p + 1]; cz += P[p + 2];
-    }
-    const F = frameFromNormal(norm3([nx, ny, nz]), [cx / n, cy / n, cz / n]);
-    const xy = new Float64Array(2 * n);
-    for (let i = 0; i < n; i++) { const p = 3 * ring[i], d = [P[p] - F.o[0], P[p + 1] - F.o[1], P[p + 2] - F.o[2]]; xy[2 * i] = d[0] * F.u[0] + d[1] * F.u[1] + d[2] * F.u[2]; xy[2 * i + 1] = d[0] * F.v[0] + d[1] * F.v[1] + d[2] * F.v[2]; }
+    const lf = loopFrame(P, ring), F = lf.F, xy = lf.xy, [cxn, cyn, czn] = lf.centre, cx = cxn * n, cy = cyn * n, cz = czn * n;
     const ringXY = new Map(ring.map((v, i) => [v, [xy[2 * i], xy[2 * i + 1]]]));
     const keep = untangledRing(xy), flat = [], ids = [];
     for (const k of keep) { ids.push(ring[k]); flat.push(xy[2 * k], xy[2 * k + 1]); }
@@ -1936,7 +1963,14 @@ const KMCore = (() => {
     for (let i = 0; i < tris[1].length; i += 3) for (let k = 0; k < 3; k++) { const a = tris[1][i + k], b = tris[1][i + (k + 1) % 3]; surf.add(a < b ? a * (nv + n + 2) + b : b * (nv + n + 2) + a); }
     let clash = keep.length < n;
     for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) { const a = cap[i + k], b = cap[i + (k + 1) % 3]; if (surf.has(a < b ? a * (nv + n + 2) + b : b * (nv + n + 2) + a)) { clash = true; break; } }
-    if (clash) {
+    const cfg = opts.cfg || { type: 'none' };
+    const keys = cfg.type === 'none' ? [] : (opts.keys || []).filter(k => regionAt({ loops: [makeLoop(ring, [], xy)], regions: buildRegions([makeLoop(ring, [], xy)]) }, k.x, k.y) === 0);
+    let V = null, pins = [];
+    if (keys.length) {
+      const a = analyzeLoop(P, I, loop, { type: 'none' }, 1);
+      if (!a.curved.flatEnough) throw new Error('This line bends too far out of flat for keys. Cut it without keys (set Keys to None), or use a flat cut here.');
+      ({ V, pins } = keyedLoopCap(pos, tris, ring, copy, xy, F, wantCCW, keys, cfg));
+    } else if (clash) {
       const c1 = nv + n, c2 = nv + n + 1;
       for (const c of [c1, c2]) { pos[3 * c] = cx / n; pos[3 * c + 1] = cy / n; pos[3 * c + 2] = cz / n; }
       cap.length = 0;
@@ -1947,9 +1981,10 @@ const KMCore = (() => {
       tris[1].push(...cap);
       for (let i = 0; i < cap.length; i += 3) tris[2].push(copy.get(cap[i]), copy.get(cap[i + 2]), copy.get(cap[i + 1])); // the same cap, facing the other piece
     }
+    const src = V || pos;
     const build = (list) => {
       const map = new Map(), out = [], idx = new Uint32Array(list.length);
-      for (let i = 0; i < list.length; i++) { const v = list[i]; let w = map.get(v); if (w === undefined) { w = out.length / 3; map.set(v, w); out.push(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]); } idx[i] = w; }
+      for (let i = 0; i < list.length; i++) { const v = list[i]; let w = map.get(v); if (w === undefined) { w = out.length / 3; map.set(v, w); out.push(src[3 * v], src[3 * v + 1], src[3 * v + 2]); } idx[i] = w; }
       const positions = new Float32Array(out);
       return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions) };
     };
@@ -1970,7 +2005,85 @@ const KMCore = (() => {
       throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
     for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
     parts.sort((x, y) => y.volume - x.volume);
-    return { parts, length: loop.length };
+    return { parts, pins, length: loop.length, frame: F };
+  }
+  // The keyed cap for a curved cut. For each side: a band from the cut line to its copy flattened on the plane,
+  // then the flat face with holes for the keys, then each key's peg or socket, built as on a flat cut.
+  function keyedLoopCap(pos, tris, ring, copy, xy, F, wantCCW1, keys, cfg) {
+    const V = Array.from(pos), n = ring.length;
+    const addV = (q) => { V.push(q[0], q[1], q[2]); return V.length / 3 - 1; };
+    const at = (x, y, z) => [F.o[0] + F.u[0] * x + F.v[0] * y + F.n[0] * z, F.o[1] + F.u[1] * x + F.v[1] * y + F.n[1] * z, F.o[2] + F.u[2] * x + F.v[2] * y + F.n[2] * z];
+    const posOf = (i) => [V[3 * i], V[3 * i + 1], V[3 * i + 2]];
+    const sec = { loops: [makeLoop(ring, [], xy)] }; sec.regions = buildRegions(sec.loops);
+    const pins = [];
+    for (const k of keys) { k.cfg = keyCfg(cfg, k); k.spec = keyGeometrySpec(k.cfg); k.angle = keyAngle(sec, 0, k.cfg); }
+    for (const s of [1, 2]) {
+      const T = tris[s], id = (v) => (s === 1 ? v : copy.get(v)), wantCCW = s === 1 ? wantCCW1 : !wantCCW1;
+      const push3 = (a, b, c) => T.push(a, b, c);
+      const pushOriented = (a, b, c, e) => {
+        const A = posOf(a), B = posOf(b), C = posOf(c);
+        const nn = cross3([B[0] - A[0], B[1] - A[1], B[2] - A[2]], [C[0] - A[0], C[1] - A[1], C[2] - A[2]]);
+        if (nn[0] * e[0] + nn[1] * e[1] + nn[2] * e[2] < 0) push3(a, c, b); else push3(a, b, c);
+      };
+      // the band: side 1 runs along the line (a to b), so its band and face run the other way; side 2 mirrors it
+      const proj = ring.map((v, i) => addV(at(xy[2 * i], xy[2 * i + 1], 0)));
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n, a = id(ring[i]), b = id(ring[j]);
+        if (s === 1) { push3(b, a, proj[i]); push3(b, proj[i], proj[j]); } else { push3(b, proj[i], a); push3(b, proj[j], proj[i]); }
+      }
+      // the flat face, with a hole per key
+      const flat = [], ids = [], holes = [], rings = [], ringXY = new Map();
+      const pushRing = (ringIds, rxy, outer) => {
+        rings.push(ringIds);
+        for (let q = 0; q < ringIds.length; q++) ringXY.set(ringIds[q], [rxy[2 * q], rxy[2 * q + 1]]);
+        if (!outer) holes.push(ids.length);
+        for (const q of outer ? untangledRing(rxy) : rxy.map((_, i) => i).filter(i => i % 2 === 0).map(i => i / 2)) { ids.push(ringIds[q]); flat.push(rxy[2 * q], rxy[2 * q + 1]); }
+      };
+      pushRing(proj, Array.from(xy), true);
+      const sg = wantCCW ? -1 : +1; // the side whose face points along the plane's normal is "below", as on flat cuts
+      const tubes = [];
+      for (const k of keys) {
+        const ks = k.spec, kc = k.cfg;
+        let role, grow, depth, dir, tipR = ks.r;
+        if (cfg.type === 'peg') {
+          const pegSide = cfg.pegSide === 'above' ? +1 : -1;
+          if (sg === pegSide) { role = 'peg'; grow = 0; depth = kc.length; dir = -sg; tipR = ks.r * ks.taper; }
+          else { role = 'socket'; grow = ks.cs; depth = kc.length + ks.ca; dir = sg; tipR = ks.r * ks.sockTip; }
+        } else { role = 'socket'; grow = ks.cs; dir = sg; depth = cfg.type === 'dowel' ? kc.length / 2 + ks.ca : kc.length + ks.ca; }
+        const prof = keyProfile(ks.shape, ks.r, grow, k.angle, ks.res), prof1 = keyProfile(ks.shape, tipR, grow, k.angle, ks.res);
+        const kr = [], kxy = [];
+        for (const [px, py] of prof) { kr.push(addV(at(k.x + px, k.y + py, 0))); kxy.push(k.x + px, k.y + py); }
+        pushRing(kr, kxy, false);
+        tubes.push({ k, role, prof1, depth, dir, ring: kr });
+      }
+      const loc = earcut(flat, holes);
+      let sum = 0; for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
+      const flip = wantCCW ? sum < 0 : sum > 0, cap = [];
+      for (let i = 0; i < loc.length; i += 3) { if (flip) cap.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]); else cap.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]); }
+      for (const r of rings) fixTJunctions(cap, r);
+      const xyOf = (v) => ringXY.get(v);
+      splitThroughPoints(cap, rings, xyOf);
+      patchCap(cap, rings, xyOf, wantCCW);
+      T.push(...cap);
+      const nrm = F.n;
+      for (const tb of tubes) {
+        const z = tb.dir * tb.depth;
+        const ring1 = tb.prof1.map(([px, py]) => addV(at(tb.k.x + px, tb.k.y + py, z)));
+        const center = addV(at(tb.k.x, tb.k.y, z)), axis0 = at(tb.k.x, tb.k.y, 0), m = tb.ring.length;
+        for (let i = 0; i < m; i++) {
+          const a = tb.ring[i], b = tb.ring[(i + 1) % m], c = ring1[(i + 1) % m], d = ring1[i];
+          const A = posOf(a), C = posOf(c), mid = [(A[0] + C[0]) / 2, (A[1] + C[1]) / 2, (A[2] + C[2]) / 2];
+          const along = (mid[0] - axis0[0]) * nrm[0] + (mid[1] - axis0[1]) * nrm[1] + (mid[2] - axis0[2]) * nrm[2];
+          let rx = mid[0] - axis0[0] - nrm[0] * along, ry = mid[1] - axis0[1] - nrm[1] * along, rz = mid[2] - axis0[2] - nrm[2] * along;
+          if (tb.role === 'socket') { rx = -rx; ry = -ry; rz = -rz; }
+          pushOriented(a, b, c, [rx, ry, rz]); pushOriented(a, c, d, [rx, ry, rz]);
+          const e = tb.role === 'peg' ? [nrm[0] * tb.dir, nrm[1] * tb.dir, nrm[2] * tb.dir] : [-nrm[0] * tb.dir, -nrm[1] * tb.dir, -nrm[2] * tb.dir];
+          pushOriented(center, ring1[i], ring1[(i + 1) % m], e);
+        }
+      }
+    }
+    if (cfg.type === 'dowel') for (const k of keys) pins.push(makePin(at, k, k.spec, k.cfg.length));
+    return { V, pins };
   }
 
 
@@ -2381,7 +2494,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
 })();
