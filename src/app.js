@@ -1237,6 +1237,7 @@
     if (tc.dragging || tc.axis) return;
     ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = performance.now(); ptr.dragKey = -1; ptr.ring = null; ptr.tilt = null; ptr.sheet = null;
     if (e.altKey) return; // Alt-drag always orbits
+    if (state.regions.on) return; // the cut plane is hidden while surface regions show: drags orbit, clicks pick lines
     const ring = pickRing(e);
     if (ring) { startRing(ring, e); return; }
     const k = pickKey(e);
@@ -1261,6 +1262,7 @@
       moveTilt(e);
       return;
     }
+    if (state.regions.on) { if (!ptr.down) canvas.style.cursor = ''; return; } // nothing on the hidden plane to grab
     if (!ptr.down && selectedPart() && !tc.dragging) {
       const ring = tc.axis ? null : pickRing(e);
       setRingHover(ring ? ring.ax : null);
@@ -1548,10 +1550,10 @@
     }
     const p = selectedPart();
     el.innerHTML = p ? cutPanel(p) : modelPanel();
-    planeBar.hidden = !p;
-    planeBar.innerHTML = p ? planeBarHTML() : '';
+    planeBar.hidden = !p || state.regions.on; // it works the cut plane, which steps aside while regions show
+    planeBar.innerHTML = p && !state.regions.on ? planeBarHTML() : '';
     suggestPanel.innerHTML = p ? suggestSection() : '';
-    stage.style.setProperty('--bar-h', p ? `${planeBar.offsetHeight}px` : '0px');
+    stage.style.setProperty('--bar-h', p && !state.regions.on ? `${planeBar.offsetHeight}px` : '0px');
     updatePositionReadout();
   }
   // The cut plane's controls, in a toolbar along the bottom of the view.
@@ -1853,8 +1855,28 @@
     clearPick();
     const near = K.borderLoopNear(p.positions, regionsFor(p), linesFor(p), point);
     if (!near || near.distance > K.diag(p.bbox) * 0.03) { toast('Click on or next to one of the dark border lines to cut along it.'); renderPick(); return; }
-    const pick = { partId: p.id, loop: near.loop };
-    try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop); } catch (err) { pick.error = err.message; }
+    const pick = { partId: p.id, loop: near.loop, keys: [] };
+    // keys: placed and checked like a flat cut's, on the flat face at the line's best-fit plane
+    const cfg = coreCfg();
+    if (near.loop.closed && cfg.type !== 'none') {
+      try {
+        const an = K.analyzeLoop(p.positions, p.indices, near.loop, cfg, K.diag(p.bbox));
+        pick.frame = an.frame;
+        if (!an.curved.flatEnough) pick.noKeys = 'This line bends too far out of flat for keys, so it will be cut without them.';
+        else {
+          const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, cfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, cfg, state.cfg.perArea, new Set());
+          const ok = K.evaluateKeys(an, keys, cfg, new Set());
+          pick.keys = keys.filter((k, i) => ok[i].ok);
+          if (!pick.keys.length) pick.noKeys = 'No room for keys inside this line at these settings, so it will be cut without them.';
+        }
+      } catch (err) { pick.noKeys = 'Keys couldn’t be placed on this line, so it will be cut without them.'; }
+    }
+    try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { cfg, keys: pick.keys }); }
+    catch (err) {
+      if (pick.keys.length) { // still offer the cut, without keys
+        try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop); pick.keys = []; pick.noKeys = 'Keys didn’t fit cleanly here, so it will be cut without them.'; } catch (e2) { pick.error = e2.message; }
+      } else pick.error = err.message;
+    }
     state.regions.pick = pick;
     const v = views.get(p.id);
     if (v) {
@@ -1863,36 +1885,70 @@
         : new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xe5484d, depthTest: false }));
       line.renderOrder = 9;
       v.pickLine = line; v.mesh.add(line);
+      if (pick.keys.length && pick.frame) { v.pickKeys = curvedKeyMarkers(pick.keys, pick.frame); v.mesh.add(v.pickKeys); }
     }
     renderPick();
     markDirty();
   }
+  function curvedKeyMarkers(keys, F) {
+    const g = new THREE.Group(), cfg = state.cfg;
+    const world = (geom) => { // plane coordinates (u, v, n) to the part's coordinates
+      for (const name of ['position', 'normal']) {
+        const att = geom.attributes[name];
+        if (!att) continue;
+        const a = att.array, o = name === 'position' ? F.o : [0, 0, 0];
+        for (let i = 0; i < a.length; i += 3) { const x = a[i], y = a[i + 1], z = a[i + 2]; for (let k = 0; k < 3; k++) a[i + k] = o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z; }
+      }
+      return geom;
+    };
+    const sec = { regions: [] };
+    for (const k of keys) {
+      const kc = K.keyCfg(cfg, k), ks = K.keyGeometrySpec(kc), ang = K.keyAngle(sec, -1, kc) + 0;
+      const prof = (rr, dd) => K.keyProfile(ks.shape, rr, dd, k.angle !== undefined ? k.angle : ang, ks.res).map(([x, y]) => [x + k.x, y + k.y]);
+      let z0, z1, tipR = ks.r;
+      if (cfg.type === 'peg') { z0 = 0; z1 = (cfg.pegSide === 'above' ? -1 : 1) * kc.length; tipR = ks.r * ks.taper; }
+      else if (cfg.type === 'dowel') { z0 = -kc.length / 2; z1 = kc.length / 2; }
+      else { z0 = -kc.length; z1 = kc.length; }
+      const disc = new THREE.Mesh(world(fanGeometry(prof(ks.r, ks.cs), 0.02)), new THREE.MeshBasicMaterial({ color: 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: 0.8, depthTest: false }));
+      const body = new THREE.Mesh(world(prismGeometry(prof(ks.r, 0), prof(tipR, 0), z0, z1)), new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.4 }));
+      disc.renderOrder = 8; body.renderOrder = 8;
+      g.add(disc, body);
+    }
+    return g;
+  }
   function clearPick() {
-    for (const v of views.values()) if (v.pickLine) { v.mesh.remove(v.pickLine); v.pickLine.geometry.dispose(); v.pickLine.material.dispose(); v.pickLine = null; }
+    for (const v of views.values()) {
+      if (v.pickLine) { v.mesh.remove(v.pickLine); v.pickLine.geometry.dispose(); v.pickLine.material.dispose(); v.pickLine = null; }
+      if (v.pickKeys) { v.mesh.remove(v.pickKeys); clearGroup(v.pickKeys); v.pickKeys = null; }
+    }
     state.regions.pick = null;
   }
   function renderPick() {
     const el = $('#cutLineInfo'), pick = state.regions.pick;
     if (!el) return;
-    if (!pick) { el.innerHTML = `<p class="muted small">Click a dark border line to cut along it. Curved cuts don’t add keys yet.</p>`; return; }
+    if (!pick) { el.innerHTML = `<p class="muted small">Click a dark border line to cut along it. Keys use your key settings.</p>`; return; }
     const len = `${fmt(pick.loop.length)} mm`;
     if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>`; return; }
     const cm3 = (v) => (v / 1000 >= 10 ? Math.round(v / 1000) : (v / 1000).toFixed(1));
-    el.innerHTML = `<p class="status ok">${ICONS.check}<span>A ${len} line all the way round. It splits the part into pieces of ${cm3(pick.result.parts[0].volume)} and ${cm3(pick.result.parts[1].volume)} cm³.</span></p>
-      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>Cut along this line</span></button>
-      <p class="muted small">Curved cuts don’t add keys yet.</p>`;
+    const nk = pick.keys.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
+    const keyLine = nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
+    el.innerHTML = `<p class="status ok">${ICONS.check}<span>A ${len} line all the way round. It splits the part into pieces of ${cm3(pick.result.parts[0].volume)} and ${cm3(pick.result.parts[1].volume)} cm³.${keyLine}</span></p>
+      ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
+      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>Cut along this line</span></button>`;
   }
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);
     if (!p || !pick.result) return;
     const made = pick.result.parts.map((c, i) => makePart({ name: `${p.name} ${i ? 'B' : 'A'}`, color: i ? nextColor() : p.color, positions: c.positions, indices: c.indices }));
+    (pick.result.pins || []).forEach((pin, i) => made.push(makePart({ name: `${p.name} pin ${i + 1}`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' })));
     const idx = state.parts.indexOf(p);
     clearPick();
     commit(state.parts.slice(0, idx).concat(made, state.parts.slice(idx + 1)), 'the curved cut');
     if (state.selectedId === p.id) state.selectedId = null;
     syncScene();
     renderPick();
-    toast(`Cut along the line into 2 pieces. Click another line to keep cutting.`);
+    const pinsMade = (pick.result.pins || []).length;
+    toast(`Cut along the line into 2 pieces${pinsMade ? ` and ${pinsMade} dowel pins` : ''}. Click another line to keep cutting.`);
   }
   regionsPanel.addEventListener('click', (e) => { if (e.target.closest('[data-act=cut-line]')) cutAlongPick(); });
   function applyRegions() {
@@ -1928,7 +1984,7 @@
     state.regions.on = on;
     applyRegions();
     updatePreview();
-    placeAreaTags(); placeSuggestPins(); updateHint();
+    placeAreaTags(); placeSuggestPins(); updateHint(); renderInspector();
     markDirty();
   }
   $('#regionsBtn').addEventListener('click', () => {

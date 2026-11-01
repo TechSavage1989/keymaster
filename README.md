@@ -12,7 +12,7 @@ Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com*
 - **Suggested cuts.** Press **Find cut spots** and Keymaster looks for narrow points (wrists, ankles, necks), seams and panel lines, and separate pieces. Each one appears as a lettered pin on the model; click it to move the cut there.
 - **Keys sized to fit.** By default each area gets the biggest key that fits, between the Largest and Smallest sizes you set, and never more than half the area's width. Choose **Resin** or **Filament** under Printer (with no part selected) for sizes, gaps and walls that print reliably; resin allows keys down to 1 mm for miniatures. Magnets use standard disc sizes.
 - **Customise any key.** Click a key to give it its own shape, size, length, gap, taper or turn. The other keys keep the general settings.
-- **Surface regions.** The regions button above the view colours the model by where its surface turns sharply, like ZBrush polygroups. Click a border line that goes all the way round, such as a sleeve hem, and **Cut along this line** splits the part along it with a curved, sealed cut face. Curved cuts don't add keys yet.
+- **Surface regions.** The regions button above the view colours the model by where its surface turns sharply, like ZBrush polygroups. Click a border line that goes all the way round, such as a sleeve hem, and **Cut along this line** splits the part along it with a curved, sealed cut face, with keys from your key settings (a line that bends too far out of flat is cut without keys).
 - **Checked before you cut.** Each key is tested for thin walls and for sockets that would break through the surface. Problem keys turn red and explain why.
 - **Leave areas joined.** When a cut crosses several separate areas, each gets a label in the view. Click a label (or untick the area in the side panel) to keep that area attached, and click it again to cut it.
 - **Model tools.** Fill holes, fix inside-out models, turn the model a quarter turn, scale it (including inches to millimeters), and see which parts fit your printer bed.
@@ -30,6 +30,8 @@ Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com*
 Shortcuts: Enter cut, Esc done, X/Y/Z align, F frame, Delete remove key, Ctrl+Z undo, Ctrl+Shift+Z redo.
 
 **Before printing a large piece, print a small test cut.** The right fit depends on your printer, material, orientation and post-processing.
+
+The version shows beside the name at the top left (for example **v1.14 · 2c6ad6**). After an update, refresh the page: if the label changed, the new version is live.
 
 ## Running it yourself
 

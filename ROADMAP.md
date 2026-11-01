@@ -17,6 +17,8 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Adjustable peg taper on every shape, from straight to a point (cone or pyramid), with a matching or straight hole. The fit gap is kept at right angles to sloping walls.
 - Cut suggestions: narrow points (wrists, ankles, necks), seams and panel lines, and separate pieces, found from the model's shape, shown as lettered pins and a list. Picking a narrow point cuts just that limb.
 - Individually configurable keys: click a key to give it its own shape, size, length, gap, taper and turn, checked and cut at its own size.
+- A version label beside the name (from 1.14), so a refresh shows whether an update is live.
+- Keys on curved cuts, sized to fit like flat ones; lines that bend too far are cut without keys.
 - Curved cuts along a border: with surface regions showing, click a border line that goes all the way round and cut along it, with sealed curved faces.
 - Surface regions: colour a model by where its surface turns sharply, like ZBrush polygroups, with an adjustable threshold.
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
@@ -24,7 +26,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 
 ## Next
 
-1. **Curved cuts along the model's own contours.** The owner chose curved cuts that follow a line, and wants Keymaster to find those lines itself: split the surface into regions by creases, normal changes and contours, the way ZBrush makes polygroups, and cut along a region border, such as an arm off at the sleeve hem. Planned in steps, each its own pull request: (a) show the detected surface regions (done: splits at sharp turns, which suits hard-surface models); (a2) also split organic sculpts, where folds and hems are soft, by concave folds and changes in thickness; (b) a sealed curved cut along a chosen border (done: click a border line while regions show); (c) keys on a curved cut face; (d) paint or adjust the cut line by hand.
+1. **Curved cuts along the model's own contours.** The owner chose curved cuts that follow a line, and wants Keymaster to find those lines itself: split the surface into regions by creases, normal changes and contours, the way ZBrush makes polygroups, and cut along a region border, such as an arm off at the sleeve hem. Planned in steps, each its own pull request: (a) show the detected surface regions (done: splits at sharp turns, which suits hard-surface models); (a2) also split organic sculpts, where folds and hems are soft, by concave folds and changes in thickness; (b) a sealed curved cut along a chosen border (done: click a border line while regions show); (c) keys on a curved cut face (done: on a flat face at the line's best-fit plane); (d) paint or adjust the cut line by hand.
 2. **Limit the cut to a region.** Draw a circle or box on the plane so only what's inside is cut, even where the cut face is one connected area (take off a hand without slicing into a cape behind it).
 3. **Per-area key settings.** Choose key type, size and count separately for each area of a cut face.
 4. **Locking joints.** Twist-lock (push in and turn) and dovetail slide-in keys that hold pieces together before gluing. Needs test prints from the owner to tune the fit.
