@@ -8,7 +8,7 @@ Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com*
 
 - **Live cut preview.** Drag the arrow to slide the cut, or switch to Tilt and drag a ring to angle it. The cut face appears as a hatched section while you drag, even on dense sculpts.
 - **Cut as many times as you need.** Every piece lands in the parts list and can be cut again. Undo and redo cover every step.
-- **Keys that fit.** Choose pegs (round or square, optionally tapered), dowel holes with printable pins, or magnet pockets. Keys are placed automatically, and you can click the cut face to add one, drag to move it, or right-click to remove it.
+- **Keys that fit.** Choose pegs (optionally tapered), dowel holes with printable pins, or magnet pockets. Keys come in seven shapes: round, square, hexagon, cross, oval, slot, and a D-shape that only fits one way round. Shaped keys line up with each area's long side, and the fit gap is even all the way round. Keys are placed automatically, and you can click the cut face to add one, drag to move it, or right-click to remove it.
 - **Checked before you cut.** Each key is tested for thin walls and for sockets that would break through the surface. Problem keys turn red and explain why.
 - **Leave areas joined.** When a cut crosses several separate areas, each gets a label in the view. Click a label (or untick the area in the side panel) to keep that area attached, and click it again to cut it.
 - **Model tools.** Fill holes, fix inside-out models, turn the model a quarter turn, scale it (including inches to millimeters), and see which parts fit your printer bed.

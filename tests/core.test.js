@@ -143,6 +143,92 @@ console.log('sphere with keys');
   check('overlapping keys rejected', !ev2[1].ok && !ev2[2].ok, ev2);
 }
 
+console.log('key shapes');
+{
+  // polygon helpers for checking outlines
+  const segDist = (px, py, a, b) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy;
+    let s = L > 0 ? ((px - a[0]) * dx + (py - a[1]) * dy) / L : 0; s = Math.max(0, Math.min(1, s));
+    return Math.hypot(a[0] + s * dx - px, a[1] + s * dy - py);
+  };
+  const polyDist = (A, B) => { let d = Infinity; for (const p of A) for (let i = 0; i < B.length; i++) d = Math.min(d, segDist(p[0], p[1], B[i], B[(i + 1) % B.length])); return d; };
+  const inside = (poly, x, y) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+  const prismatoid = (A0, A1, h) => { const mid = A0.map((p, i) => [(p[0] + A1[i][0]) / 2, (p[1] + A1[i][1]) / 2]); return h / 6 * (K.profileArea(A0) + 4 * K.profileArea(mid) + K.profileArea(A1)); };
+
+  check('seven shapes offered', K.KEY_SHAPES.length === 7 && K.KEY_SHAPES.includes('dshape') && K.KEY_SHAPES.includes('slot'));
+  for (const shape of K.KEY_SHAPES) {
+    const r = 2.5, c = 0.2, res = 40;
+    for (const ang of [0, 0.7]) {
+      const peg = K.keyProfile(shape, r, 0, ang, res), sock = K.keyProfile(shape, r, c, ang, res);
+      const gap = Math.min(polyDist(peg, sock), polyDist(sock, peg));
+      check(`${shape}${ang ? ' (turned)' : ''}: socket clears the peg by the full gap on every side`, gap > c * 0.97 && peg.every(([x, y]) => inside(sock, x, y)), gap);
+    }
+    const peg = K.keyProfile(shape, r, 0, 0, res), tip = K.keyProfile(shape, r * 0.8, 0, 0, res);
+    check(`${shape}: tip ring pairs with base ring`, peg.length === tip.length);
+    check(`${shape}: outline runs counter-clockwise around the centre`, K.profileArea(peg) > 0 && peg.every((a, i) => { const b = peg[(i + 1) % peg.length]; return a[0] * b[1] - a[1] * b[0] > 0; }));
+    const fit = K.profileFit(peg);
+    check(`${shape}: width matches the size setting`, Math.abs(fit.inner - (shape === 'cross' ? 0.38 * r * Math.SQRT2 : shape === 'dshape' ? 0.5 * r : r)) < 0.05 * r, fit);
+  }
+  const d0 = K.keyProfile('dshape', 2.5, 0, 0, 40), d1 = K.keyProfile('dshape', 2.5, 0, Math.PI, 40);
+  check('D-shape only fits one way round', d0.some(([x, y]) => !inside(d1, x * 0.97, y * 0.97)));
+  check('magnets fall back to round for other shapes', K.keyGeometrySpec(cfgOf({ type: 'magnet', shape: 'cross' })).shape === 'round');
+
+  // every shape cuts into closed solids, and the volume adds up exactly: sphere minus sockets plus pegs and pins
+  const s = K.prepareMesh(uvSphere(20, 96, 64));
+  const V0 = s.report.volume;
+  const F = K.frameFromNormal([0, 0, 1], [0, 0, 1.3]);
+  for (const type of ['peg', 'dowel', 'magnet']) {
+    const shapes = type === 'magnet' ? K.MAGNET_SHAPES : K.KEY_SHAPES;
+    for (const shape of shapes) {
+      if ((shape === 'round' || shape === 'square') && type !== 'peg') continue; // covered above
+      const d = K.KEY_DEFAULTS[type];
+      const cfg = cfgOf({ type, shape, diameter: d.diameter, length: d.length, taper: type === 'peg', turn: 20 });
+      const an = K.analyzePlane(s.positions, s.indices, F, cfg, 40);
+      const keys = K.autoPlaceKeys(an, cfg, 3, new Set());
+      const ev = K.evaluateKeys(an, keys, cfg, new Set());
+      check(`${type}/${shape}: 3 valid keys placed`, keys.length === 3 && ev.every(e => e.ok), [keys.length, ev.filter(e => !e.ok)]);
+      const res = K.cutMesh(s.positions, s.indices, F, { scale: 40, cfg, keys });
+      check(`${type}/${shape}: parts and pins closed`, res.parts.length === 2 && allClosed(res.parts) && allClosed(res.pins), res.parts.map(p => K.edgeReport(p.indices)));
+      const spec = K.keyGeometrySpec(cfg), ang = K.keyAngle(an.base, 0, cfg);
+      const P = (rr, dd) => K.keyProfile(spec.shape, rr, dd, ang, spec.res);
+      let expect = V0;
+      if (type === 'peg') expect += keys.length * (prismatoid(P(spec.r, 0), P(spec.r * 0.8, 0), d.length) - prismatoid(P(spec.r, spec.c), P(spec.r * 0.8, spec.c), d.length + spec.ca));
+      else expect -= keys.length * 2 * prismatoid(P(spec.r, spec.c), P(spec.r, spec.c), type === 'dowel' ? d.length / 2 + spec.ca : d.length + spec.ca);
+      expect += sumVol(res.pins);
+      const total = sumVol(res.parts) + sumVol(res.pins);
+      check(`${type}/${shape}: volume adds up`, Math.abs(total - expect) / V0 < 1e-4, [total, expect]);
+    }
+  }
+
+  // a slot lines up with a long narrow area and fits where a round key of the same length can't
+  const bar = K.prepareMesh({ positions: gridCube(3).positions.map((v, i) => v * [60, 9, 20][i % 3]), indices: null });
+  const Fb = K.frameFromNormal([0, 0, 1], [30, 4.5, 10]);
+  const slot = cfgOf({ type: 'peg', shape: 'slot', diameter: 4, length: 6 });
+  const anb = K.analyzePlane(bar.positions, bar.indices, Fb, slot, 60);
+  const ang = K.keyAngle(anb.base, 0, slot), u = Fb.u;
+  const dir = [Math.cos(ang) * u[0] + Math.sin(ang) * Fb.v[0], Math.cos(ang) * u[1] + Math.sin(ang) * Fb.v[1]];
+  check('slot follows the long direction of the area', Math.abs(dir[0]) > 0.99, dir);
+  const kb = K.autoPlaceKeys(anb, slot, 3, new Set());
+  check('slots fit in a narrow bar', kb.length === 3 && K.evaluateKeys(anb, kb, slot, new Set()).every(e => e.ok), kb.length);
+  const across = { ...slot, align: false, turn: 0 };
+  const turned = K.keyAngle(anb.base, 0, across) === 0 ? { ...across, turn: Math.abs(u[0]) > 0.9 ? 90 : 0 } : across;
+  check('a slot turned across the bar is rejected', K.evaluateKeys(anb, [{ x: 0, y: 0 }], turned, new Set())[0].reason === 'Too close to the edge', K.evaluateKeys(anb, [{ x: 0, y: 0 }], turned, new Set())[0]);
+  const rb = K.cutMesh(bar.positions, bar.indices, Fb, { scale: 60, cfg: slot, keys: kb });
+  check('slot cut closed', rb.parts.length === 2 && allClosed(rb.parts));
+  // turn setting adds to the area's direction; round keys never turn
+  const sq = { loops: [{ xy: [0, 0, 40, 0, 40, 8, 0, 8].map((v, i) => v), area: 320, bbox: [0, 0, 40, 8] }], regions: [{ outer: 0, holes: [], area: 320, bbox: [0, 0, 40, 8] }] };
+  const rot = (deg) => { const a = deg * Math.PI / 180, xy = []; const b = sq.loops[0].xy; for (let i = 0; i < b.length; i += 2) xy.push(b[i] * Math.cos(a) - b[i + 1] * Math.sin(a), b[i] * Math.sin(a) + b[i + 1] * Math.cos(a)); return { loops: [{ ...sq.loops[0], xy }], regions: [{ ...sq.regions[0] }] }; };
+  const a30 = K.keyAngle(rot(30), 0, { type: 'peg', shape: 'oval' });
+  check('keys follow an area turned 30°', Math.abs(Math.sin(a30 - Math.PI / 6)) < 1e-6, a30 * 180 / Math.PI);
+  check('turn adds to the area direction', Math.abs(Math.sin(K.keyAngle(rot(30), 0, { type: 'peg', shape: 'oval', turn: 45 }) - 75 * Math.PI / 180)) < 1e-6);
+  check('round keys never turn', K.keyAngle(rot(30), 0, { type: 'peg', shape: 'round', turn: 45 }) === 0);
+
+  // regression: square sockets whose straight sides line up used to leave gaps in the cut face
+  const sqm = cfgOf({ type: 'magnet', shape: 'square', diameter: 6, length: 3, align: false });
+  const ra = K.cutMesh(s.positions, s.indices, F, { scale: 40, cfg: sqm, keys: [{ x: 0, y: 0 }, { x: 0, y: -12 }, { x: 10, y: 0 }] });
+  check('lined-up square sockets leave no gaps', allClosed(ra.parts), ra.parts.map(p => K.edgeReport(p.indices)));
+}
+
 console.log('torus knot: many regions, components, selective cut');
 {
   const k = K.prepareMesh(K.torusKnot());

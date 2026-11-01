@@ -33,6 +33,8 @@ Always rebuild and commit `index.html` with any `src/` change. CI fails if it is
 
 The plane is a frame `{o, n, u, v}` with `u × v = n`. Key positions are 2D `(x, y)` in that frame, which is the same as the cut plane object's local space in the app. `computeSection` nudges the plane by a tiny amount if any vertex sits on it, chains crossing segments into loops, and `buildRegions` nests loops into areas (outer plus holes). Each side gets its own copy of the section vertices; caps are triangulated with the built-in earcut and then `fixTJunctions` re-inserts any ring points earcut dropped, so cap edges always match the side walls. Skipped areas leave their crossing triangles whole, which is how "leave this area joined" works. Shells the cut never touched (eyes, inner voids) are merged into the piece that contains them.
 
+Key outlines come from `keyProfile(shape, r, d, angle, res)`. A socket is the peg outline grown by the clearance `d` (never scaled), and the vertex count depends only on `shape` and `res`, so tapered top and bottom rings pair up. **Every key shape must be star-shaped around its centre**: the cap fans and the wall orientation in `cutMesh` and `makePin` rely on it, and `core.test.js` checks it. Fit checks for non-round shapes use `footprintClear`, which follows the real outline. `splitThroughPoints` repairs cap edges that earcut runs straight past ring points, which happens when straight socket sides line up.
+
 ## Interface conventions
 
 - Copy: sentence case, plain verbs, say what a button does ("Cut part", "Export parts"). Errors say what happened and how to fix it, without apologizing.

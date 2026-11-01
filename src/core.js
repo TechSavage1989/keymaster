@@ -637,6 +637,44 @@ const KMCore = (() => {
     }
   }
 
+  // Earcut can also leave a long cap edge running straight past ring points it still uses elsewhere, for example
+  // when the straight sides of two square sockets line up. Split any cap edge that passes through such a point.
+  function splitThroughPoints(tris, rings, xyOf) {
+    const edges = new Set();
+    for (let t = 0; t < tris.length; t += 3) for (let k = 0; k < 3; k++) edges.add(tris[t + k] + ',' + tris[t + (k + 1) % 3]);
+    const cand = new Set();
+    for (const r of rings) for (let i = 0; i < r.length; i++) {
+      const a = r[i], b = r[(i + 1) % r.length];
+      if (!edges.has(a + ',' + b) && !edges.has(b + ',' + a)) { cand.add(a); cand.add(b); }
+    }
+    if (!cand.size) return;
+    const pts = [...cand].map(v => [v, xyOf(v)]);
+    const queue = [];
+    for (let t = 0; t < tris.length; t += 3) queue.push([tris[t], tris[t + 1], tris[t + 2]]);
+    const out = [];
+    let guard = queue.length * 4 + 1000;
+    while (queue.length && guard-- > 0) {
+      const tri = queue.pop();
+      let hit = null;
+      for (let k = 0; k < 3 && !hit; k++) {
+        const p = tri[k], q = tri[(k + 1) % 3], x = tri[(k + 2) % 3];
+        const P = xyOf(p), Q = xyOf(q), dx = Q[0] - P[0], dy = Q[1] - P[1], L2 = dx * dx + dy * dy;
+        if (L2 <= 0) continue;
+        for (const [v, V] of pts) {
+          if (v === p || v === q || v === x) continue;
+          const s = ((V[0] - P[0]) * dx + (V[1] - P[1]) * dy) / L2;
+          if (s <= 1e-9 || s >= 1 - 1e-9) continue;
+          const off = Math.abs((V[0] - P[0]) * dy - (V[1] - P[1]) * dx) / Math.sqrt(L2);
+          if (off < 1e-7 * Math.sqrt(L2) + 1e-9) { hit = [p, v, q, x]; break; }
+        }
+      }
+      if (hit) { const [p, v, q, x] = hit; queue.push([p, v, x], [v, q, x]); } else out.push(...tri);
+    }
+    if (guard <= 0) return; // pathological input: keep the original triangles
+    tris.length = 0;
+    for (const v of out) tris.push(v);
+  }
+
   /* ---------- frames and planes ---------- */
   function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
   function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
@@ -865,14 +903,123 @@ const KMCore = (() => {
   function keyGeometrySpec(cfg) {
     const r = cfg.diameter / 2, c = cfg.clearance, ca = cfg.clearance + 0.1;
     const taper = cfg.type === 'peg' && cfg.taper ? 0.8 : 1;
-    const footprint = (rad) => cfg.shape === 'square' ? rad * Math.SQRT2 : rad;
+    const shape = shapeFor(cfg);
+    const res = profileRes(r + c);
+    const sock = keyProfile(shape, r, c, 0, res);
     let sockets; // [{side:-1|+1, depth}]
     if (cfg.type === 'peg') {
       const s = cfg.pegSide === 'above' ? -1 : +1; // socket goes into the side opposite the peg
       sockets = [{ side: s, depth: cfg.length + ca }];
     } else if (cfg.type === 'dowel') sockets = [{ side: -1, depth: cfg.length / 2 + ca }, { side: +1, depth: cfg.length / 2 + ca }];
     else sockets = [{ side: -1, depth: cfg.length + ca }, { side: +1, depth: cfg.length + ca }];
-    return { r, c, ca, taper, sockets, outer: footprint(r + c) };
+    const fit = profileFit(sock);
+    return { r, c, ca, taper, sockets, shape, res, outer: shape === 'round' ? r + c : fit.outer, inner: shape === 'round' ? r + c : fit.inner };
+  }
+
+  /* ---------- key shapes ----------
+     Every shape is defined by its half-width r and an outward offset d, so a socket is the peg grown by exactly
+     the clearance on every side (scaling would leave thin gaps on shapes like the cross). Vertex count depends
+     only on the shape and res, so the top and bottom rings of a tapered key always pair up. All shapes are
+     star-shaped around the key centre, which the cap fans and wall orientation in cutMesh rely on. */
+  const KEY_SHAPES = ['round', 'square', 'hexagon', 'cross', 'oval', 'slot', 'dshape'];
+  const MAGNET_SHAPES = ['round', 'square'];
+  function shapeFor(cfg) {
+    const s = KEY_SHAPES.includes(cfg.shape) ? cfg.shape : 'round';
+    return cfg.type === 'magnet' && !MAGNET_SHAPES.includes(s) ? 'round' : s;
+  }
+  function profileRes(rad) { return Math.max(20, Math.min(56, Math.round((2 * Math.PI * rad) / 0.5))); }
+  function keyProfile(shape, r, d = 0, angle = 0, res = profileRes(r + d)) {
+    const R = r + d, out = [];
+    const arc = (cx, cy, rad, a0, a1, n, closed) => { for (let i = 0; i < n; i++) { const a = a0 + (a1 - a0) * (closed ? i / n : i / (n - 1)); out.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad]); } };
+    switch (shape) {
+      case 'square': out.push([R, -R], [R, R], [-R, R], [-R, -R]); break;
+      case 'hexagon': { const q = R * 2 / Math.sqrt(3); arc(0, 0, q, 0, 2 * Math.PI, 6, true); break; } // across flats = 2R
+      case 'cross': {
+        const w = 0.38 * r + d; // arm half-thickness
+        out.push([R, -w], [R, w], [w, w], [w, R], [-w, R], [-w, w], [-R, w], [-R, -w], [-w, -w], [-w, -R], [w, -R], [w, -w]);
+        break;
+      }
+      case 'oval': { // ellipse 3:2, grown along its true normals so the gap is even all round
+        const a = 1.5 * r, b = r;
+        for (let i = 0; i < res; i++) {
+          const t = (i / res) * 2 * Math.PI, nx = b * Math.cos(t), ny = a * Math.sin(t), nl = Math.hypot(nx, ny);
+          out.push([a * Math.cos(t) + d * nx / nl, b * Math.sin(t) + d * ny / nl]);
+        }
+        break;
+      }
+      case 'slot': { const h = Math.max(4, Math.round(res / 2)); arc(r, 0, R, -Math.PI / 2, Math.PI / 2, h, false); arc(-r, 0, R, Math.PI / 2, Math.PI * 1.5, h, false); break; }
+      case 'dshape': { const f = Math.min(0.5 * r + d, R * 0.999), a0 = Math.acos(f / R); arc(0, 0, R, a0, 2 * Math.PI - a0, res, false); break; } // flat side at +x
+      default: arc(0, 0, R, 0, 2 * Math.PI, res, true);
+    }
+    if (!angle) return out;
+    const ca = Math.cos(angle), sa = Math.sin(angle);
+    return out.map(([x, y]) => [x * ca - y * sa, x * sa + y * ca]);
+  }
+  function profileFit(prof) { // outer: farthest point; inner: nearest edge, measured from the key centre
+    let outer = 0, inner = Infinity;
+    for (let i = 0; i < prof.length; i++) {
+      const [ax, ay] = prof[i], [bx, by] = prof[(i + 1) % prof.length];
+      outer = Math.max(outer, Math.hypot(ax, ay));
+      const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy;
+      let s = L > 0 ? -(ax * dx + ay * dy) / L : 0; s = s < 0 ? 0 : s > 1 ? 1 : s;
+      inner = Math.min(inner, Math.hypot(ax + s * dx, ay + s * dy));
+    }
+    return { outer, inner };
+  }
+  function profileArea(prof) { let a = 0; for (let i = 0; i < prof.length; i++) { const [ax, ay] = prof[i], [bx, by] = prof[(i + 1) % prof.length]; a += ax * by - bx * ay; } return a / 2; }
+  // Long direction of an area, from the second moments of its outline. Near-round areas get 0 so keys don't spin as the plane moves.
+  function regionAngle(sec, ri) {
+    const reg = sec.regions[ri];
+    if (reg._angle !== undefined) return reg._angle;
+    const xy = sec.loops[reg.outer].xy, n = xy.length / 2;
+    let A = 0, cx = 0, cy = 0, sxx = 0, syy = 0, sxy = 0;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const x0 = xy[2 * j], y0 = xy[2 * j + 1], x1 = xy[2 * i], y1 = xy[2 * i + 1], c = x0 * y1 - x1 * y0;
+      A += c; cx += (x0 + x1) * c; cy += (y0 + y1) * c;
+      sxx += (y0 * y0 + y0 * y1 + y1 * y1) * c; syy += (x0 * x0 + x0 * x1 + x1 * x1) * c; sxy += (x0 * y1 + 2 * x0 * y0 + 2 * x1 * y1 + x1 * y0) * c;
+    }
+    let ang = 0;
+    if (Math.abs(A) > 1e-12) {
+      A /= 2; cx /= 6 * A; cy /= 6 * A;
+      const Ixx = sxx / 12 - A * cy * cy, Iyy = syy / 12 - A * cx * cx, Ixy = sxy / 24 - A * cx * cy; // Ixx = ∫y², Iyy = ∫x²
+      const mxx = Iyy, myy = Ixx; // spread along x and along y
+      const tr = mxx + myy, det = mxx * myy - Ixy * Ixy, disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+      const l1 = tr / 2 + disc, l2 = tr / 2 - disc;
+      if (l2 > 0 && l1 / l2 > 1.2) ang = 0.5 * Math.atan2(2 * Ixy, mxx - myy);
+    }
+    reg._angle = ang;
+    return ang;
+  }
+  function keyAngle(sec, ri, cfg) {
+    if (shapeFor(cfg) === 'round') return 0;
+    const base = cfg.align === false || ri < 0 || !sec.regions[ri] ? 0 : regionAngle(sec, ri);
+    return base + ((cfg.turn || 0) * Math.PI) / 180;
+  }
+  // Outline points of a key's footprint (socket size), spaced evenly, for checking it against an area's edge.
+  function footprintOf(spec, angle) {
+    const prof = keyProfile(spec.shape, spec.r, spec.c, angle, spec.res);
+    let per = 0;
+    for (let i = 0; i < prof.length; i++) { const a = prof[i], b = prof[(i + 1) % prof.length]; per += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+    const step = per / 40, pts = [];
+    for (let i = 0; i < prof.length; i++) {
+      const a = prof[i], b = prof[(i + 1) % prof.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]), k = Math.max(1, Math.ceil(L / step));
+      for (let j = 0; j < k; j++) pts.push([a[0] + (b[0] - a[0]) * j / k, a[1] + (b[1] - a[1]) * j / k]);
+    }
+    return { round: spec.shape === 'round', outer: spec.outer, inner: spec.inner, pts };
+  }
+  // Smallest gap between the key's footprint at (x, y) and the area's edge. Negative when the footprint pokes out.
+  // `need` is the gap the caller requires: a key comfortably inside skips the detailed outline check.
+  function footprintClear(sec, reg, x, y, fp, need) {
+    const c = regionClearance(sec.loops, reg, x, y);
+    if (fp.round || c - fp.outer >= need) return c - fp.outer;
+    if (c < fp.inner) return c - fp.inner;
+    let best = Infinity;
+    for (const [px, py] of fp.pts) {
+      if (!regionContains(sec.loops, reg, x + px, y + py)) return -1;
+      best = Math.min(best, regionClearance(sec.loops, reg, x + px, y + py));
+      if (best < need) return best;
+    }
+    return best;
   }
   function depthPlan(cfg) {
     const spec = keyGeometrySpec(cfg);
@@ -896,27 +1043,30 @@ const KMCore = (() => {
     }
     return { frame: F, base, depth };
   }
-  function keyScore(an, cfg, x, y, skip) {
-    const spec = keyGeometrySpec(cfg);
-    const R = spec.outer, m = cfg.margin;
+  function keyScore(an, cfg, x, y, skip, spec = keyGeometrySpec(cfg), fps) {
+    const m = cfg.margin;
     const ri = regionAt(an.base, x, y);
     if (ri < 0) return { ok: false, reason: 'Not on the cut face', region: -1, score: -Infinity };
     if (skip && skip.has(ri)) return { ok: false, reason: 'In an area you chose not to cut', region: ri, score: -Infinity };
-    let score = regionClearance(an.base.loops, an.base.regions[ri], x, y) - R;
+    let fp = fps && fps[ri];
+    if (!fp) { fp = footprintOf(spec, keyAngle(an.base, ri, cfg)); if (fps) fps[ri] = fp; }
+    let score = footprintClear(an.base, an.base.regions[ri], x, y, fp, m);
     if (score < m) return { ok: false, reason: 'Too close to the edge', region: ri, score };
     for (const d of an.depth) {
       if (d.sec.error) continue;
       const rj = regionAt(d.sec, x, y);
       if (rj < 0) return { ok: false, reason: d.need === 'floor' ? 'Socket would break through the surface' : 'Socket would break through the side', region: ri, score: -Infinity };
-      const cl = regionClearance(d.sec.loops, d.sec.regions[rj], x, y);
-      if (d.need === 'wall' && cl - R < m * 0.75) return { ok: false, reason: 'Wall around the socket is too thin', region: ri, score: cl - R };
-      if (d.need === 'floor' && cl < R) return { ok: false, reason: 'Socket would break through the surface', region: ri, score: -Infinity };
-      if (d.need === 'wall') score = Math.min(score, cl - R);
+      const need = d.need === 'wall' ? m * 0.75 : 0;
+      const cl = footprintClear(d.sec, d.sec.regions[rj], x, y, fp, need);
+      if (d.need === 'wall' && cl < need) return { ok: false, reason: 'Wall around the socket is too thin', region: ri, score: cl };
+      if (d.need === 'floor' && cl < 0) return { ok: false, reason: 'Socket would break through the surface', region: ri, score: -Infinity };
+      if (d.need === 'wall') score = Math.min(score, cl);
     }
     return { ok: true, reason: '', region: ri, score };
   }
   function evaluateKeys(an, keys, cfg, skip) {
-    const res = keys.map(k => keyScore(an, cfg, k.x, k.y, skip));
+    const spec = keyGeometrySpec(cfg), fps = [];
+    const res = keys.map(k => keyScore(an, cfg, k.x, k.y, skip, spec, fps));
     const R = keyGeometrySpec(cfg).outer;
     for (let i = 0; i < keys.length; i++) for (let j = i + 1; j < keys.length; j++) {
       if (Math.hypot(keys[i].x - keys[j].x, keys[i].y - keys[j].y) < 2 * R + cfg.margin) {
@@ -928,7 +1078,8 @@ const KMCore = (() => {
   function autoPlaceKeys(an, cfg, perRegion, skip) {
     const keys = [];
     if (cfg.type === 'none' || an.base.error) return keys;
-    const R = keyGeometrySpec(cfg).outer, m = cfg.margin;
+    const spec = keyGeometrySpec(cfg), fps = [];
+    const R = spec.outer, m = cfg.margin;
     an.base.regions.forEach((reg, ri) => {
       if (skip && skip.has(ri)) return;
       if (reg.area < Math.PI * (R + m) * (R + m)) return;
@@ -938,7 +1089,7 @@ const KMCore = (() => {
       const cands = [];
       for (let x = x0 + h / 2; x < x1; x += h) for (let y = y0 + h / 2; y < y1; y += h) {
         if (!regionContains(an.base.loops, reg, x, y)) continue;
-        const s = keyScore(an, cfg, x, y, skip);
+        const s = keyScore(an, cfg, x, y, skip, spec, fps);
         if (s.ok && s.region === ri) cands.push({ x, y, score: s.score });
       }
       if (!cands.length) return;
@@ -961,13 +1112,6 @@ const KMCore = (() => {
       for (const c of chosen) keys.push({ x: c.x, y: c.y });
     });
     return keys;
-  }
-  function profile(shape, rad) {
-    if (shape === 'square') return [[rad, -rad], [rad, rad], [-rad, rad], [-rad, -rad]];
-    const segs = Math.max(20, Math.min(56, Math.round((2 * Math.PI * rad) / 0.5)));
-    const out = [];
-    for (let i = 0; i < segs; i++) { const a = (i / segs) * Math.PI * 2; out.push([Math.cos(a) * rad, Math.sin(a) * rad]); }
-    return out;
   }
 
   /* ---------- the cut ---------- */
@@ -1028,7 +1172,7 @@ const KMCore = (() => {
     const spec = keyGeometrySpec(cfg);
     const keys = (cfg.type === 'none' ? [] : (opts.keys || [])).map(k => ({ ...k, region: -1 }));
     const tmpSec = { loops, regions };
-    for (const k of keys) k.region = regionAt(tmpSec, k.x, k.y);
+    for (const k of keys) { k.region = regionAt(tmpSec, k.x, k.y); k.angle = keyAngle(tmpSec, k.region, cfg); }
     const pins = [];
 
     regions.forEach((reg, ri) => {
@@ -1046,20 +1190,22 @@ const KMCore = (() => {
         for (const h of reg.holes) pushRing(loops[h].ids.map(q => off + q), loops[h].xy);
         const tubes = [];
         for (const k of myKeys) {
-          let role, rad, depth, dir, tip = 1;
+          let role, grow, depth, dir, tipR = spec.r;
           if (cfg.type === 'peg') {
             const pegSide = cfg.pegSide === 'above' ? +1 : -1;
-            if (side === pegSide) { role = 'peg'; rad = spec.r; depth = cfg.length; dir = -side; tip = spec.taper; }
-            else { role = 'socket'; rad = spec.r + spec.c; depth = cfg.length + spec.ca; dir = side; tip = (spec.r * spec.taper + spec.c) / (spec.r + spec.c); }
+            if (side === pegSide) { role = 'peg'; grow = 0; depth = cfg.length; dir = -side; }
+            else { role = 'socket'; grow = spec.c; depth = cfg.length + spec.ca; dir = side; }
+            tipR = spec.r * spec.taper;
           } else {
-            role = 'socket'; rad = spec.r + spec.c; dir = side;
+            role = 'socket'; grow = spec.c; dir = side;
             depth = cfg.type === 'dowel' ? cfg.length / 2 + spec.ca : cfg.length + spec.ca;
           }
-          const prof = profile(cfg.shape, rad);
+          const prof = keyProfile(spec.shape, spec.r, grow, k.angle, spec.res);
+          const prof1 = keyProfile(spec.shape, tipR, grow, k.angle, spec.res);
           const ring = [], xy = [];
           for (const [px, py] of prof) { ring.push(addV(at(k.x + px, k.y + py, 0))); xy.push(k.x + px, k.y + py); }
           pushRing(ring, xy);
-          tubes.push({ k, role, prof, depth, dir, tip, ring });
+          tubes.push({ k, role, prof1, depth, dir, ring });
         }
         const loc = earcut(flat, holes);
         let sum = 0;
@@ -1072,10 +1218,13 @@ const KMCore = (() => {
           else capTris.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]);
         }
         for (const r of rings) fixTJunctions(capTris, r);
+        const localOf = new Map();
+        ids.forEach((id, li) => localOf.set(id, li));
+        splitThroughPoints(capTris, rings, (id) => { const li = localOf.get(id); return [flat[2 * li], flat[2 * li + 1]]; });
         for (let i = 0; i < capTris.length; i += 3) T.push3(capTris[i], capTris[i + 1], capTris[i + 2]);
         for (const tb of tubes) {
           const z = tb.dir * tb.depth;
-          const ring1 = tb.prof.map(([px, py]) => addV(at(tb.k.x + px * tb.tip, tb.k.y + py * tb.tip, z)));
+          const ring1 = tb.prof1.map(([px, py]) => addV(at(tb.k.x + px, tb.k.y + py, z)));
           const center = addV(at(tb.k.x, tb.k.y, z));
           const axis0 = at(tb.k.x, tb.k.y, 0);
           const m = tb.ring.length;
@@ -1092,19 +1241,18 @@ const KMCore = (() => {
           }
         }
       }
-      if (cfg.type === 'dowel') for (const k of myKeys) pins.push(makePin(at, n, k, spec.r, cfg.length, cfg.shape));
+      if (cfg.type === 'dowel') for (const k of myKeys) pins.push(makePin(at, k, spec, cfg.length));
     });
 
     const comps = splitComponents(V.a.subarray(0, V.n), T.view(), nv, spans, Fs);
     return { parts: comps, pins, shift: sec.shift, keysUsed: keys.filter(k => k.region >= 0 && !skip.has(k.region)).length };
   }
 
-  function makePin(at, n, k, r, L, shape) {
-    const ch = Math.min(0.4, r * 0.2, L * 0.1);
+  function makePin(at, k, spec, L) {
+    const r = spec.r, ch = Math.min(0.4, r * 0.2, L * 0.1);
     const pv = [], pi = [];
-    const prof = profile(shape, 1);
-    const levels = [[-L / 2, r - ch], [-L / 2 + ch, r], [L / 2 - ch, r], [L / 2, r - ch]];
-    const rings = levels.map(([z, rad]) => prof.map(([px, py]) => { const p = at(k.x + px * rad, k.y + py * rad, z); pv.push(...p); return pv.length / 3 - 1; }));
+    const levels = [[-L / 2, -ch], [-L / 2 + ch, 0], [L / 2 - ch, 0], [L / 2, -ch]]; // chamfered ends: the outline inset by ch
+    const rings = levels.map(([z, d]) => keyProfile(spec.shape, r, d, k.angle, spec.res).map(([px, py]) => { const p = at(k.x + px, k.y + py, z); pv.push(...p); return pv.length / 3 - 1; }));
     const c0 = at(k.x, k.y, -L / 2), c1 = at(k.x, k.y, L / 2);
     pv.push(...c0); const i0 = pv.length / 3 - 1; pv.push(...c1); const i1 = pv.length / 3 - 1;
     const ctr = at(k.x, k.y, 0);
@@ -1116,7 +1264,7 @@ const KMCore = (() => {
       if (nn[0] * m[0] + nn[1] * m[1] + nn[2] * m[2] < 0) pi.push(a, c, b); else pi.push(a, b, c);
     };
     P();
-    const m = prof.length;
+    const m = rings[0].length;
     for (let l = 0; l + 1 < rings.length; l++) for (let i = 0; i < m; i++) {
       const a = rings[l][i], b = rings[l][(i + 1) % m], c = rings[l + 1][(i + 1) % m], d = rings[l + 1][i];
       orient(a, b, c); orient(a, c, d);
@@ -1337,6 +1485,7 @@ const KMCore = (() => {
   return {
     parseSTL, parseOBJ, prepareMesh, fillHoles, edgeReport, volume, bounds, diag,
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
+    KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
 })();
