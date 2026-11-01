@@ -23,6 +23,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Surface regions: colour a model by where its surface turns sharply, like ZBrush polygroups, with an adjustable threshold.
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
+- Printable, assemblable cuts (1.15): no piece thinner than the printer's wall, no pieces that hook together or get caged, no cuts that only crack the part. Curved cut lines are straightened and capped flat, so their faces no longer fold into tiny teeth.
 
 ## Next
 

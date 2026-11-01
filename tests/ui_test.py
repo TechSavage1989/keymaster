@@ -54,6 +54,20 @@ def dumbbell_stl(path):
             f.write(struct.pack('<3f', 0, 0, 0))
             for p_ in tri: f.write(struct.pack('<3f', *p_))
             f.write(b'\0\0')
+def boxes_stl(path, boxes):
+    # separate axis-aligned boxes [x0, y0, z0, x1, y1, z1], as one binary STL
+    import struct
+    tris = []
+    for (x0, y0, z0, x1, y1, z1) in boxes:
+        c = [[x, y, z] for z in (z0, z1) for y in (y0, y1) for x in (x0, x1)]
+        for a, b_, c_, d in ((0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5)):
+            tris.append((c[a], c[b_], c[c_])); tris.append((c[a], c[c_], c[d]))
+    with open(path, 'wb') as f:
+        f.write(b'boxes'.ljust(80, b' ')); f.write(struct.pack('<I', len(tris)))
+        for tri in tris:
+            f.write(struct.pack('<3f', 0, 0, 0))
+            for p_ in tri: f.write(struct.pack('<3f', *p_))
+            f.write(b'\0\0')
 def check(name, cond, extra=''):
     results.append((name, bool(cond)))
     print(('  ok  ' if cond else '  FAIL ') + name + (('  ' + str(extra)) if extra and not cond else ''))
@@ -646,6 +660,33 @@ with sync_playwright() as p:
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
     pg.click('[data-act=keytype][data-value=peg]'); pg.wait_for_timeout(200)
     pg.screenshot(path=str(OUT / 'shot_curved.png'))
+    pg.keyboard.press('Escape')
+    # a cut that would leave a sliver too thin to print is held back, and says which area and how to fix it
+    boxes_stl(str(OUT / 'towers.stl'), [(0, 0, 0, 10, 10, 20), (20, 0, 0, 28, 10, 10.5)])
+    pg.set_input_files('#fileInput', str(OUT / 'towers.stl'))
+    pg.wait_for_function("document.querySelector('#partList .part-name') && document.querySelector('#partList .part-name').innerText.includes('towers')", timeout=20000)
+    if pg.get_attribute('#regionsBtn', 'aria-pressed') == 'true': pg.click('#regionsBtn'); pg.wait_for_timeout(200)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
+    pg.keyboard.press('z'); pg.wait_for_timeout(300)
+    pg.fill('#cutPosNum', '-0.25'); pg.press('#cutPosNum', 'Tab'); pg.wait_for_timeout(700)
+    foot = pg.inner_text('#keyStatus')
+    print('    thin:', foot.replace('\n', ' ')[:200])
+    check('a cut just under the top of the short tower warns that it would leave a sliver', 'would leave a sliver thinner than' in foot and 'too thin to print' in foot and 'area 2' in foot, foot)
+    tag = pg.locator('#areaTags [data-area-tag="1"]')
+    check('the area’s label in the view says too thin', 'too thin' in tag.inner_text(), tag.inner_text())
+    pg.click('[data-act=cut]'); pg.wait_for_timeout(300)
+    check('cutting it is held back, with the reason', 'too thin to print' in pg.inner_text('#toast') and pg.locator('#partList li[data-id]').count() == 1, pg.inner_text('#toast'))
+    pg.click('#keyStatus [data-act=join-thin]'); pg.wait_for_timeout(300)
+    check('one click leaves that area joined, and the warning goes', tag.get_attribute('aria-pressed') == 'false' and 'sliver' not in pg.inner_text('#keyStatus'), pg.inner_text('#keyStatus'))
+    pg.click('[data-act=cut]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length >= 2", timeout=15000)
+    check('then the cut goes through the tall tower only', pg.locator('#partList li[data-id]').count() >= 2 and 'Cut into' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
+    pg.keyboard.press('z'); pg.wait_for_timeout(300)
+    pg.fill('#cutPosNum', '3'); pg.press('#cutPosNum', 'Tab'); pg.wait_for_timeout(700)
+    check('a cut lower down, through both towers, is fine', 'sliver' not in pg.inner_text('#keyStatus'), pg.inner_text('#keyStatus'))
+    pg.screenshot(path=str(OUT / 'shot_thin.png'))
     pg.keyboard.press('Escape')
     b.close()
 
