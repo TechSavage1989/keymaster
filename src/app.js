@@ -433,7 +433,7 @@
     state.cut.stale = false;
     state.cut.hoverArea = -1;
     state.cut.labels = an.base.error ? [] : an.base.regions.map((r, ri) => ({ samples: K.regionSamples(an.base, ri), x: 0, y: 0 }));
-    if (state.cut.auto) state.cut.keys = an.base.error ? [] : K.autoPlaceKeys(an, coreCfg(), state.cfg.perArea, state.cut.skip);
+    if (state.cut.auto) { state.cut.keys = an.base.error ? [] : K.autoPlaceKeys(an, coreCfg(), state.cfg.perArea, state.cut.skip); state.cut.why = whyMap(state.cut.keys); }
     state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
     evaluateKeys();
     renderRegions();
@@ -505,6 +505,24 @@
     return out;
   }
   function areaCount() { return shownAreas().length; }
+  function whyMap(keys) { const m = new Map(); for (const e of keys.empty || []) m.set(e.region, e.reason); return m; }
+  // Areas that will be cut but have no key in them, so the panel and the labels can say so.
+  function areasWithoutKeys() {
+    const an = state.cut.analysis;
+    if (state.cfg.type === 'none' || !an || an.base.error || state.cut.stale) return [];
+    const has = new Set(state.cut.keys.map(k => K.regionAt(an.base, k.x, k.y)));
+    return shownAreas().filter(i => !state.cut.skip.has(i) && !has.has(i));
+  }
+  function noKeyMessage(list, everywhere) {
+    const shown = shownAreas(), num = (i) => shown.indexOf(i) + 1;
+    const nums = list.map(num), names = nums.length === 1 ? `area ${nums[0]}` : `areas ${nums.slice(0, -1).join(', ')} and ${nums[nums.length - 1]}`;
+    const why = state.cut.why || new Map();
+    const said = { 'Too close to the edge': 'too narrow for keys this size', 'Area too small': 'too small for keys this size', 'Wall around the socket is too thin': `the walls would be thinner than ${state.cfg.margin} mm`, 'Socket would break through the surface': 'the socket would break through the surface', 'Socket would break through the side': 'the socket would break through the side' };
+    const reasons = [...new Set(list.map(i => said[why.get(i)]).filter(Boolean))];
+    const because = reasons.length === 1 ? `: ${reasons[0]}` : '';
+    const head = everywhere ? 'No room for keys on this cut' : `No room for a key in ${names}`;
+    return `${head}${because}. Use smaller keys or a thinner wall, or click the cut face to place one yourself.`;
+  }
   function updateLabelPoints() {
     if (!state.cut.labels.length) return;
     const avoid = state.cfg.type === 'none' ? 0 : K.keyGeometrySpec(state.cfg).outer + state.cfg.margin;
@@ -512,10 +530,10 @@
     for (const l of state.cut.labels) Object.assign(l, K.pickLabelPoint(l.samples, keys, avoid));
   }
   function renderAreaTags() {
-    const shown = shownAreas();
+    const shown = shownAreas(), noKey = new Set(areasWithoutKeys());
     tagLayer.innerHTML = shown.length > 1 ? shown.map((i, k) => {
       const cut = !state.cut.skip.has(i);
-      return `<button class="area-tag${i === state.cut.hoverArea ? ' is-hover' : ''}" data-area-tag="${i}" aria-pressed="${cut}" title="${cut ? `Area ${k + 1} will be cut. Click to leave it joined.` : `Area ${k + 1} stays joined. Click to cut it.`}"><b>${k + 1}</b>${cut ? 'Cut' : 'Joined'}</button>`;
+      return `<button class="area-tag${i === state.cut.hoverArea ? ' is-hover' : ''}" data-area-tag="${i}" aria-pressed="${cut}" title="${cut ? `Area ${k + 1} will be cut. Click to leave it joined.` : `Area ${k + 1} stays joined. Click to cut it.`}"><b>${k + 1}</b>${cut ? 'Cut' : 'Joined'}${cut && noKey.has(i) ? '<i>no key</i>' : ''}</button>`;
     }).join('') : '';
     updateLabelPoints();
     placeAreaTags();
@@ -551,7 +569,7 @@
   function toggleArea(i) {
     if (!shownAreas().includes(i)) return;
     if (state.cut.skip.has(i)) state.cut.skip.delete(i); else state.cut.skip.add(i);
-    if (state.cut.auto) state.cut.keys = K.autoPlaceKeys(state.cut.analysis, coreCfg(), state.cfg.perArea, state.cut.skip);
+    if (state.cut.auto) { state.cut.keys = K.autoPlaceKeys(state.cut.analysis, coreCfg(), state.cfg.perArea, state.cut.skip); state.cut.why = whyMap(state.cut.keys); }
     state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
     evaluateKeys(); renderRegions(); renderKeyMarkers(); renderInspector(); renderAreaTags();
   }
@@ -1049,7 +1067,7 @@
     if (ptr.dragKey >= 0) {
       ptr.dragKey = -1;
       orbit.enabled = true;
-      renderInspector();
+      renderInspector(); renderAreaTags();
       return;
     }
     const moved = Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y);
@@ -1079,13 +1097,13 @@
     state.cut.keys.push(h);
     state.cut.auto = false;
     state.cut.active = state.cut.keys.length - 1;
-    evaluateKeys(); renderKeyMarkers(); renderInspector();
+    evaluateKeys(); renderKeyMarkers(); renderInspector(); renderAreaTags();
   }
   function removeKey(i) {
     state.cut.keys.splice(i, 1);
     state.cut.auto = false;
     state.cut.active = -1;
-    evaluateKeys(); renderKeyMarkers(); renderInspector();
+    evaluateKeys(); renderKeyMarkers(); renderInspector(); renderAreaTags();
   }
 
   // drag and drop
@@ -1321,11 +1339,13 @@
       if (state.cut.stale) keyStatus = `<p class="status muted">Checking key placement…</p>`;
       else if (an && an.base.error) keyStatus = `<p class="status warn">${ICONS.alert}<span>The surface is broken where it crosses this cut, so keys can’t be checked. Move the cut slightly or fill holes first.</span></p>`;
       else if (!regions.length) keyStatus = `<p class="status muted">Slide the cut into the part to see where keys can go.</p>`;
-      else if (!state.cut.keys.length) keyStatus = `<p class="status warn">${ICONS.alert}<span>No room for keys at this size. Try smaller keys, or click the cut face to place one yourself.</span></p>`;
+      else if (!state.cut.keys.length) keyStatus = `<p class="status warn">${ICONS.alert}<span>${esc(noKeyMessage(areasWithoutKeys().length ? areasWithoutKeys() : shown, true))}</span></p>`;
       else if (bad.length) {
         const reasons = [...new Set(bad.map(b => b.reason))].join('. ');
         keyStatus = `<p class="status warn">${ICONS.alert}<span>${bad.length === 1 ? 'One key needs' : bad.length + ' keys need'} attention: ${esc(reasons)}.</span></p><button class="btn small" data-act="remove-bad">Remove ${bad.length === 1 ? 'it' : 'them'}</button>`;
       } else keyStatus = `<p class="status ok">${ICONS.check}<span>${state.cut.keys.length} ${state.cut.keys.length === 1 ? 'key' : 'keys'} ready, with walls at least ${c.margin} mm thick.</span></p>`;
+      const missing = state.cut.keys.length ? areasWithoutKeys() : [];
+      if (missing.length && shown.length > 1) keyStatus += `<p class="status warn no-key">${ICONS.alert}<span>${esc(noKeyMessage(missing))}</span></p>`;
     }
     const lenLabel = c.type === 'magnet' ? 'Thickness' : 'Length';
     const shownShape = K.keyGeometrySpec(c).shape;

@@ -1229,15 +1229,16 @@ const KMCore = (() => {
   }
   // Smallest gap between the key's footprint at (x, y) and the area's edge. Negative when the footprint pokes out.
   // `need` is the gap the caller requires: a key comfortably inside skips the detailed outline check.
-  function footprintClear(sec, reg, x, y, fp, need) {
+  // With exact set, measure the whole outline even once it's known to fail, so near misses can be ranked.
+  function footprintClear(sec, reg, x, y, fp, need, exact) {
     const c = regionClearance(sec.loops, reg, x, y);
     if (fp.round || c - fp.outer >= need) return c - fp.outer;
     if (c < fp.inner) return c - fp.inner;
     let best = Infinity;
     for (const [px, py] of fp.pts) {
-      if (!regionContains(sec.loops, reg, x + px, y + py)) return -1;
+      if (!regionContains(sec.loops, reg, x + px, y + py)) { if (!exact) return -1; best = Math.min(best, -regionClearance(sec.loops, reg, x + px, y + py)); continue; }
       best = Math.min(best, regionClearance(sec.loops, reg, x + px, y + py));
-      if (best < need) return best;
+      if (best < need && !exact) return best;
     }
     return best;
   }
@@ -1263,7 +1264,7 @@ const KMCore = (() => {
     }
     return { frame: F, base, depth };
   }
-  function keyScore(an, cfg, x, y, skip, spec = keyGeometrySpec(cfg), fps) {
+  function keyScore(an, cfg, x, y, skip, spec = keyGeometrySpec(cfg), fps, exact) {
     const m = cfg.margin;
     const ri = regionAt(an.base, x, y);
     if (ri < 0) return { ok: false, reason: 'Not on the cut face', region: -1, score: -Infinity };
@@ -1272,19 +1273,21 @@ const KMCore = (() => {
     if (an.base.regions[ri].nested) return { ok: false, reason: 'On a part of the model that overlaps another', region: ri, score: -Infinity };
     let fp = fps && fps[ri];
     if (!fp) { fp = footprintOf(spec, keyAngle(an.base, ri, cfg)); if (fps) fps[ri] = fp; }
-    let score = footprintClear(an.base, an.base.regions[ri], x, y, fp, m);
-    if (score < m) return { ok: false, reason: 'Too close to the edge', region: ri, score };
+    let score = footprintClear(an.base, an.base.regions[ri], x, y, fp, m, exact);
+    if (score < m) return { ok: false, reason: 'Too close to the edge', region: ri, score, slack: score - m };
+    let slack = score - m;
     for (const d of an.depth) {
       if (d.sec.error) continue;
       const rj = regionAt(d.sec, x, y);
       if (rj < 0) return { ok: false, reason: d.need === 'floor' ? 'Socket would break through the surface' : 'Socket would break through the side', region: ri, score: -Infinity };
       const need = d.need === 'wall' ? m * 0.75 : 0;
-      const cl = footprintClear(d.sec, d.sec.regions[rj], x, y, fp, need);
-      if (d.need === 'wall' && cl < need) return { ok: false, reason: 'Wall around the socket is too thin', region: ri, score: cl };
-      if (d.need === 'floor' && cl < 0) return { ok: false, reason: 'Socket would break through the surface', region: ri, score: -Infinity };
+      const cl = footprintClear(d.sec, d.sec.regions[rj], x, y, fp, need, exact);
+      if (d.need === 'wall' && cl < need) return { ok: false, reason: 'Wall around the socket is too thin', region: ri, score: cl, slack: cl - need };
+      if (d.need === 'floor' && cl < 0) return { ok: false, reason: 'Socket would break through the surface', region: ri, score: -Infinity, slack: cl };
       if (d.need === 'wall') score = Math.min(score, cl);
+      slack = Math.min(slack, cl - need);
     }
-    return { ok: true, reason: '', region: ri, score };
+    return { ok: true, reason: '', region: ri, score, slack };
   }
   function evaluateKeys(an, keys, cfg, skip) {
     const spec = keyGeometrySpec(cfg), fps = [];
@@ -1302,19 +1305,42 @@ const KMCore = (() => {
     if (cfg.type === 'none' || an.base.error) return keys;
     const spec = keyGeometrySpec(cfg), fps = [];
     const R = spec.outer, m = cfg.margin;
+    const empty = []; // areas left without a key, with the reason, so the interface can say why
     an.base.regions.forEach((reg, ri) => {
       if (skip && skip.has(ri)) return;
-      if (reg.nested || reg.inverted || reg.area < Math.PI * (R + m) * (R + m)) return;
+      if (reg.nested || reg.inverted) return;
+      // the key's inscribed circle plus the wall must fit at the very least
+      if (reg.area < Math.PI * (spec.inner + m) * (spec.inner + m)) { empty.push({ region: ri, reason: 'Area too small' }); return; }
       const [x0, y0, x1, y1] = reg.bbox;
       let h = Math.max(R * 0.3, Math.sqrt(reg.area / 1400));
       while (((x1 - x0) / h) * ((y1 - y0) / h) > 5000) h *= 1.25;
-      const cands = [];
-      for (let x = x0 + h / 2; x < x1; x += h) for (let y = y0 + h / 2; y < y1; y += h) {
-        if (!regionContains(an.base.loops, reg, x, y)) continue;
-        const s = keyScore(an, cfg, x, y, skip, spec, fps);
+      const cands = [], tried = [];
+      const test = (x, y, exact) => {
+        if (!regionContains(an.base.loops, reg, x, y)) return;
+        const s = keyScore(an, cfg, x, y, skip, spec, fps, exact);
         if (s.ok && s.region === ri) cands.push({ x, y, score: s.score });
+        else if (s.region === ri && isFinite(s.slack)) tried.push({ x, y, score: s.slack, reason: s.reason });
+      };
+      for (let x = x0 + h / 2; x < x1; x += h) for (let y = y0 + h / 2; y < y1; y += h) test(x, y, false);
+      if (!cands.length) { const again = tried.splice(0); for (const q of again) test(q.x, q.y, true); } // rank the near misses properly
+      // Where keys fit can be a strip narrower than the grid (thick walls, long shapes, narrow areas), so the
+      // grid steps right over it. Look again, finer and finer, around the most promising spots.
+      for (let step = h / 3, level = 0; !cands.length && tried.length && level < 3; step /= 3, level++) {
+        // the closest near misses, spread out so separate promising spots each get a look
+        const pool = [];
+        for (const q of tried.sort((a, b) => b.score - a.score)) {
+          if (pool.length >= 8) break;
+          if (pool.every(o => Math.hypot(o.x - q.x, o.y - q.y) > step * 2)) pool.push(q);
+        }
+        tried.length = 0;
+        for (const q of pool) for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) if (i || j) test(q.x + i * step, q.y + j * step, true);
+        tried.push(...pool);
       }
-      if (!cands.length) return;
+      if (!cands.length) {
+        const best = tried.sort((a, b) => b.score - a.score)[0];
+        empty.push({ region: ri, reason: best ? best.reason : 'Socket would break through the surface' });
+        return;
+      }
       const chosen = [];
       let best = cands[0];
       for (const c of cands) if (c.score > best.score) best = c;
@@ -1333,6 +1359,7 @@ const KMCore = (() => {
       }
       for (const c of chosen) keys.push({ x: c.x, y: c.y });
     });
+    keys.empty = empty;
     return keys;
   }
 
