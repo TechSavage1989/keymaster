@@ -266,6 +266,46 @@ console.log('key shapes');
   check('lined-up square sockets leave no gaps', allClosed(ra.parts), ra.parts.map(p => K.edgeReport(p.indices)));
 }
 
+console.log('keys in narrow areas');
+{
+  // square pegs, 45% taper, 5 mm walls (an owner's report): the key fits only on a 0.3 mm strip down the middle of a bar
+  const cfg = cfgOf({ type: 'peg', shape: 'square', diameter: 5, length: 6, margin: 5, taper: 45 });
+  const spec = K.keyGeometrySpec(cfg);
+  const W = 2 * (spec.r + spec.cs) + 2 * 5 + 0.3;
+  // 30 mm tall, so a 6 mm socket plus the 3.75 mm floor a 5 mm wall asks for fits on either side of the middle
+  const bar = K.prepareMesh({ positions: gridCube(3).positions.map((v, i) => v * [60, W, 30][i % 3]), indices: null });
+  const F = K.frameFromNormal([0, 0, 1], [30, W / 2, 15]);
+  const an = K.analyzePlane(bar.positions, bar.indices, F, cfg, 70);
+  const keys = K.autoPlaceKeys(an, cfg, 2, new Set());
+  check('a key is found on a strip narrower than the search grid', keys.length >= 1 && K.evaluateKeys(an, keys, cfg, new Set()).every(e => e.ok) && !keys.empty.length, [keys.length, keys.empty]);
+  check('keyed cut of the narrow bar is sealed', allClosed(K.cutMesh(bar.positions, bar.indices, F, { scale: 70, cfg, keys }).parts));
+  // a little narrower and nothing fits: the area is reported, with the reason
+  const W2 = W - 0.8;
+  const bar2 = K.prepareMesh({ positions: gridCube(3).positions.map((v, i) => v * [60, W2, 30][i % 3]), indices: null });
+  const an2 = K.analyzePlane(bar2.positions, bar2.indices, K.frameFromNormal([0, 0, 1], [30, W2 / 2, 15]), cfg, 70);
+  const k2 = K.autoPlaceKeys(an2, cfg, 2, new Set());
+  check('an area with no room is reported with its reason', k2.length === 0 && k2.empty.length === 1 && k2.empty[0].region === 0 && k2.empty[0].reason === 'Too close to the edge', k2.empty);
+  // across the sample knot, with thick walls and every key type, keys are only missing where nothing fits
+  const kn = K.prepareMesh(K.torusKnot()), kb = K.bounds(kn.positions);
+  let missed = 0, areas = 0;
+  for (const c of [cfg, cfgOf({ type: 'dowel', diameter: 4, length: 12, margin: 5 }), cfgOf({ type: 'peg', shape: 'slot', margin: 3 })]) {
+    for (let i = 0; i < 12; i++) {
+      const tilt = (i % 4) * 0.15, a = i * 0.9;
+      const Fk = K.frameFromNormal([Math.sin(tilt) * Math.cos(a), Math.sin(tilt) * Math.sin(a), Math.cos(tilt)], [kb.center[0], kb.center[1], kb.center[2] + ((i % 3) - 1) * 6]);
+      const ak = K.analyzePlane(kn.positions, kn.indices, Fk, c, 100);
+      const kk = K.autoPlaceKeys(ak, c, 2, new Set());
+      for (const e of kk.empty) {
+        areas++;
+        const reg = ak.base.regions[e.region], [x0, y0, x1, y1] = reg.bbox;
+        let fits = 0;
+        for (let x = x0; x < x1; x += 0.25) for (let y = y0; y < y1; y += 0.25) if (K.regionAt(ak.base, x, y) === e.region && K.evaluateKeys(ak, [{ x, y }], c, new Set())[0].ok) fits++;
+        if (fits > 8) missed++; // a patch bigger than half a square millimetre where a key fits
+      }
+    }
+  }
+  check('no area is left without a key where one clearly fits', missed === 0, [missed, areas]);
+}
+
 console.log('torus knot: many regions, components, selective cut');
 {
   const k = K.prepareMesh(K.torusKnot());
