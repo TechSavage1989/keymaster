@@ -29,6 +29,7 @@
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, pegSide: 'below', perArea: 2, align: true, turn: 0 },
     cut: { keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
+  state.regions = { on: false, angle: 35 };
   const history = { past: [], future: [] };
   let uid = 1;
   let downloads = null;
@@ -257,6 +258,7 @@
       v.mat.wireframe = state.wire;
     }
     applyExplode();
+    if (state.regions.on) applyRegions();
     updatePreview();
     updateGrid();
     renderParts();
@@ -289,7 +291,10 @@
       v.mesh.renderOrder = want ? 2 : 0;
     }
     const p = selectedPart();
-    if (!p) { planeGroup.visible = false; tc.detach(); preview.partId = null; return; }
+    if (!p || state.regions.on) { // nothing to cut, or the surface regions are on show: no cut preview
+      for (const v of views.values()) if (v.mat.clippingPlanes) { v.mat.clippingPlanes = null; v.mat.needsUpdate = true; }
+      planeGroup.visible = false; tc.detach(); preview.partId = null; return;
+    }
     const v = viewFor(p);
     ghostMat.color.set(p.color).lerp(new THREE.Color(0xffffff), 0.45);
     ghostMat.wireframe = state.wire;
@@ -565,7 +570,7 @@
   function placeAreaTags() {
     const tags = tagLayer.children;
     if (!tags.length) return;
-    const show = !!selectedPart() && !state.cut.stale && !ptr.ring && !ptr.tilt && areaCount() > 1 && cameraOnClearSide();
+    const show = !!selectedPart() && !state.regions.on && !state.cut.stale && !ptr.ring && !ptr.tilt && areaCount() > 1 && cameraOnClearSide();
     tagLayer.hidden = !show;
     if (!show) return;
     planeGroup.updateMatrixWorld(true);
@@ -770,7 +775,7 @@
   function placeSuggestPins() {
     if (!pinLayer || !pinLayer.children.length) return;
     const s = state.suggest;
-    const show = s && !ptr.ring && !ptr.tilt && !tc.dragging;
+    const show = s && !state.regions.on && !ptr.ring && !ptr.tilt && !tc.dragging;
     pinLayer.hidden = !show;
     if (!show) return;
     camera.updateMatrixWorld();
@@ -899,6 +904,7 @@
   async function doCut() {
     const p = selectedPart();
     if (!p) return;
+    if (state.regions.on) setRegions(false);
     if (state.cut.stale) runAnalysis();
     const an = state.cut.analysis;
     if (!an || an.base.error || !an.base.regions.length) {
@@ -1786,6 +1792,67 @@
   $('#redoBtn').addEventListener('click', redo);
   $('#exportBtn').addEventListener('click', () => exportParts(null));
   $('#frameBtn').addEventListener('click', () => frameAll(selectedPart() || undefined));
+  /* ---------------- surface regions ----------------
+     Colour each part by the regions its surface splits into where it turns sharply (like ZBrush polygroups),
+     with dark lines on the borders. The cut preview steps aside while they show; results are kept per part
+     and threshold. */
+  const regionsPanel = $('#regionsPanel');
+  const regionCache = new Map();
+  const REGION_HUES = (() => { const out = []; let h = 205; while (out.length < 64) { h = (h + 137.508) % 360; if (h < 35 || h > 75) out.push(h); } return out; })(); // never yellow: that means cutting
+  function hslToRgb(h, s, l) {
+    const k = (n) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)];
+  }
+  function regionsFor(p) {
+    const key = `${p.id}:${state.regions.angle}`;
+    if (!regionCache.has(key)) regionCache.set(key, K.segmentSurface(p.positions, p.indices, { angle: state.regions.angle }));
+    return regionCache.get(key);
+  }
+  function applyRegions() {
+    const on = state.regions.on;
+    let count = 0;
+    for (const p of state.parts) {
+      const v = views.get(p.id);
+      if (!v) continue;
+      if (v.borders) { v.mesh.remove(v.borders); v.borders.geometry.dispose(); v.borders.material.dispose(); v.borders = null; }
+      if (!on) { if (v.mat.vertexColors) { v.mat.vertexColors = false; v.mat.needsUpdate = true; } v.mat.color.set(p.color); continue; }
+      const seg = regionsFor(p);
+      count += seg.count;
+      const col = new Float32Array(p.indices.length * 3);
+      const rgb = REGION_HUES.map((h, i) => hslToRgb(h, 0.42, i % 2 ? 0.66 : 0.58));
+      for (let t = 0; t < p.indices.length / 3; t++) { const c = rgb[seg.groupOf[t] % rgb.length]; for (let k = 0; k < 3; k++) col.set(c, 9 * t + 3 * k); }
+      v.geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      v.mat.vertexColors = true; v.mat.color.set(0xffffff); v.mat.needsUpdate = true;
+      const lg = new THREE.BufferGeometry();
+      lg.setAttribute('position', new THREE.BufferAttribute(K.regionBorderLines(p.positions, p.indices, seg, K.diag(p.bbox) * 0.0012), 3));
+      v.borders = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x1d1d1b }));
+      v.mesh.add(v.borders);
+    }
+    regionsPanel.hidden = !on;
+    $('#regionsBtn').setAttribute('aria-pressed', on ? 'true' : 'false');
+    const out = $('#regionsCount');
+    if (out) out.textContent = on ? `${count} ${count === 1 ? 'region' : 'regions'}` : '';
+    markDirty();
+  }
+  function setRegions(on) {
+    if (state.regions.on === on) return;
+    state.regions.on = on;
+    applyRegions();
+    updatePreview();
+    placeAreaTags(); placeSuggestPins();
+    markDirty();
+  }
+  $('#regionsBtn').addEventListener('click', () => {
+    if (!state.regions.on) { busy('Finding surface regions'); setTimeout(() => { setRegions(true); busy(null); }, 30); }
+    else setRegions(false);
+  });
+  $('#regionsAngle').addEventListener('input', (e) => { $('#regionsAngleOut').textContent = `${e.target.value}°`; });
+  $('#regionsAngle').addEventListener('change', (e) => {
+    state.regions.angle = +e.target.value;
+    busy('Finding surface regions'); setTimeout(() => { applyRegions(); busy(null); }, 30);
+  });
+
   $('#wireBtn').addEventListener('click', () => {
     state.wire = !state.wire;
     for (const v of views.values()) v.mat.wireframe = state.wire;

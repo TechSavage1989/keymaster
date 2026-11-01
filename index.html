@@ -299,6 +299,12 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .side-suggest .suggest-list strong { font-size: 13px; }
 .side-suggest .suggest-list em { font-size: 12px; }
 
+.regions-panel { position: absolute; top: 62px; right: 12px; width: 268px; padding: 10px 12px; border-radius: 10px; background: var(--chip); backdrop-filter: blur(8px); box-shadow: 0 4px 18px rgba(0,0,0,.12); }
+.rp-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13.5px; }
+.rp-head output { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.regions-panel .slider { grid-template-columns: auto 1fr auto; margin-top: 8px; gap: 8px; }
+.regions-panel .slider output { min-width: 34px; font-size: 12.5px; }
+.regions-panel p { margin-top: 6px; font-size: 12px; line-height: 1.35; }
 /* compact key settings, so everything fits without scrolling */
 .ins-section.head { padding: 10px 16px 8px; }
 .ins-section.head h2 { font-size: 15px; }
@@ -429,11 +435,17 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
       </div>
       <div class="view-tools" id="viewTools" hidden>
         <button class="icon-btn" id="frameBtn" aria-label="Frame the model" title="Frame the model (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="10" cy="10" r="2.5" fill="currentColor"/></svg></button>
+        <button class="icon-btn" id="regionsBtn" aria-label="Show surface regions" aria-pressed="false" title="Show surface regions: where the surface turns sharply, like polygroups"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h6.5v5H3zM10.5 4.5H17v8h-6.5zM3 10.5h6.5v5H3zM10.5 13.5H17v2h-6.5z" fill="currentColor" opacity=".35"/><path d="M3 4.5h14v11H3zM9.5 4.5v11M3 10h6.5M10.5 13h6.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
         <button class="icon-btn" id="wireBtn" aria-label="Show wireframe" aria-pressed="false" title="Show wireframe"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7zM10 2.5v15M3 6.5l14 7M17 6.5l-14 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
       </div>
       <div class="area-tags" id="areaTags" aria-label="Areas on the cut face"></div>
       <div class="drag-chip" id="dragChip" hidden></div>
       <div class="suggest-pins" id="suggestPins" aria-label="Suggested cut spots"></div>
+      <div class="regions-panel" id="regionsPanel" hidden>
+        <div class="rp-head"><strong>Surface regions</strong><output id="regionsCount"></output></div>
+        <label class="slider"><span class="lbl">Split at turns over</span><input type="range" id="regionsAngle" min="10" max="80" step="5" value="35" aria-label="Split the surface where it turns more sharply than this"><output id="regionsAngleOut">35°</output></label>
+        <p class="muted small">Colours show where the surface turns sharply, like ZBrush polygroups. Curved cuts along these borders are coming next.</p>
+      </div>
       <p class="hint" id="hint" hidden></p>
       <div class="plane-bar" id="planeBar" aria-label="Cut plane" hidden></div>
       <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
@@ -2085,6 +2097,89 @@ const KMCore = (() => {
     return top.length > 1 ? top : [];
   }
 
+  /* ---------- surface regions ----------
+     Split the surface into regions wherever it turns sharply (a crease, a hem, a panel edge), like ZBrush's
+     auto polygroups: neighbouring triangles join when the angle between them is under `angle` degrees. Specks
+     smaller than `minFrac` of the total area (sculpted texture, noise) melt into the neighbour they share the
+     longest border with. These borders are the lines a curved cut will follow. */
+  function segmentSurface(P, I, opts = {}) {
+    const angle = opts.angle === undefined ? 35 : opts.angle, minFrac = opts.minFrac === undefined ? 0.003 : opts.minFrac;
+    const nt = I.length / 3, nv = P.length / 3;
+    const N = new Float64Array(nt * 3), A = new Float64Array(nt);
+    let total = 0;
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]);
+      const L = Math.hypot(n[0], n[1], n[2]);
+      A[t] = L / 2; total += L / 2;
+      if (L > 0) { N[3 * t] = n[0] / L; N[3 * t + 1] = n[1] / L; N[3 * t + 2] = n[2] / L; }
+    }
+    // triangle neighbours across each edge, with the edge's length
+    const first = new Map(), pairs = [];
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
+      const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a;
+      const f = first.get(key);
+      if (f === undefined) first.set(key, t);
+      else { first.delete(key); pairs.push(f, t, a, b); }
+    }
+    const par = new Int32Array(nt);
+    for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    const cosA = Math.cos((angle * Math.PI) / 180);
+    for (let i = 0; i < pairs.length; i += 4) {
+      const s = pairs[i], q = pairs[i + 1];
+      if (N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2] >= cosA) { const x = find(s), y = find(q); if (x !== y) par[x] = y; }
+    }
+    // melt specks into the neighbour they share the most border with, smallest first, until none are left
+    const minA = total * minFrac;
+    for (let pass = 0; pass < 12; pass++) {
+      const area = new Map();
+      for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
+      const border = new Map();
+      for (let i = 0; i < pairs.length; i += 4) {
+        const x = find(pairs[i]), y = find(pairs[i + 1]);
+        if (x === y) continue;
+        const a = 3 * pairs[i + 2], b = 3 * pairs[i + 3], len = Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]);
+        for (const [g, h] of [[x, y], [y, x]]) { if (!border.has(g)) border.set(g, new Map()); const m = border.get(g); m.set(h, (m.get(h) || 0) + len); }
+      }
+      const small = [...area.entries()].filter(([, a]) => a < minA).sort((a, b) => a[1] - b[1]);
+      if (!small.length) break;
+      let merged = 0;
+      for (const [g] of small) {
+        const r = find(g);
+        if (r !== g) continue; // already merged this pass
+        const m = border.get(g);
+        if (!m) continue;
+        let best = -1, bl = -1;
+        for (const [h, len] of m) { const hr = find(h); if (hr !== g && len > bl) { bl = len; best = hr; } }
+        if (best >= 0) { par[g] = best; merged++; }
+      }
+      if (!merged) break;
+    }
+    // number the regions, largest first
+    const area = new Map();
+    for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
+    const order = [...area.entries()].sort((a, b) => b[1] - a[1]);
+    const id = new Map(order.map(([r], i) => [r, i]));
+    const groupOf = new Int32Array(nt);
+    for (let t = 0; t < nt; t++) groupOf[t] = id.get(find(t));
+    const borders = [];
+    for (let i = 0; i < pairs.length; i += 4) if (groupOf[pairs[i]] !== groupOf[pairs[i + 1]]) borders.push(pairs[i], pairs[i + 1], pairs[i + 2], pairs[i + 3]);
+    return { groupOf, count: order.length, areas: order.map(([, a]) => a), borders: new Int32Array(borders) };
+  }
+  // Border edges as line segments, nudged a hair off the surface so they draw on top of it.
+  function regionBorderLines(P, I, seg, lift) {
+    const b = seg.borders, out = new Float32Array((b.length / 4) * 6), N = (t) => {
+      const a = 3 * I[3 * t], c = 3 * I[3 * t + 1], d = 3 * I[3 * t + 2];
+      return norm3(cross3([P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]], [P[d] - P[a], P[d + 1] - P[a + 1], P[d + 2] - P[a + 2]]));
+    };
+    for (let i = 0, o = 0; i < b.length; i += 4) {
+      const n0 = N(b[i]), n1 = N(b[i + 1]), n = norm3([n0[0] + n1[0], n0[1] + n1[1], n0[2] + n1[2]]);
+      for (const v of [b[i + 2], b[i + 3]]) { out[o++] = P[3 * v] + n[0] * lift; out[o++] = P[3 * v + 1] + n[1] * lift; out[o++] = P[3 * v + 2] + n[2] * lift; }
+    }
+    return out;
+  }
+
   /* ---------- the cut ---------- */
   // Every exported part must be a closed solid. Real sculpts carry microscopic defects (self-crossing folds,
   // near-duplicate points) that can still defeat the cap at one exact plane position, so check the result and,
@@ -2479,6 +2574,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
+    segmentSurface, regionBorderLines,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
 })();
@@ -2517,6 +2613,7 @@ const KMCore = (() => {
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, pegSide: 'below', perArea: 2, align: true, turn: 0 },
     cut: { keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
+  state.regions = { on: false, angle: 35 };
   const history = { past: [], future: [] };
   let uid = 1;
   let downloads = null;
@@ -2745,6 +2842,7 @@ const KMCore = (() => {
       v.mat.wireframe = state.wire;
     }
     applyExplode();
+    if (state.regions.on) applyRegions();
     updatePreview();
     updateGrid();
     renderParts();
@@ -2777,7 +2875,10 @@ const KMCore = (() => {
       v.mesh.renderOrder = want ? 2 : 0;
     }
     const p = selectedPart();
-    if (!p) { planeGroup.visible = false; tc.detach(); preview.partId = null; return; }
+    if (!p || state.regions.on) { // nothing to cut, or the surface regions are on show: no cut preview
+      for (const v of views.values()) if (v.mat.clippingPlanes) { v.mat.clippingPlanes = null; v.mat.needsUpdate = true; }
+      planeGroup.visible = false; tc.detach(); preview.partId = null; return;
+    }
     const v = viewFor(p);
     ghostMat.color.set(p.color).lerp(new THREE.Color(0xffffff), 0.45);
     ghostMat.wireframe = state.wire;
@@ -3053,7 +3154,7 @@ const KMCore = (() => {
   function placeAreaTags() {
     const tags = tagLayer.children;
     if (!tags.length) return;
-    const show = !!selectedPart() && !state.cut.stale && !ptr.ring && !ptr.tilt && areaCount() > 1 && cameraOnClearSide();
+    const show = !!selectedPart() && !state.regions.on && !state.cut.stale && !ptr.ring && !ptr.tilt && areaCount() > 1 && cameraOnClearSide();
     tagLayer.hidden = !show;
     if (!show) return;
     planeGroup.updateMatrixWorld(true);
@@ -3258,7 +3359,7 @@ const KMCore = (() => {
   function placeSuggestPins() {
     if (!pinLayer || !pinLayer.children.length) return;
     const s = state.suggest;
-    const show = s && !ptr.ring && !ptr.tilt && !tc.dragging;
+    const show = s && !state.regions.on && !ptr.ring && !ptr.tilt && !tc.dragging;
     pinLayer.hidden = !show;
     if (!show) return;
     camera.updateMatrixWorld();
@@ -3387,6 +3488,7 @@ const KMCore = (() => {
   async function doCut() {
     const p = selectedPart();
     if (!p) return;
+    if (state.regions.on) setRegions(false);
     if (state.cut.stale) runAnalysis();
     const an = state.cut.analysis;
     if (!an || an.base.error || !an.base.regions.length) {
@@ -4274,6 +4376,67 @@ const KMCore = (() => {
   $('#redoBtn').addEventListener('click', redo);
   $('#exportBtn').addEventListener('click', () => exportParts(null));
   $('#frameBtn').addEventListener('click', () => frameAll(selectedPart() || undefined));
+  /* ---------------- surface regions ----------------
+     Colour each part by the regions its surface splits into where it turns sharply (like ZBrush polygroups),
+     with dark lines on the borders. The cut preview steps aside while they show; results are kept per part
+     and threshold. */
+  const regionsPanel = $('#regionsPanel');
+  const regionCache = new Map();
+  const REGION_HUES = (() => { const out = []; let h = 205; while (out.length < 64) { h = (h + 137.508) % 360; if (h < 35 || h > 75) out.push(h); } return out; })(); // never yellow: that means cutting
+  function hslToRgb(h, s, l) {
+    const k = (n) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [f(0), f(8), f(4)];
+  }
+  function regionsFor(p) {
+    const key = `${p.id}:${state.regions.angle}`;
+    if (!regionCache.has(key)) regionCache.set(key, K.segmentSurface(p.positions, p.indices, { angle: state.regions.angle }));
+    return regionCache.get(key);
+  }
+  function applyRegions() {
+    const on = state.regions.on;
+    let count = 0;
+    for (const p of state.parts) {
+      const v = views.get(p.id);
+      if (!v) continue;
+      if (v.borders) { v.mesh.remove(v.borders); v.borders.geometry.dispose(); v.borders.material.dispose(); v.borders = null; }
+      if (!on) { if (v.mat.vertexColors) { v.mat.vertexColors = false; v.mat.needsUpdate = true; } v.mat.color.set(p.color); continue; }
+      const seg = regionsFor(p);
+      count += seg.count;
+      const col = new Float32Array(p.indices.length * 3);
+      const rgb = REGION_HUES.map((h, i) => hslToRgb(h, 0.42, i % 2 ? 0.66 : 0.58));
+      for (let t = 0; t < p.indices.length / 3; t++) { const c = rgb[seg.groupOf[t] % rgb.length]; for (let k = 0; k < 3; k++) col.set(c, 9 * t + 3 * k); }
+      v.geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      v.mat.vertexColors = true; v.mat.color.set(0xffffff); v.mat.needsUpdate = true;
+      const lg = new THREE.BufferGeometry();
+      lg.setAttribute('position', new THREE.BufferAttribute(K.regionBorderLines(p.positions, p.indices, seg, K.diag(p.bbox) * 0.0012), 3));
+      v.borders = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x1d1d1b }));
+      v.mesh.add(v.borders);
+    }
+    regionsPanel.hidden = !on;
+    $('#regionsBtn').setAttribute('aria-pressed', on ? 'true' : 'false');
+    const out = $('#regionsCount');
+    if (out) out.textContent = on ? `${count} ${count === 1 ? 'region' : 'regions'}` : '';
+    markDirty();
+  }
+  function setRegions(on) {
+    if (state.regions.on === on) return;
+    state.regions.on = on;
+    applyRegions();
+    updatePreview();
+    placeAreaTags(); placeSuggestPins();
+    markDirty();
+  }
+  $('#regionsBtn').addEventListener('click', () => {
+    if (!state.regions.on) { busy('Finding surface regions'); setTimeout(() => { setRegions(true); busy(null); }, 30); }
+    else setRegions(false);
+  });
+  $('#regionsAngle').addEventListener('input', (e) => { $('#regionsAngleOut').textContent = `${e.target.value}°`; });
+  $('#regionsAngle').addEventListener('change', (e) => {
+    state.regions.angle = +e.target.value;
+    busy('Finding surface regions'); setTimeout(() => { applyRegions(); busy(null); }, 30);
+  });
+
   $('#wireBtn').addEventListener('click', () => {
     state.wire = !state.wire;
     for (const v of views.values()) v.mat.wireframe = state.wire;
