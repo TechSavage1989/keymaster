@@ -308,6 +308,15 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .cut-action { gap: 6px; padding-top: 10px; padding-bottom: 8px; }
 .cut-action .btn.cut { min-height: 38px; }
 .cut-action .btn.ghost.small { min-height: 0; padding: 2px 8px; }
+/* a little headroom so wider fallback fonts still fit */
+.keys .inline, .keys .grid2 { margin-top: 5px; }
+.keys .shape-head { margin-top: 6px; }
+.keys .shape-grid { margin-top: 3px; }
+.keys .shape-help, .keys .type-line { margin-top: 4px; }
+.keys .taper .slider { margin-top: 5px; }
+.keys .row.keyrow { margin-top: 0; }
+.cut-action { gap: 4px; padding-top: 8px; padding-bottom: 6px; }
+.cut-action .key-status .status + .status { margin-top: 4px; }
 .ins-section.keys, .ins-section.cut-action { padding-left: 16px; padding-right: 16px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin-top: 7px; }
 .numi { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); min-width: 0; }
