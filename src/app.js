@@ -210,7 +210,7 @@
       }
       dirty = true;
     }
-    if (moved || dirty) { renderer.render(scene, camera); placeAreaTags(); dirty = false; }
+    if (moved || dirty) { renderer.render(scene, camera); placeAreaTags(); placeSuggestPins(); dirty = false; }
   }
   function animate(dur, step) {
     if (reduceMotion) { step(1); markDirty(); return; }
@@ -450,6 +450,16 @@
     state.cut.stale = false;
     state.cut.hoverArea = -1;
     state.cut.labels = an.base.error ? [] : an.base.regions.map((r, ri) => ({ samples: K.regionSamples(an.base, ri), x: 0, y: 0 }));
+    if (state.cut.focus && !an.base.error) { // a narrow-point suggestion: cut just the limb it found, leave the rest joined
+      planeGroup.updateMatrixWorld(true);
+      const l = planeGroup.worldToLocal(state.cut.focus.clone());
+      const ri = K.regionAt(an.base, l.x, l.y), shown = shownAreas();
+      if (ri >= 0 && shown.length > 1) {
+        for (const j of shown) if (j !== ri) state.cut.skip.add(j);
+        toast('Only the narrow part will be cut. Tick other areas to cut them too.');
+      }
+      state.cut.focus = null;
+    }
     if (state.cut.auto) { state.cut.keys = an.base.error ? [] : K.autoPlaceKeys(an, coreCfg(), state.cfg.perArea, state.cut.skip); state.cut.why = whyMap(state.cut.keys); }
     state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
     evaluateKeys();
@@ -682,12 +692,130 @@
       sizePlaneVisuals(state.cut.R);
       const up = new THREE.Vector3(0, 0, 1);
       setPlaneNormal(towardCamera(up));
-      state.cut.keys = []; state.cut.auto = true; state.cut.skip = new Set(); state.cut.analysis = null; state.cut.evals = []; state.cut.active = -1;
+      state.cut.keys = []; state.cut.auto = true; state.cut.skip = new Set(); state.cut.analysis = null; state.cut.evals = []; state.cut.active = -1; state.cut.focus = null;
+      state.suggest = suggestCache.get(p.id) || null;
       attachGizmo();
       scheduleAnalysis(0);
     }
     syncScene();
+    renderSuggestPins();
   }
+
+  /* ---------------- cut suggestions ---------------- */
+  // Narrow points (wrists, ankles, necks), seams and panel lines, and separate pieces, found from the model's
+  // shape. The search runs a direction at a time between frames so the screen keeps moving, and its results
+  // are kept for each part.
+  const suggestCache = new Map();
+  let suggestRun = null;
+  const pinLayer = $('#suggestPins');
+  async function findSuggestions() {
+    const p = selectedPart();
+    if (!p) return;
+    const token = {};
+    suggestRun = token;
+    state.suggest = { partId: p.id, status: 'running', progress: 0, items: [], active: -1 };
+    renderInspector(); renderSuggestPins();
+    const still = async (frac) => {
+      if (suggestRun !== token || state.selectedId !== p.id) return false;
+      state.suggest.progress = frac;
+      const bar = $('#suggestBar'); if (bar) bar.style.width = `${Math.round(frac * 100)}%`;
+      await nextFrame();
+      return suggestRun === token && state.selectedId === p.id;
+    };
+    const scale = K.diag(p.bbox), dirs = K.sweepDirections(p.positions), steps = dirs.length + 3;
+    let found = [];
+    if (!(await still(0.02))) return;
+    for (let i = 0; i < dirs.length; i++) {
+      found = found.concat(K.neckSweep(p.positions, p.indices, dirs[i], scale));
+      if (!(await still((i + 1) / steps))) return;
+    }
+    const necks = K.refineNecks(p.positions, p.indices, found, scale);
+    if (!(await still((dirs.length + 1) / steps))) return;
+    const creases = K.creasePlanes(p.positions, p.indices, dirs, scale, K.creaseEdges(p.positions, p.indices));
+    if (!(await still((dirs.length + 2) / steps))) return;
+    const shells = K.separateShells(p.positions, p.indices);
+    const items = [];
+    if (shells.length) items.push({ kind: 'shells', count: shells.length });
+    items.push(...necks.concat(creases).sort((a, b) => b.score - a.score).slice(0, 9));
+    state.suggest = { partId: p.id, status: 'done', progress: 1, items, active: -1 };
+    suggestCache.set(p.id, state.suggest);
+    suggestRun = null;
+    renderInspector(); renderSuggestPins();
+  }
+  // Suggestions are lettered (A, B, C…) so they can't be mixed up with the numbered areas of a cut face.
+  function suggestMark(s, i) { const off = s.items[0] && s.items[0].kind === 'shells' ? 1 : 0; return s.items[i].kind === 'shells' ? '✂' : String.fromCharCode(65 + i - off); }
+  function suggestText(it) {
+    if (it.kind === 'shells') return ['Split into separate pieces', `${it.count} pieces that don’t touch, so no cut is needed`];
+    if (it.kind === 'neck') return ['Narrow point', `About ${fmt(it.width)} mm across`];
+    return ['Seam or panel line', `Runs along creases for ${Math.round(it.coverage * 100)}% of the cut`];
+  }
+  function suggestSection() {
+    const s = state.suggest;
+    let body;
+    if (!s) body = `<p class="muted small">Keymaster can look for natural places to cut: narrow points like wrists, ankles and necks, seams and panel lines, and separate pieces.</p>
+      <button class="btn" data-act="find-cuts">Find cut spots</button>`;
+    else if (s.status === 'running') body = `<div class="progress" role="progressbar" aria-label="Looking for cut spots"><span id="suggestBar" style="width:${Math.round(s.progress * 100)}%"></span></div>
+      <p class="muted small">Looking at the shape of the model…</p>`;
+    else if (!s.items.length) body = `<p class="muted small">No clear break points on this part. Place the cut yourself, or try another part.</p>`;
+    else body = `<p class="muted small">Click one to move the cut there. The letters match the pins on the model.</p>
+      <ol class="suggest-list">${s.items.map((it, i) => { const [a, b] = suggestText(it); return `<li><button type="button" data-act="suggest" data-value="${i}" aria-pressed="${i === s.active}"><b>${suggestMark(s, i)}</b><span><strong>${a}</strong><em>${esc(b)}</em></span></button></li>`; }).join('')}</ol>`;
+    return `<div class="ins-section suggest"><h3>Suggested cuts</h3>${body}</div>`;
+  }
+  function renderSuggestPins() {
+    const s = state.suggest, p = selectedPart();
+    if (!pinLayer) return;
+    if (!s || s.status !== 'done' || !p || s.partId !== p.id) { pinLayer.innerHTML = ''; return; }
+    pinLayer.innerHTML = s.items.map((it, i) => it.kind === 'shells' ? '' :
+      `<button type="button" class="suggest-pin${i === s.active ? ' is-active' : ''}" data-pin="${i}" title="${suggestText(it).join(': ')}">${suggestMark(s, i)}</button>`).join('');
+    placeSuggestPins();
+  }
+  function placeSuggestPins() {
+    if (!pinLayer || !pinLayer.children.length) return;
+    const s = state.suggest;
+    const show = s && !ptr.ring && !ptr.tilt && !tc.dragging;
+    pinLayer.hidden = !show;
+    if (!show) return;
+    camera.updateMatrixWorld();
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    for (const el of pinLayer.children) {
+      const it = s.items[+el.dataset.pin];
+      const q = new THREE.Vector3(...it.point).project(camera);
+      const offscreen = q.z > 1 || Math.abs(q.x) > 1.05 || Math.abs(q.y) > 1.05;
+      el.style.visibility = offscreen ? 'hidden' : '';
+      if (!offscreen) el.style.transform = `translate(${Math.round((q.x + 1) / 2 * W - 12)}px, ${Math.round((1 - q.y) / 2 * H - 12)}px)`;
+    }
+  }
+  function applySuggestion(i) {
+    const s = state.suggest, it = s && s.items[i];
+    if (!it) return;
+    s.active = i;
+    if (it.kind === 'shells') { splitShells(); return; }
+    const pt = new THREE.Vector3(...it.point), n = new THREE.Vector3(...it.normal).normalize();
+    if (n.dot(camera.position.clone().sub(pt)) < 0) n.negate(); // keep the clear side facing you
+    planeGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    planeGroup.position.set(pt.x, pt.y, pt.z);
+    computeSliderRange();
+    onPlaneMoved();
+    state.cut.auto = true; state.cut.skip.clear(); state.cut.active = -1;
+    state.cut.focus = it.kind === 'neck' ? pt : null;
+    scheduleAnalysis(0);
+    renderInspector(); renderSuggestPins();
+  }
+  function splitShells() {
+    const p = selectedPart();
+    if (!p) return;
+    const shells = K.separateShells(p.positions, p.indices);
+    if (shells.length < 2) { toast('This part is all one piece now, so there is nothing to split.'); return; }
+    shells.sort((a, b) => b.volume - a.volume);
+    const made = shells.map((sh, i) => makePart({ name: `${p.name} ${i + 1}`, color: i ? nextColor() : p.color, positions: sh.positions, indices: sh.indices }));
+    const idx = state.parts.indexOf(p);
+    commit(state.parts.slice(0, idx).concat(made, state.parts.slice(idx + 1)), 'the split');
+    state.selectedId = null;
+    syncScene();
+    renderSuggestPins();
+    toast(`Split into ${made.length} pieces. Click a piece to cut it.`);
+  }
+  if (pinLayer) pinLayer.addEventListener('click', (e) => { const b = e.target.closest('[data-pin]'); if (b) applySuggestion(+b.dataset.pin); });
   /* ---------------- history ---------------- */
   function commit(parts, label) {
     history.past.push({ parts: state.parts, label });
@@ -1458,6 +1586,7 @@
       ${shown.length > 1 ? `<div class="areas"><p class="lbl">The cut face has ${shown.length} separate areas. Click an area’s label in the view, or untick it here, to leave it joined.</p>
         <ul>${shown.map((i, k) => `<li data-area-row="${i}"${i === state.cut.hoverArea ? ' class="is-hover"' : ''}><label><input type="checkbox" data-area="${i}" ${state.cut.skip.has(i) ? '' : 'checked'}> Area ${k + 1} <span class="muted">${fmt(regions[i].area)} mm²</span></label></li>`).join('')}</ul></div>` : ''}
     </div>
+    ${suggestSection()}
     <div class="ins-section">
       <h3>Keys</h3>
       ${seg('keytype', c.type, [['peg', 'Pegs'], ['dowel', 'Dowels'], ['magnet', 'Magnets'], ['none', 'None']])}
@@ -1515,6 +1644,8 @@
       case 'align': alignPlane(val); break;
       case 'flip': flipPlane(); break;
       case 'straighten': straighten(); break;
+      case 'find-cuts': findSuggestions(); break;
+      case 'suggest': applySuggestion(+val); break;
       case 'gizmo': setGizmoMode(val); renderInspector(); updateHint(); break;
       case 'keytype': {
         if (c.type === val) break;

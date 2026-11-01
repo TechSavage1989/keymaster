@@ -466,6 +466,7 @@ console.log('cut suggestions');
   check('dumbbell: the bar is the top narrow point', !!top && Math.hypot(top.point[0] - mid[0], top.point[1] - mid[1], top.point[2] - mid[2]) < 12, top && top.point);
   check('dumbbell: the cut sits square across the bar (within 6°)', !!top && angleDeg(top.normal, axis) < 6, top && angleDeg(top.normal, axis));
   check('dumbbell: the width is the bar width', !!top && Math.abs(top.width - 5) < 0.6, top && top.width);
+  check('dumbbell: the even bar counts as one narrow point', necks.filter(n => Math.abs(n.width - 5) < 1).length === 1, necks.map(n => n.width));
   const rb = K.cutMesh(bell.positions, bell.indices, K.frameFromNormal(top.normal, top.point), { scale: 70, cfg: cfgOf({}) });
   check('cutting at the suggestion splits the dumbbell in two sealed halves', rb.parts.length === 2 && allClosed(rb.parts));
   // a plain cylinder has no narrow point

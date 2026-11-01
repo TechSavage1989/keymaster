@@ -1502,8 +1502,17 @@ const KMCore = (() => {
     }
     out.sort((a, b) => b.score - a.score);
     // two groups can settle on the same neck after tilting
+    // and a long even neck (a bar, a forearm) is narrow all along it: keep one spot per neck
+    const sameNeck = (o, u) => {
+      const d = [o.point[0] - u.point[0], o.point[1] - u.point[1], o.point[2] - u.point[2]], len = Math.hypot(d[0], d[1], d[2]);
+      if (len < 0.6 * Math.sqrt(Math.max(o.area, u.area))) return true;
+      const par = Math.abs(o.normal[0] * u.normal[0] + o.normal[1] * u.normal[1] + o.normal[2] * u.normal[2]) > 0.985;
+      const along = Math.abs(d[0] * u.normal[0] + d[1] * u.normal[1] + d[2] * u.normal[2]);
+      const off = Math.sqrt(Math.max(0, len * len - along * along));
+      return par && off < 0.5 * Math.sqrt(Math.min(o.area, u.area)) && Math.abs(o.area - u.area) < 0.2 * Math.max(o.area, u.area);
+    };
     const uniq = [];
-    for (const o of out) if (!uniq.some(u => Math.hypot(o.point[0] - u.point[0], o.point[1] - u.point[1], o.point[2] - u.point[2]) < 0.6 * Math.sqrt(Math.max(o.area, u.area)))) uniq.push(o);
+    for (const o of out) if (!uniq.some(u => sameNeck(o, u))) uniq.push(o);
     return uniq.slice(0, limit);
   }
   // Sharp inward creases (valleys between faces), as short segments.
