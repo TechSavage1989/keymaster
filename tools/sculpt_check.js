@@ -11,7 +11,7 @@ const files = process.argv.slice(2);
 if (!files.length) { console.log('usage: node tools/sculpt_check.js model.stl [more files]'); process.exit(1); }
 const N = +(process.env.POSITIONS || 13);
 const dirs = [[0, 0, 1], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0.3, -0.2, 1], [1, 0.4, 0.7], [-0.5, 1, 0.25]];
-const peg = (shape) => ({ type: 'peg', shape, diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: true, pegSide: 'below' });
+const peg = (shape, taper, taperSocket) => ({ type: 'peg', shape, diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper, taperSocket, pegSide: 'below' });
 let total = 0, unsealed = 0, refused = 0, retried = 0, slowest = 0;
 
 for (const f of files) {
@@ -29,7 +29,7 @@ for (const f of files) {
     const ext = [0, 1, 2].map(i => b.size[i] * Math.abs(d[i])).reduce((s, v) => s + v, 0);
     for (let k = 1; k <= N; k++) {
       const F = K.frameFromNormal(d, b.center.map((c, i) => c + d[i] * (-ext / 2 + ext * (k - 0.37) / (N + 1))));
-      for (const cfg of [{ type: 'none' }, peg(k % 2 ? 'round' : 'dshape')]) {
+      for (const cfg of [{ type: 'none' }, [peg('round', 20, true), peg('dshape', 100, true), peg('square', 100, false)][k % 3]]) {
         const cf = { shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: false, pegSide: 'below', ...cfg };
         const an = K.analyzePlane(m.positions, m.indices, F, cf, scale);
         if (an.base.error || !an.base.regions.length) continue;

@@ -1114,10 +1114,18 @@ const KMCore = (() => {
   };
   function keyGeometrySpec(cfg) {
     const r = cfg.diameter / 2, c = cfg.clearance, ca = cfg.clearance + 0.1;
-    const taper = cfg.type === 'peg' && cfg.taper ? 0.8 : 1;
+    // Taper (pegs only): percent the tip narrows, 0 straight to 100 a point (kept at 2% of the width so the tip
+    // stays a real, printable outline). Older settings stored it as on/off, which meant 20%.
+    const pct = cfg.type !== 'peg' ? 0 : typeof cfg.taper === 'number' ? Math.max(0, Math.min(100, cfg.taper)) : cfg.taper ? 20 : 0;
+    const taper = Math.max(0.02, 1 - pct / 100);
+    const match = pct > 0 && cfg.taperSocket !== false; // socket narrows with the peg, or stays straight
+    // The fit gap is meant at right angles to the wall: on a sloping wall, a gap c measured across is only c·cosθ
+    // at right angles, so grow a matching socket by c / cosθ, using the steepest slope of the shape.
+    const slope = cfg.length > 0 ? (r * (1 - taper)) / cfg.length : 0;
+    const cs = match ? c * Math.sqrt(1 + slope * slope) : c;
     const shape = shapeFor(cfg);
-    const res = profileRes(r + c);
-    const sock = keyProfile(shape, r, c, 0, res);
+    const res = profileRes(r + cs);
+    const sock = keyProfile(shape, r, cs, 0, res);
     let sockets; // [{side:-1|+1, depth}]
     if (cfg.type === 'peg') {
       const s = cfg.pegSide === 'above' ? -1 : +1; // socket goes into the side opposite the peg
@@ -1125,7 +1133,7 @@ const KMCore = (() => {
     } else if (cfg.type === 'dowel') sockets = [{ side: -1, depth: cfg.length / 2 + ca }, { side: +1, depth: cfg.length / 2 + ca }];
     else sockets = [{ side: -1, depth: cfg.length + ca }, { side: +1, depth: cfg.length + ca }];
     const fit = profileFit(sock);
-    return { r, c, ca, taper, sockets, shape, res, outer: shape === 'round' ? r + c : fit.outer, inner: shape === 'round' ? r + c : fit.inner };
+    return { r, c, cs, ca, taper, taperPct: pct, sockTip: match ? taper : 1, sockets, shape, res, outer: shape === 'round' ? r + cs : fit.outer, inner: shape === 'round' ? r + cs : fit.inner };
   }
 
   /* ---------- key shapes ----------
@@ -1209,7 +1217,7 @@ const KMCore = (() => {
   }
   // Outline points of a key's footprint (socket size), spaced evenly, for checking it against an area's edge.
   function footprintOf(spec, angle) {
-    const prof = keyProfile(spec.shape, spec.r, spec.c, angle, spec.res);
+    const prof = keyProfile(spec.shape, spec.r, spec.cs, angle, spec.res);
     let per = 0;
     for (let i = 0; i < prof.length; i++) { const a = prof[i], b = prof[(i + 1) % prof.length]; per += Math.hypot(b[0] - a[0], b[1] - a[1]); }
     const step = per / 40, pts = [];
@@ -1428,11 +1436,10 @@ const KMCore = (() => {
           let role, grow, depth, dir, tipR = spec.r;
           if (cfg.type === 'peg') {
             const pegSide = cfg.pegSide === 'above' ? +1 : -1;
-            if (side === pegSide) { role = 'peg'; grow = 0; depth = cfg.length; dir = -side; }
-            else { role = 'socket'; grow = spec.c; depth = cfg.length + spec.ca; dir = side; }
-            tipR = spec.r * spec.taper;
+            if (side === pegSide) { role = 'peg'; grow = 0; depth = cfg.length; dir = -side; tipR = spec.r * spec.taper; }
+            else { role = 'socket'; grow = spec.cs; depth = cfg.length + spec.ca; dir = side; tipR = spec.r * spec.sockTip; }
           } else {
-            role = 'socket'; grow = spec.c; dir = side;
+            role = 'socket'; grow = spec.cs; dir = side;
             depth = cfg.type === 'dowel' ? cfg.length / 2 + spec.ca : cfg.length + spec.ca;
           }
           const prof = keyProfile(spec.shape, spec.r, grow, k.angle, spec.res);

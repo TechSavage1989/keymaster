@@ -26,7 +26,7 @@
     wire: false,
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: false, pegSide: 'below', perArea: 2, align: true, turn: 0 },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, pegSide: 'below', perArea: 2, align: true, turn: 0 },
     cut: { mode: 'translate', keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   const history = { past: [], future: [] };
@@ -550,7 +550,7 @@
       const an = state.cut.analysis, sec = an && !an.base.error ? an.base : null;
       const ang = K.keyAngle(sec || { regions: [] }, sec ? K.regionAt(sec, k.x, k.y) : -1, cfg);
       const prof = (rr, dd) => K.keyProfile(spec.shape, rr, dd, ang, spec.res);
-      const disc = new THREE.Mesh(fanGeometry(prof(spec.r, spec.c), 0), new THREE.MeshBasicMaterial({ color: bad ? 0xe5484d : 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: active ? 0.95 : 0.78 }));
+      const disc = new THREE.Mesh(fanGeometry(prof(spec.r, spec.cs), 0), new THREE.MeshBasicMaterial({ color: bad ? 0xe5484d : 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: active ? 0.95 : 0.78 }));
       disc.position.z = z; disc.renderOrder = 5;
       g.add(disc);
       let z0, z1, tipR = spec.r;
@@ -1167,6 +1167,18 @@
     return `<div class="shape-grid${shapes.length < 4 ? ' few' : ''}" role="group" aria-label="Key shape">${shapes.map(s =>
       `<button type="button" data-act="shape" data-value="${s}" aria-pressed="${s === cur}" title="${SHAPE_NAMES[s]}">${shapeIcon(s)}<span>${SHAPE_NAMES[s]}</span></button>`).join('')}</div>`;
   }
+  function taperField(c) {
+    const pct = K.keyGeometrySpec(c).taperPct;
+    const shape = K.keyGeometrySpec(c).shape;
+    const point = { round: 'a cone', square: 'a four-sided pyramid', hexagon: 'a six-sided pyramid', cross: 'a cross-shaped point', oval: 'an oval cone', slot: 'a wedge-like point', dshape: 'a cone with a flat side' }[shape];
+    const desc = pct === 0 ? 'Straight sides.' : pct >= 100 ? `Comes to a point, like ${point}.` : `The tip is ${100 - pct}% of the base width.`;
+    return `<div class="taper"><label class="slider"><span class="lbl">Taper</span>
+        <input type="range" id="taperPct" data-cfg="taper" min="0" max="100" step="5" value="${pct}" aria-describedby="taperDesc">
+        <output id="taperOut">${pct}%</output></label>
+      <p class="muted small" id="taperDesc">${desc} Tapered pegs find their way in more easily.</p>
+      ${pct > 0 ? `<label class="check"><input type="checkbox" data-cfg="taperSocket" ${c.taperSocket !== false ? 'checked' : ''}> Match the hole to the taper</label>
+      <p class="muted small">${c.taperSocket !== false ? 'The hole narrows with the peg for a snug, even fit.' : 'The hole stays straight, so the peg slides in easily but has more play.'}</p>` : ''}</div>`;
+  }
   function normTurn(v) { let a = ((Math.round(v) % 360) + 360) % 360; if (a > 180) a -= 360; return a; }
   function numField(field, label, value, opts = {}) {
     return `<label class="num"><span>${label}</span><span class="num-wrap"><input type="number" inputmode="decimal" data-cfg="${field}" value="${value}" step="${opts.step || 0.1}" min="${opts.min || 0}" ${opts.max ? `max="${opts.max}"` : ''}><em>${opts.unit || 'mm'}</em></span></label>`;
@@ -1290,7 +1302,7 @@
         <label class="check"><input type="checkbox" data-cfg="align" ${c.align !== false ? 'checked' : ''}> Line up with each area’s long side</label>
         <div class="row two">${numField('turn', 'Turn by', c.turn || 0, { min: -180, max: 180, step: 15, unit: '°' })}</div></div>` : ''}
       ${c.type === 'peg' ? `<div class="field"><span class="lbl">Pegs go on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}
-        <label class="check"><input type="checkbox" data-cfg="taper" ${c.taper ? 'checked' : ''}> Taper the pegs for easier fitting</label></div>` : ''}
+        ${taperField(c)}</div>` : ''}
       <div class="row keyrow">
         <label class="num"><span>Keys per area</span><select data-cfg="perArea">${[1, 2, 3, 4].map(n => `<option ${n === c.perArea ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <button class="btn" data-act="auto-keys">${state.cut.auto ? 'Re-place keys' : 'Auto-place keys'}</button>
@@ -1383,6 +1395,10 @@
       analysisTimer = setTimeout(() => { state.cut.skip.clear(); runAnalysis(); }, 220);
     } else if (t.id === 'explode') {
       state.explode = parseFloat(t.value); applyExplode();
+    } else if (t.id === 'taperPct') { // live preview while dragging; the change event re-checks the keys
+      state.cfg.taper = parseFloat(t.value);
+      const out = $('#taperOut'); if (out) out.textContent = `${Math.round(state.cfg.taper)}%`;
+      renderKeyMarkers();
     }
   });
 
