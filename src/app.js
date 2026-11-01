@@ -26,7 +26,7 @@
     wire: false,
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: false, pegSide: 'below', perArea: 2 },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: false, pegSide: 'below', perArea: 2, align: true, turn: 0 },
     cut: { mode: 'translate', keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   const history = { past: [], future: [] };
@@ -541,26 +541,62 @@
       const color = stale ? 0xd5d8dc : bad ? 0xe5484d : 0xfafbfc;
       const g = new THREE.Group();
       g.position.set(k.x, k.y, 0);
-      const footR = spec.r + spec.c;
-      const discGeom = cfg.shape === 'square' ? new THREE.PlaneGeometry(footR * 2, footR * 2) : new THREE.CircleGeometry(footR, 40);
-      const disc = new THREE.Mesh(discGeom, new THREE.MeshBasicMaterial({ color: bad ? 0xe5484d : 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: active ? 0.95 : 0.78 }));
+      const an = state.cut.analysis, sec = an && !an.base.error ? an.base : null;
+      const ang = K.keyAngle(sec || { regions: [] }, sec ? K.regionAt(sec, k.x, k.y) : -1, cfg);
+      const prof = (rr, dd) => K.keyProfile(spec.shape, rr, dd, ang, spec.res);
+      const disc = new THREE.Mesh(fanGeometry(prof(spec.r, spec.c), 0), new THREE.MeshBasicMaterial({ color: bad ? 0xe5484d : 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: active ? 0.95 : 0.78 }));
       disc.position.z = z; disc.renderOrder = 5;
       g.add(disc);
-      let len, zc, rad = spec.r;
-      if (cfg.type === 'peg') { len = cfg.length; zc = (cfg.pegSide === 'above' ? -1 : 1) * len / 2; }
-      else if (cfg.type === 'dowel') { len = cfg.length; zc = 0; }
-      else { len = cfg.length * 2; zc = 0; }
-      const body = cfg.shape === 'square' ? new THREE.BoxGeometry(rad * 2, rad * 2, len) : new THREE.CylinderGeometry(rad * (cfg.taper && cfg.type === 'peg' ? 0.8 : 1), rad, len, 32);
-      if (cfg.shape !== 'square') {
-        body.rotateX(Math.PI / 2);
-        if (cfg.type === 'peg' && cfg.pegSide === 'above') body.rotateX(Math.PI);
-      }
+      let z0, z1, tipR = spec.r;
+      if (cfg.type === 'peg') { z0 = 0; z1 = (cfg.pegSide === 'above' ? -1 : 1) * cfg.length; tipR = spec.r * spec.taper; }
+      else if (cfg.type === 'dowel') { z0 = -cfg.length / 2; z1 = cfg.length / 2; }
+      else { z0 = -cfg.length; z1 = cfg.length; }
+      const body = prismGeometry(prof(spec.r, 0), prof(tipR, 0), z0, z1);
       const mesh = new THREE.Mesh(body, new THREE.MeshStandardMaterial({ color, roughness: 0.4, emissive: active ? 0x4a3a00 : 0x000000 }));
-      mesh.position.z = zc; mesh.renderOrder = 5;
+      mesh.renderOrder = 5;
       g.add(mesh);
       keyGroup.add(g);
     });
     markDirty();
+  }
+
+  // Flat outline of a key's footprint, as a fan from its centre (every key shape is star-shaped around it).
+  function fanGeometry(prof, z) {
+    const pos = [0, 0, z], idx = [];
+    prof.forEach(([x, y], i) => { pos.push(x, y, z); idx.push(0, 1 + i, 1 + (i + 1) % prof.length); });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setIndex(idx);
+    return g;
+  }
+  // A key body: outline p0 at z0 rising to outline p1 at z1, with smooth sides on curves and sharp edges at corners.
+  function prismGeometry(p0, p1, z0, z1) {
+    const n = p0.length, pos = [], nor = [], idx = [];
+    const up = z1 > z0;
+    const en = p0.map((a, i) => { const b = p0[(i + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [dy / l, -dx / l]; });
+    const vn = (i, e) => { // normal at vertex i for edge e: averaged with the neighbour edge when the turn is gentle
+      const o = e === i ? en[(i - 1 + n) % n] : en[(i + 1) % n], m = en[e];
+      if (m[0] * o[0] + m[1] * o[1] < Math.cos(Math.PI / 5)) return m;
+      const sx = m[0] + o[0], sy = m[1] + o[1], l = Math.hypot(sx, sy) || 1;
+      return [sx / l, sy / l];
+    };
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, ni = vn(i, i), nj = vn(j, i), b = pos.length / 3;
+      pos.push(p0[i][0], p0[i][1], z0, p0[j][0], p0[j][1], z0, p1[j][0], p1[j][1], z1, p1[i][0], p1[i][1], z1);
+      nor.push(ni[0], ni[1], 0, nj[0], nj[1], 0, nj[0], nj[1], 0, ni[0], ni[1], 0);
+      if (up) idx.push(b, b + 1, b + 2, b, b + 2, b + 3); else idx.push(b, b + 2, b + 1, b, b + 3, b + 2);
+    }
+    for (const [ring, z, top] of [[p1, z1, true], [p0, z0, false]]) {
+      const c = pos.length / 3, nz = (top === up) ? 1 : -1;
+      pos.push(0, 0, z); nor.push(0, 0, nz);
+      ring.forEach(([x, y]) => { pos.push(x, y, z); nor.push(0, 0, nz); });
+      for (let i = 0; i < n; i++) { const a = c + 1 + i, b = c + 1 + (i + 1) % n; if (nz > 0) idx.push(c, a, b); else idx.push(c, b, a); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nor), 3));
+    g.setIndex(idx);
+    return g;
   }
 
   /* ---------------- selection ---------------- */
@@ -1097,6 +1133,32 @@
     return `<div class="seg" role="group" aria-label="${esc(name)}">${options.map(([v, label]) =>
       `<button type="button" data-act="${name}" data-value="${v}" aria-pressed="${String(v) === String(value)}">${label}</button>`).join('')}</div>`;
   }
+  const SHAPE_NAMES = { round: 'Round', square: 'Square', hexagon: 'Hexagon', cross: 'Cross', oval: 'Oval', slot: 'Slot', dshape: 'D-shape' };
+  const SHAPE_HELP = {
+    round: 'Easiest to fit. Use two or more so the pieces can’t turn.',
+    square: 'Stops the pieces turning, even with a single key.',
+    hexagon: 'Stops the pieces turning, even with a single key.',
+    cross: 'Grips firmly and stops the pieces turning, even with a single key.',
+    oval: 'For narrow areas. Half again as long as it is wide, and stops the pieces turning.',
+    slot: 'For long, narrow areas. Twice as long as it is wide, and stops the pieces turning.',
+    dshape: 'Fits only one way round, so a piece can’t be glued on backwards.',
+  };
+  const shapeIcons = {};
+  function shapeIcon(s) {
+    if (!shapeIcons[s]) {
+      const prof = K.keyProfile(s, 1, 0, 0, 36);
+      const half = Math.max(...prof.map(([x, y]) => Math.max(Math.abs(x), Math.abs(y)))) * 1.12; // each icon fills its box
+      const pts = prof.map(([x, y]) => `${x.toFixed(3)},${(-y).toFixed(3)}`).join(' ');
+      shapeIcons[s] = `<svg viewBox="${-half} ${-half} ${2 * half} ${2 * half}" aria-hidden="true"><polygon points="${pts}" fill="currentColor"/></svg>`;
+    }
+    return shapeIcons[s];
+  }
+  function shapePicker(c) {
+    const shapes = c.type === 'magnet' ? K.MAGNET_SHAPES : K.KEY_SHAPES, cur = K.keyGeometrySpec(c).shape;
+    return `<div class="shape-grid${shapes.length < 4 ? ' few' : ''}" role="group" aria-label="Key shape">${shapes.map(s =>
+      `<button type="button" data-act="shape" data-value="${s}" aria-pressed="${s === cur}" title="${SHAPE_NAMES[s]}">${shapeIcon(s)}<span>${SHAPE_NAMES[s]}</span></button>`).join('')}</div>`;
+  }
+  function normTurn(v) { let a = ((Math.round(v) % 360) + 360) % 360; if (a > 180) a -= 360; return a; }
   function numField(field, label, value, opts = {}) {
     return `<label class="num"><span>${label}</span><span class="num-wrap"><input type="number" inputmode="decimal" data-cfg="${field}" value="${value}" step="${opts.step || 0.1}" min="${opts.min || 0}" ${opts.max ? `max="${opts.max}"` : ''}><em>${opts.unit || 'mm'}</em></span></label>`;
   }
@@ -1175,6 +1237,7 @@
       } else keyStatus = `<p class="status ok">${ICONS.check}<span>${state.cut.keys.length} ${state.cut.keys.length === 1 ? 'key' : 'keys'} ready, with walls at least ${c.margin} mm thick.</span></p>`;
     }
     const lenLabel = c.type === 'magnet' ? 'Thickness' : 'Length';
+    const shownShape = K.keyGeometrySpec(c).shape;
     return `<div class="ins-section head">
       <div class="head-row"><h2>${esc(p.name)}</h2><button class="btn ghost small" data-act="done">Done</button></div>
       <p class="muted small">${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm, ${fmtInt(p.tris)} triangles</p>
@@ -1203,15 +1266,19 @@
       ${seg('keytype', c.type, [['peg', 'Pegs'], ['dowel', 'Dowels'], ['magnet', 'Magnets'], ['none', 'None']])}
       ${c.type === 'none' ? '<p class="muted small">The pieces will have flat faces with nothing to line them up.</p>' : `
       <p class="muted small">${{ peg: 'A peg on one piece fits a socket in the other.', dowel: 'Both pieces get holes, and Keymaster adds printable pins. Metal rods work too.', magnet: 'Both pieces get pockets sized for disc magnets.' }[c.type]}</p>
-      ${seg('shape', c.shape, [['round', 'Round'], ['square', 'Square']])}
+      ${shapePicker(c)}
+      <p class="muted small shape-help">${SHAPE_HELP[shownShape]}</p>
       <div class="row two">
-        ${numField('diameter', c.shape === 'square' ? 'Width' : 'Diameter', c.diameter, { min: 1, step: 0.5 })}
+        ${numField('diameter', shownShape === 'round' ? 'Diameter' : 'Width', c.diameter, { min: 1, step: 0.5 })}
         ${numField('length', lenLabel, c.length, { min: 0.5, step: 0.5 })}
       </div>
       <div class="field"><span class="lbl">Fit</span>
         ${seg('fit', c.clearance, [['0.1', 'Snug'], ['0.2', 'Standard'], ['0.3', 'Loose']])}
         <div class="row two">${numField('clearance', 'Gap per side', c.clearance, { min: 0, step: 0.05 })}${numField('margin', 'Wall around keys', c.margin, { min: 0.4, step: 0.2 })}</div>
       </div>
+      ${shownShape !== 'round' ? `<div class="field direction"><span class="lbl">Direction</span>
+        <label class="check"><input type="checkbox" data-cfg="align" ${c.align !== false ? 'checked' : ''}> Line up with each area’s long side</label>
+        <div class="row two">${numField('turn', 'Turn by', c.turn || 0, { min: -180, max: 180, step: 15, unit: '°' })}</div></div>` : ''}
       ${c.type === 'peg' ? `<div class="field"><span class="lbl">Pegs go on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}
         <label class="check"><input type="checkbox" data-cfg="taper" ${c.taper ? 'checked' : ''}> Taper the pegs for easier fitting</label></div>` : ''}
       <div class="row keyrow">
@@ -1277,8 +1344,8 @@
       if (t.type === 'checkbox') state.cfg[k] = t.checked;
       else {
         const v = parseFloat(t.value);
-        if (!isFinite(v) || v < 0) { renderInspector(); return; }
-        state.cfg[k] = k === 'perArea' ? Math.round(v) : v;
+        if (!isFinite(v) || (v < 0 && k !== 'turn')) { renderInspector(); return; }
+        state.cfg[k] = k === 'perArea' ? Math.round(v) : k === 'turn' ? normTurn(v) : v;
       }
       if (k === 'perArea') state.cut.auto = true;
       savePrefs(); scheduleAnalysis(0); renderInspector();
