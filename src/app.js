@@ -612,6 +612,7 @@
     const R = state.cut.R;
     const z = Math.max(0.03, R * 0.0009);
     state.cut.keys.forEach((k, i) => {
+      const kc = K.keyCfg(cfg, k), ks = k.o ? K.keyGeometrySpec(kc) : spec;
       const ev = state.cut.evals[i];
       const stale = state.cut.stale;
       const bad = !stale && ev && !ev.ok;
@@ -620,17 +621,17 @@
       const g = new THREE.Group();
       g.position.set(k.x, k.y, 0);
       const an = state.cut.analysis, sec = an && !an.base.error ? an.base : null;
-      const ang = K.keyAngle(sec || { regions: [] }, sec ? K.regionAt(sec, k.x, k.y) : -1, cfg);
-      const prof = (rr, dd) => K.keyProfile(spec.shape, rr, dd, ang, spec.res);
-      const disc = new THREE.Mesh(fanGeometry(prof(spec.r, spec.cs), 0), new THREE.MeshBasicMaterial({ color: bad ? 0xe5484d : 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: active ? 0.95 : 0.78 }));
+      const ang = K.keyAngle(sec || { regions: [] }, sec ? K.regionAt(sec, k.x, k.y) : -1, kc);
+      const prof = (rr, dd) => K.keyProfile(ks.shape, rr, dd, ang, ks.res);
+      const disc = new THREE.Mesh(fanGeometry(prof(ks.r, ks.cs), 0), new THREE.MeshBasicMaterial({ color: bad ? 0xe5484d : active ? 0x2a5fb8 : k.o ? 0x2b3a4d : 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: active ? 0.95 : 0.78 }));
       disc.position.z = z; disc.renderOrder = 5;
       g.add(disc);
-      let z0, z1, tipR = spec.r;
-      if (cfg.type === 'peg') { z0 = 0; z1 = (cfg.pegSide === 'above' ? -1 : 1) * cfg.length; tipR = spec.r * spec.taper; }
-      else if (cfg.type === 'dowel') { z0 = -cfg.length / 2; z1 = cfg.length / 2; }
-      else { z0 = -cfg.length; z1 = cfg.length; }
-      const body = prismGeometry(prof(spec.r, 0), prof(tipR, 0), z0, z1);
-      const mesh = new THREE.Mesh(body, new THREE.MeshStandardMaterial({ color, roughness: 0.4, emissive: active ? 0x4a3a00 : 0x000000 }));
+      let z0, z1, tipR = ks.r;
+      if (cfg.type === 'peg') { z0 = 0; z1 = (cfg.pegSide === 'above' ? -1 : 1) * kc.length; tipR = ks.r * ks.taper; }
+      else if (cfg.type === 'dowel') { z0 = -kc.length / 2; z1 = kc.length / 2; }
+      else { z0 = -kc.length; z1 = kc.length; }
+      const body = prismGeometry(prof(ks.r, 0), prof(tipR, 0), z0, z1);
+      const mesh = new THREE.Mesh(body, new THREE.MeshStandardMaterial({ color, roughness: 0.4, emissive: active ? 0x16325e : 0x000000 }));
       mesh.renderOrder = 5;
       g.add(mesh);
       keyGroup.add(g);
@@ -1162,7 +1163,7 @@
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -1253,7 +1254,7 @@
     if (ptr.dragKey >= 0) {
       const h = planeHit(e);
       if (!h) return;
-      state.cut.keys[ptr.dragKey] = h;
+      Object.assign(state.cut.keys[ptr.dragKey], { x: h.x, y: h.y }); // keeps the key's own settings
       state.cut.auto = false;
       evaluateKeys(); renderKeyMarkers();
       return;
@@ -1331,7 +1332,7 @@
     if (typing || mod || e.altKey) return;
     const p = selectedPart();
     switch (e.key) {
-      case 'Escape': if (p) selectPart(null); break;
+      case 'Escape': if (p && state.cut.active >= 0) { state.cut.active = -1; renderKeyMarkers(); renderInspector(); } else if (p) selectPart(null); break;
       case 'Enter': if (p) { e.preventDefault(); doCut(); } break;
       case 'Delete': case 'Backspace': if (p && state.cut.active >= 0) { e.preventDefault(); removeKey(state.cut.active); } break;
       case 'f': case 'F': frameAll(p || undefined); break;
@@ -1351,7 +1352,7 @@
   }
   function flipPlane() {
     planeGroup.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI));
-    state.cut.keys = state.cut.keys.map(k => ({ x: k.x, y: -k.y }));
+    state.cut.keys = state.cut.keys.map(k => ({ ...k, y: -k.y }));
     computeSliderRange();
     onPlaneMoved();
     state.cut.skip.clear();
@@ -1375,7 +1376,7 @@
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
     else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
     else if (state.cfg.type === 'none') t = coarse ? 'Drag the arrow to slide the cut, the plane or a ring to tilt it. Drag outside the plane to orbit.' : 'Drag the arrow to slide the cut, the plane or a ring to tilt it (Shift for fine steps). Drag outside the plane, or hold Alt, to orbit.';
-    else t = coarse ? 'Drag the arrow to slide, the plane or a ring to tilt. Tap the cut face to add a key. Drag outside the plane to orbit.' : 'Drag the arrow to slide, the plane or a ring to tilt. Click the cut face to add a key. Drag outside the plane, or hold Alt, to orbit.';
+    else t = coarse ? 'Drag the arrow to slide, the plane or a ring to tilt. Tap the cut face to add a key. Drag outside the plane to orbit.' : 'Drag the arrow to slide, the plane or a ring to tilt. Click the cut face to add a key, or a key to set it up on its own. Alt-drag to orbit.';
     el.textContent = t;
     el.hidden = !t;
   }
@@ -1458,10 +1459,39 @@
     }
     return shapeIcons[s];
   }
-  function shapePicker(c) {
+  function shapePicker(c, act = 'shape') {
     const shapes = c.type === 'magnet' ? K.MAGNET_SHAPES : K.KEY_SHAPES, cur = K.keyGeometrySpec(c).shape;
     return `<div class="shape-grid${shapes.length < 4 ? ' few' : ''}" role="group" aria-label="Key shape">${shapes.map(s =>
-      `<button type="button" data-act="shape" data-value="${s}" aria-pressed="${s === cur}" title="${SHAPE_NAMES[s]}">${shapeIcon(s)}<span>${SHAPE_NAMES[s]}</span></button>`).join('')}</div>`;
+      `<button type="button" data-act="${act}" data-value="${s}" aria-pressed="${s === cur}" title="${SHAPE_NAMES[s]}">${shapeIcon(s)}<span>${SHAPE_NAMES[s]}</span></button>`).join('')}</div>`;
+  }
+  // Settings for one key, in the space the general key settings use, so the panel never needs to scroll.
+  function keyEditor(i) {
+    const c = state.cfg, k = state.cut.keys[i], kc = K.keyCfg(c, k), spec = K.keyGeometrySpec(kc), ev = state.cut.evals[i];
+    const status = state.cut.stale ? '' : ev && !ev.ok ? `<p class="status warn">${ICONS.alert}<span>This key needs attention: ${esc(ev.reason)}.</span></p>` : ev ? `<p class="status ok">${ICONS.check}<span>This key fits, with walls at least ${c.margin} mm thick.</span></p>` : '';
+    const lenLabel = c.type === 'magnet' ? 'Thickness' : 'Length';
+    const f = (field, label, value, opts) => inlineField(field, label, value, opts).replace('data-cfg=', 'data-kcfg=');
+    return `<div class="ins-section keys key-edit" aria-label="Selected key">
+      <div class="head-row"><h3>Key ${i + 1}${k.o ? ' <span class="badge">own settings</span>' : ''}</h3><button class="btn ghost small" data-act="key-done" title="Esc">Back to all keys</button></div>
+      <p class="muted small">Changes here apply to this key only. The other keys keep the general settings.</p>
+      <div class="shape-head"><span class="lbl">Shape</span><span class="shape-name">${SHAPE_NAMES[spec.shape]}</span></div>
+      ${shapePicker(kc, 'kshape')}
+      <p class="muted small shape-help">${SHAPE_HELP[spec.shape]}</p>
+      <div class="grid2">${f('diameter', spec.shape === 'round' ? 'Diameter' : 'Width', kc.diameter, { min: 1, step: 0.5 })}${f('length', lenLabel, kc.length, { min: 0.5, step: 0.5 })}</div>
+      <div class="grid2">${f('clearance', 'Gap', kc.clearance, { min: 0, step: 0.05, aria: 'Gap per side' })}${spec.shape !== 'round' ? f('turn', 'Turn', kc.turn || 0, { min: -180, max: 180, step: 15, unit: '°', aria: 'Turn by' }) : ''}</div>
+      ${c.type === 'peg' ? `<div class="taper"><div class="slider"><span class="lbl">Taper</span>
+        <input type="range" id="keyTaper" data-kcfg="taper" min="0" max="100" step="5" value="${spec.taperPct}" aria-label="Taper of this key">
+        <output id="keyTaperOut">${spec.taperPct}%</output></div>
+        ${spec.taperPct > 0 ? `<label class="check"><input type="checkbox" data-kcfg="taperSocket" ${kc.taperSocket !== false ? 'checked' : ''}> Match the hole to the taper</label>` : ''}</div>` : ''}
+      <div class="key-own-status">${status}</div>
+      <div class="row"><button class="btn small" data-act="key-reset" ${k.o ? '' : 'disabled'}>Use general settings</button><button class="btn small" data-act="remove-key">Remove key</button></div>
+    </div>`;
+  }
+  function setKeyOwn(field, value) {
+    const k = state.cut.keys[state.cut.active];
+    if (!k) return;
+    k.o = { ...(k.o || {}), [field]: value };
+    state.cut.auto = false; // the keys are now placed and set by hand
+    evaluateKeys(); renderKeyMarkers(); renderInspector(); renderAreaTags();
   }
   function taperField(c) {
     const spec = K.keyGeometrySpec(c), pct = spec.taperPct;
@@ -1588,7 +1618,7 @@
       <div class="head-row"><h2>${esc(p.name)}</h2><button class="btn ghost small" data-act="done">Done</button></div>
       <p class="muted small">${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm, ${fmtInt(p.tris)} triangles</p>
     </div>
-    <div class="ins-section keys" aria-label="Keys">
+    ${state.cut.active >= 0 && state.cut.keys[state.cut.active] && c.type !== 'none' ? keyEditor(state.cut.active) : `<div class="ins-section keys" aria-label="Keys">
       ${seg('keytype', c.type, [['peg', 'Pegs'], ['dowel', 'Dowels'], ['magnet', 'Magnets'], ['none', 'None']]).replace(/data-value="(\w+)"/g, (m, v) => `${m} title="${({ peg: 'A peg on one piece fits a socket in the other', dowel: 'Holes in both pieces, with printable pins. Metal rods work too', magnet: 'Pockets in both pieces, sized for disc magnets', none: 'No keys: flat faces' })[v]}"`)}
       ${c.type === 'none' ? '<p class="muted small">The pieces will have flat faces with nothing to line them up.</p>' : `
       ${c.type !== 'peg' ? `<p class="muted small type-line">${typeLine}</p>` : ''}
@@ -1609,8 +1639,8 @@
         <label class="numi"><span>Keys per area</span><select data-cfg="perArea" aria-label="Keys per area">${[1, 2, 3, 4].map(n => `<option ${n === c.perArea ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <button class="btn small" data-act="auto-keys">${state.cut.auto ? 'Re-place keys' : 'Auto-place keys'}</button>
       </div>
-      ${state.cut.active >= 0 && state.cut.keys[state.cut.active] ? `<button class="btn small" data-act="remove-key">Remove selected key</button>` : ''}`}
-    </div>
+`}
+    </div>`}
     <div class="ins-section cut-action">
       <div class="key-status" id="keyStatus">${keyStatus}</div>
       <button class="btn cut" data-act="cut">${ICONS.cut}<span>Cut part</span><kbd>Enter</kbd></button>
@@ -1643,6 +1673,9 @@
       case 'flip': flipPlane(); break;
       case 'straighten': straighten(); break;
       case 'find-cuts': findSuggestions(); break;
+      case 'key-done': state.cut.active = -1; renderKeyMarkers(); renderInspector(); break;
+      case 'kshape': setKeyOwn('shape', val); break;
+      case 'key-reset': { const k = state.cut.keys[state.cut.active]; if (k) { delete k.o; evaluateKeys(); renderKeyMarkers(); renderInspector(); renderAreaTags(); } break; }
       case 'suggest': applySuggestion(+val); break;
       case 'keytype': {
         if (c.type === val) break;
@@ -1668,6 +1701,14 @@
   }
   function onPanelChange(e) {
     const t = e.target;
+    if (t.dataset.kcfg) {
+      const f = t.dataset.kcfg;
+      if (t.type === 'checkbox') { setKeyOwn(f, t.checked); return; }
+      const v = parseFloat(t.value);
+      if (!isFinite(v) || (v < 0 && f !== 'turn') || (f === 'diameter' && v < 1) || (f === 'length' && v < 0.5)) { renderInspector(); return; }
+      setKeyOwn(f, f === 'turn' ? normTurn(v) : v);
+      return;
+    }
     if (t.dataset.cfg) {
       const k = t.dataset.cfg;
       if (t.type === 'checkbox') state.cfg[k] = t.checked;
@@ -1710,6 +1751,11 @@
   }
   function onPanelInput(e) {
     const t = e.target;
+    if (t.id === 'keyTaper') { // live preview of one key's taper
+      const k = state.cut.keys[state.cut.active];
+      if (k) { k.o = { ...(k.o || {}), taper: parseFloat(t.value) }; const out = $('#keyTaperOut'); if (out) out.textContent = `${Math.round(k.o.taper)}%`; renderKeyMarkers(); }
+      return;
+    }
     if (t.id === 'cutPos') {
       setPlaneOffset(parseFloat(t.value));
       state.cut.stale = true; renderKeyMarkers();

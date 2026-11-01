@@ -1262,9 +1262,29 @@ const KMCore = (() => {
         depth.push({ ...d, sec: s });
       }
     }
-    return { frame: F, base, depth };
+    const an = { frame: F, base, depth };
+    Object.defineProperty(an, '_src', { value: { P, I, F, scale, cfg, cache: new Map() } }); // for keys with their own settings
+    return an;
   }
-  function keyScore(an, cfg, x, y, skip, spec = keyGeometrySpec(cfg), fps, exact) {
+  // Settings a key may change for itself; the key type and the side pegs go on stay the same for the whole cut.
+  const KEY_OVERRIDES = ['shape', 'diameter', 'length', 'clearance', 'taper', 'taperSocket', 'turn', 'align'];
+  function keyCfg(cfg, key) {
+    if (!key || !key.o) return cfg;
+    const out = { ...cfg };
+    for (const f of KEY_OVERRIDES) if (key.o[f] !== undefined) out[f] = key.o[f];
+    return out;
+  }
+  // The depth sections a key's own sockets need. They match the analysis when its depths do; otherwise they are
+  // sectioned once and cached on the analysis.
+  function depthFor(an, kcfg) {
+    const src = an._src, plan = depthPlan(kcfg);
+    if (!src || an.base.error || kcfg.type === 'none') return an.depth;
+    const sig = plan.map(d => `${d.side}:${d.depth.toFixed(4)}:${d.need}`).join('|');
+    if (sig === depthPlan(src.cfg).map(d => `${d.side}:${d.depth.toFixed(4)}:${d.need}`).join('|')) return an.depth;
+    if (!src.cache.has(sig)) src.cache.set(sig, plan.map(d => ({ ...d, sec: section(src.P, src.I, shiftFrame(src.F, d.side * d.depth), src.scale) })));
+    return src.cache.get(sig);
+  }
+  function keyScore(an, cfg, x, y, skip, spec = keyGeometrySpec(cfg), fps, exact, depth = an.depth) {
     const m = cfg.margin;
     const ri = regionAt(an.base, x, y);
     if (ri < 0) return { ok: false, reason: 'Not on the cut face', region: -1, score: -Infinity };
@@ -1276,7 +1296,7 @@ const KMCore = (() => {
     let score = footprintClear(an.base, an.base.regions[ri], x, y, fp, m, exact);
     if (score < m) return { ok: false, reason: 'Too close to the edge', region: ri, score, slack: score - m };
     let slack = score - m;
-    for (const d of an.depth) {
+    for (const d of depth) {
       if (d.sec.error) continue;
       const rj = regionAt(d.sec, x, y);
       if (rj < 0) return { ok: false, reason: d.need === 'floor' ? 'Socket would break through the surface' : 'Socket would break through the side', region: ri, score: -Infinity };
@@ -1291,10 +1311,14 @@ const KMCore = (() => {
   }
   function evaluateKeys(an, keys, cfg, skip) {
     const spec = keyGeometrySpec(cfg), fps = [];
-    const res = keys.map(k => keyScore(an, cfg, k.x, k.y, skip, spec, fps));
-    const R = keyGeometrySpec(cfg).outer;
+    const specs = keys.map(k => (k.o ? keyGeometrySpec(keyCfg(cfg, k)) : spec));
+    const res = keys.map((k, i) => {
+      if (!k.o) return keyScore(an, cfg, k.x, k.y, skip, spec, fps);
+      const kc = keyCfg(cfg, k);
+      return keyScore(an, kc, k.x, k.y, skip, specs[i], null, false, depthFor(an, kc));
+    });
     for (let i = 0; i < keys.length; i++) for (let j = i + 1; j < keys.length; j++) {
-      if (Math.hypot(keys[i].x - keys[j].x, keys[i].y - keys[j].y) < 2 * R + cfg.margin) {
+      if (Math.hypot(keys[i].x - keys[j].x, keys[i].y - keys[j].y) < specs[i].outer + specs[j].outer + cfg.margin) {
         for (const k of [i, j]) if (res[k].ok) res[k] = { ...res[k], ok: false, reason: 'Overlaps another key' };
       }
     }
@@ -1684,7 +1708,7 @@ const KMCore = (() => {
     const spec = keyGeometrySpec(cfg);
     const keys = (cfg.type === 'none' ? [] : (opts.keys || [])).map(k => ({ ...k, region: -1 }));
     const tmpSec = { loops, regions };
-    for (const k of keys) { k.region = regionAt(tmpSec, k.x, k.y); k.angle = keyAngle(tmpSec, k.region, cfg); }
+    for (const k of keys) { k.region = regionAt(tmpSec, k.x, k.y); k.cfg = keyCfg(cfg, k); k.spec = k.o ? keyGeometrySpec(k.cfg) : spec; k.angle = keyAngle(tmpSec, k.region, k.cfg); }
     const pins = [];
 
     regions.forEach((reg, ri) => {
@@ -1708,17 +1732,18 @@ const KMCore = (() => {
         for (const h of reg.holes) pushRing(loops[h].ids.map(q => off + q), loops[h].xy, loops[h].area);
         const tubes = [];
         for (const k of myKeys) {
-          let role, grow, depth, dir, tipR = spec.r;
+          const ks = k.spec, kc = k.cfg; // each key may have its own size, shape and taper
+          let role, grow, depth, dir, tipR = ks.r;
           if (cfg.type === 'peg') {
             const pegSide = cfg.pegSide === 'above' ? +1 : -1;
-            if (side === pegSide) { role = 'peg'; grow = 0; depth = cfg.length; dir = -side; tipR = spec.r * spec.taper; }
-            else { role = 'socket'; grow = spec.cs; depth = cfg.length + spec.ca; dir = side; tipR = spec.r * spec.sockTip; }
+            if (side === pegSide) { role = 'peg'; grow = 0; depth = kc.length; dir = -side; tipR = ks.r * ks.taper; }
+            else { role = 'socket'; grow = ks.cs; depth = kc.length + ks.ca; dir = side; tipR = ks.r * ks.sockTip; }
           } else {
-            role = 'socket'; grow = spec.cs; dir = side;
-            depth = cfg.type === 'dowel' ? cfg.length / 2 + spec.ca : cfg.length + spec.ca;
+            role = 'socket'; grow = ks.cs; dir = side;
+            depth = cfg.type === 'dowel' ? kc.length / 2 + ks.ca : kc.length + ks.ca;
           }
-          const prof = keyProfile(spec.shape, spec.r, grow, k.angle, spec.res);
-          const prof1 = keyProfile(spec.shape, tipR, grow, k.angle, spec.res);
+          const prof = keyProfile(ks.shape, ks.r, grow, k.angle, ks.res);
+          const prof1 = keyProfile(ks.shape, tipR, grow, k.angle, ks.res);
           const ring = [], xy = [];
           for (const [px, py] of prof) { ring.push(addV(at(k.x + px, k.y + py, 0))); xy.push(k.x + px, k.y + py); }
           pushRing(ring, xy);
@@ -1758,7 +1783,7 @@ const KMCore = (() => {
           }
         }
       }
-      if (cfg.type === 'dowel') for (const k of myKeys) pins.push(makePin(at, k, spec, cfg.length));
+      if (cfg.type === 'dowel') for (const k of myKeys) pins.push(makePin(at, k, k.spec, k.cfg.length));
     });
 
     const comps = splitComponents(V.a.subarray(0, V.n), T.view(), nv, spans, Fs);
@@ -2002,7 +2027,7 @@ const KMCore = (() => {
   return {
     parseSTL, parseOBJ, prepareMesh, fillHoles, edgeReport, volume, bounds, diag,
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
-    KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle,
+    KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };

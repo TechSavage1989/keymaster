@@ -266,6 +266,43 @@ console.log('key shapes');
   check('lined-up square sockets leave no gaps', allClosed(ra.parts), ra.parts.map(p => K.edgeReport(p.indices)));
 }
 
+console.log('keys with their own settings');
+{
+  const s = K.prepareMesh(uvSphere(20, 96, 64)), V0 = s.report.volume;
+  const F = K.frameFromNormal([0, 0, 1], [0, 0, 1.3]);
+  const cfg = cfgOf({ type: 'peg', shape: 'round', diameter: 5, length: 6 });
+  const an = K.analyzePlane(s.positions, s.indices, F, cfg, 40);
+  const keys = [{ x: -9, y: 0 }, { x: 0, y: 0, o: { shape: 'square', diameter: 4, taper: 60 } }, { x: 9, y: 0, o: { diameter: 7, length: 9 } }];
+  const ev = K.evaluateKeys(an, keys, cfg, new Set());
+  check('three keys, two with their own settings, all fit', ev.every(e => e.ok), ev);
+  const r = K.cutMesh(s.positions, s.indices, F, { scale: 40, cfg, keys });
+  check('cut with custom keys gives sealed parts', r.parts.length === 2 && allClosed(r.parts), r.parts.map(p => K.edgeReport(p.indices)));
+  const prism = (A0, A1, h) => { const mid = A0.map((q, i) => [(q[0] + A1[i][0]) / 2, (q[1] + A1[i][1]) / 2]); return h / 6 * (K.profileArea(A0) + 4 * K.profileArea(mid) + K.profileArea(A1)); };
+  let expect = V0;
+  for (const k of keys) {
+    const kc = K.keyCfg(cfg, k), sp = K.keyGeometrySpec(kc), ang = K.keyAngle(an.base, 0, kc), P = (rr, dd) => K.keyProfile(sp.shape, rr, dd, ang, sp.res);
+    expect += prism(P(sp.r, 0), P(sp.r * sp.taper, 0), kc.length) - prism(P(sp.r, sp.cs), P(sp.r * sp.sockTip, sp.cs), kc.length + sp.ca);
+  }
+  check('volume adds up key by key', Math.abs(sumVol(r.parts) - expect) / V0 < 1e-4, [sumVol(r.parts), expect]);
+  const lower = r.parts.find(q => q.side === 'below').positions;
+  let top = -Infinity; for (let i = 2; i < lower.length; i += 3) top = Math.max(top, lower[i]);
+  check('the long custom peg stands 9 mm tall', Math.abs(top - (1.3 + 9)) < 1e-3, top);
+  // a custom key is checked with its own depth: a 30 mm peg's socket would break through the top of the sphere
+  const ev2 = K.evaluateKeys(an, [{ x: -9, y: 0 }, { x: 0, y: 0, o: { length: 30 } }], cfg, new Set());
+  const ev2b = K.evaluateKeys(an, [{ x: -9, y: 0 }, { x: 0, y: 0 }], cfg, new Set());
+  check('a long custom peg is checked at its own depth', ev2b.every(e => e.ok) && ev2[0].ok && !ev2[1].ok && /break through/.test(ev2[1].reason), ev2);
+  // and with its own size for overlaps
+  const ev3 = K.evaluateKeys(an, [{ x: -4.5, y: 0 }, { x: 4.5, y: 0 }], cfg, new Set());
+  const ev4 = K.evaluateKeys(an, [{ x: -4.5, y: 0 }, { x: 4.5, y: 0, o: { diameter: 12 } }], cfg, new Set());
+  check('a bigger custom key overlaps where a standard one fits', ev3.every(e => e.ok) && ev4.every(e => !e.ok && e.reason === 'Overlaps another key'), [ev3, ev4]);
+  // dowel pins follow each key's own size
+  const dc = cfgOf({ type: 'dowel', diameter: 4, length: 12 });
+  const rd = K.cutMesh(s.positions, s.indices, F, { scale: 40, cfg: dc, keys: [{ x: -6, y: 0 }, { x: 6, y: 0, o: { diameter: 6 } }] });
+  const pv = rd.pins.map(q => K.volume(q.positions, q.indices));
+  check('dowel pins follow each key', rd.pins.length === 2 && allClosed(rd.pins) && allClosed(rd.parts) && pv[1] / pv[0] > 2, pv);
+  check('the key type stays the same for the whole cut', K.keyCfg(cfg, { o: { type: 'magnet', diameter: 3 } }).type === 'peg' && K.keyCfg(cfg, { o: { type: 'magnet', diameter: 3 } }).diameter === 3);
+}
+
 console.log('keys in narrow areas');
 {
   // square pegs, 45% taper, 5 mm walls (an owner's report): the key fits only on a 0.3 mm strip down the middle of a bar
