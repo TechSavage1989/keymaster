@@ -428,6 +428,70 @@ console.log('real-sculpt defects');
   check('cut next to a near-plane vertex is sealed', allClosed(rnr.parts) && Math.abs(rnr.shift) < 1.7 * 2e-5, [rnr.shift, rnr.parts.map(p => K.edgeReport(p.indices))]);
 }
 
+console.log('cut suggestions');
+{
+  // a surface of revolution along any axis: radius(t) for t in 0..1 over the length, closed at both ends
+  const lathe = (radius, len, axis, seg = 48, rings = 120) => {
+    const a = norm(axis), u = norm(Math.abs(a[2]) < 0.9 ? cr(a, [0, 0, 1]) : cr(a, [1, 0, 0])), v = cr(a, u);
+    const pos = [0, 0, 0];
+    for (let i = 1; i < rings; i++) {
+      const tt = i / rings, r = radius(tt);
+      for (let j = 0; j < seg; j++) { const ph = (j / seg) * 2 * Math.PI, c = Math.cos(ph) * r, s = Math.sin(ph) * r; for (let k = 0; k < 3; k++) pos.push(a[k] * tt * len + u[k] * c + v[k] * s); }
+    }
+    pos.push(a[0] * len, a[1] * len, a[2] * len);
+    const S = pos.length / 3 - 1, idx = [];
+    for (let j = 0; j < seg; j++) idx.push(0, 1 + (j + 1) % seg, 1 + j);
+    for (let i = 0; i < rings - 2; i++) for (let j = 0; j < seg; j++) { const p0 = 1 + i * seg + j, p1 = 1 + i * seg + (j + 1) % seg, q0 = p0 + seg, q1 = p1 + seg; idx.push(p0, p1, q1, p0, q1, q0); }
+    const base = 1 + (rings - 2) * seg;
+    for (let j = 0; j < seg; j++) idx.push(S, base + j, base + (j + 1) % seg);
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  };
+  function norm(v) { const l = Math.hypot(...v); return v.map(x => x / l); }
+  function cr(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  const angleDeg = (a, b) => Math.acos(Math.min(1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))) * 180 / Math.PI;
+  const findNecks = (m) => {
+    const scale = K.diag(K.bounds(m.positions));
+    let found = [];
+    for (const d of K.sweepDirections(m.positions)) found = found.concat(K.neckSweep(m.positions, m.indices, d, scale));
+    return K.refineNecks(m.positions, m.indices, found, scale);
+  };
+  check('sweep directions cover the half-sphere', K.sweepDirections(uvSphere(10, 24, 16).positions).length >= 13);
+  // a dumbbell tipped at an odd angle: two 12 mm balls joined by a 5 mm bar
+  const axis = norm([0.55, 0.3, 0.78]);
+  const bell = lathe(tt => { const z = tt * 60; const ball = (c) => { const d = Math.abs(z - c); return d < 12 ? Math.sqrt(144 - d * d) : 0; }; return Math.max(ball(12), ball(48), z > 6 && z < 54 ? 2.5 : 0, 0.05); }, 60, axis);
+  check('dumbbell mesh closed', bell.report.closed, bell.report);
+  const necks = findNecks(bell);
+  const top = necks[0];
+  const mid = [axis[0] * 30, axis[1] * 30, axis[2] * 30];
+  check('dumbbell: the bar is the top narrow point', !!top && Math.hypot(top.point[0] - mid[0], top.point[1] - mid[1], top.point[2] - mid[2]) < 12, top && top.point);
+  check('dumbbell: the cut sits square across the bar (within 6°)', !!top && angleDeg(top.normal, axis) < 6, top && angleDeg(top.normal, axis));
+  check('dumbbell: the width is the bar width', !!top && Math.abs(top.width - 5) < 0.6, top && top.width);
+  const rb = K.cutMesh(bell.positions, bell.indices, K.frameFromNormal(top.normal, top.point), { scale: 70, cfg: cfgOf({}) });
+  check('cutting at the suggestion splits the dumbbell in two sealed halves', rb.parts.length === 2 && allClosed(rb.parts));
+  // a plain cylinder has no narrow point
+  const tube = lathe(tt => (tt < 0.02 || tt > 0.98 ? 3 : 6), 50, [0, 0, 1]);
+  check('a straight cylinder has no narrow point', findNecks(tube).filter(n => n.width < 11).length === 0, findNecks(tube).map(n => n.width));
+  // a stepped tower: a 20 mm block with an 18 mm block on top leaves an inward crease all round at z = 10
+  const tower = (() => {
+    const pos = [], idx = [];
+    const quad = (a, b, c, d) => { const o = pos.length / 3; pos.push(...a, ...b, ...c, ...d); idx.push(o, o + 1, o + 2, o, o + 2, o + 3); };
+    const ring = (h, z) => [[-h, -h, z], [h, -h, z], [h, h, z], [-h, h, z]];
+    const L0 = ring(10, 0), L1 = ring(10, 10), U0 = ring(9, 10), U1 = ring(9, 20);
+    for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; quad(L0[i], L0[j], L1[j], L1[i]); quad(U0[i], U0[j], U1[j], U1[i]); quad(L1[i], L1[j], U0[j], U0[i]); }
+    quad(L0[3], L0[2], L0[1], L0[0]); quad(U1[0], U1[1], U1[2], U1[3]);
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  })();
+  check('stepped tower closed', tower.report.closed, tower.report);
+  const edges = K.creaseEdges(tower.positions, tower.indices);
+  check('the inward step is found as creases, the outer corners are not', edges.length > 0 && edges.every(e => Math.abs(e.mid[2] - 10) < 1e-6), edges.map(e => e.mid[2]));
+  const cp = K.creasePlanes(tower.positions, tower.indices, K.sweepDirections(tower.positions), K.diag(K.bounds(tower.positions)), edges);
+  check('the seam plane at the step is suggested', cp.length >= 1 && angleDeg(cp[0].normal, [0, 0, 1]) < 1 && Math.abs(cp[0].point[2] - 10) < 0.2 && cp[0].coverage >= 0.85, cp[0]);
+  // separate pieces: two balls apart, one with a small ball inside it (stays with it)
+  const sh = K.separateShells(...(() => { const m = K.prepareMesh(K.mergeMeshes([uvSphere(10, 24, 16), uvSphere(10, 24, 16, [40, 0, 0]), uvSphere(3, 12, 8, [40, 0, 0])])); return [m.positions, m.indices]; })());
+  check('separate pieces found, an inner ball stays with its host', sh.length === 2 && sh.every(s => K.edgeReport(s.indices).closed), sh.map(s => s.volume));
+  check('a single solid has no separate pieces', K.separateShells(uvSphere(10, 24, 16).positions, uvSphere(10, 24, 16).indices).length === 0);
+}
+
 console.log('separate shells stay with their piece');
 {
   const body = uvSphere(20, 48, 32), eye = uvSphere(2, 16, 12, [0, 0, 12]);
