@@ -27,7 +27,7 @@
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, pegSide: 'below', perArea: 2, align: true, turn: 0 },
-    cut: { mode: 'translate', keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
+    cut: { keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   const history = { past: [], future: [] };
   let uid = 1;
@@ -133,14 +133,18 @@
   capMesh.onAfterRender = (r) => r.clearStencil();
   const regionGroup = new THREE.Group();
   const keyGroup = new THREE.Group();
-  const gripGroup = new THREE.Group();
-  const gripMat = new THREE.MeshBasicMaterial({ color: 0x2a2100 });
-  const gripGeom = new THREE.SphereGeometry(1, 16, 12);
-  for (let i = 0; i < 4; i++) { const g = new THREE.Mesh(gripGeom, gripMat); g.renderOrder = 6; gripGroup.add(g); }
-  gripGroup.visible = false;
-  const hinge = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x2a2100 }));
-  hinge.visible = false; hinge.renderOrder = 6;
-  planeGroup.add(planeSheet, planeFrame, capMesh, regionGroup, keyGroup, gripGroup, hinge);
+  // Tilt rings: one turns the plane about its own x axis, the other about its y axis, like a 3D app's rotate tool.
+  // They are drawn on top of everything so they can always be grabbed.
+  const RING_COLOR = 0x3d7be0, RING_HOVER = 0x8fb8ff;
+  const rings = { x: null, y: null };
+  const ringGroup = new THREE.Group();
+  for (const ax of ['x', 'y']) {
+    const m = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: RING_COLOR, depthTest: false, transparent: true, opacity: 0.92 }));
+    m.renderOrder = 7;
+    rings[ax] = m;
+    ringGroup.add(m);
+  }
+  planeGroup.add(planeSheet, planeFrame, capMesh, regionGroup, keyGroup, ringGroup);
 
   const clipBelow = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
   const clipAbove = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
@@ -212,7 +216,7 @@
     markDirty();
   }).observe(stage);
   requestAnimationFrame(loop);
-  setGizmoMode('translate');
+  attachGizmo();
 
   /* ---------------- display meshes ---------------- */
   const views = new Map();
@@ -285,8 +289,7 @@
     preview.stencil = makeStencilGroup(v.geom, clipBelow);
     scene.add(preview.ghost, preview.stencil);
     planeGroup.visible = true;
-    if (state.cut.mode === 'translate') { if (tc.object !== planeGroup) tc.attach(planeGroup); }
-    else tc.detach();
+    if (tc.object !== planeGroup) tc.attach(planeGroup);
     preview.partId = p.id;
   }
 
@@ -337,6 +340,30 @@
     const deg = Math.acos(Math.min(1, c[i])) * 180 / Math.PI;
     return { deg, axis: 'XYZ'[i], index: i, sign: [n.x, n.y, n.z][i] >= 0 ? 1 : -1 };
   }
+  /* The plane's orientation as three turns in degrees, like a 3D app: about X, then Y, then Z, all about the
+     world axes, starting from a level cut (normal +Z). X tips it forward or back, Y side to side, and Z swings
+     the direction of the tip around. */
+  function planeAngles() {
+    const q = planeGroup.quaternion;
+    const ex = new THREE.Vector3(1, 0, 0).applyQuaternion(q), ey = new THREE.Vector3(0, 1, 0).applyQuaternion(q), ez = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    const sy = Math.max(-1, Math.min(1, -ex.z));
+    const y = Math.asin(sy);
+    let x, z;
+    if (Math.abs(sy) < 0.99999) { x = Math.atan2(ey.z, ez.z); z = Math.atan2(ex.y, ex.x); }
+    else { x = 0; z = Math.atan2(-ey.x, ey.y); }
+    const d = (r) => { const v = r * 180 / Math.PI; return Math.abs(v) < 5e-4 ? 0 : v; };
+    return { x: d(x), y: d(y), z: d(z) };
+  }
+  function setPlaneAngles(a) {
+    const r = (v) => (v * Math.PI) / 180;
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), r(a.z))
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), r(a.y)))
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), r(a.x)));
+    planeGroup.quaternion.copy(q);
+    computeSliderRange();
+    onPlaneMoved();
+  }
+  function fmtAngle(v) { const s = (Math.round(v * 10) / 10).toFixed(1); return s === '-0.0' ? '0.0' : s; }
   function straighten() {
     const t = tiltInfo();
     const a = new THREE.Vector3(t.index === 0 ? t.sign : 0, t.index === 1 ? t.sign : 0, t.index === 2 ? t.sign : 0);
@@ -357,19 +384,22 @@
     const tile = Math.max(3, R / 9);
     hatch.repeat.set((R * 3.2) / tile, (R * 3.2) / tile);
     const h = s / 2;
-    const gr = Math.max(0.6, R * 0.035);
-    [[h, 0], [-h, 0], [0, h], [0, -h]].forEach(([x, y], i) => { const g = gripGroup.children[i]; g.position.set(x, y, 0); g.scale.set(gr, gr, gr); });
+    const ringR = ringRadius(), tube = Math.max(0.18, R * 0.011);
+    for (const ax of ['x', 'y']) {
+      rings[ax].geometry.dispose();
+      const g = new THREE.TorusGeometry(ringR, tube, 8, 96);
+      if (ax === 'x') g.rotateY(Math.PI / 2); else g.rotateX(Math.PI / 2); // x ring lies across the plane's y axis, y ring across its x axis
+      rings[ax].geometry = g;
+    }
     planeFrame.geometry.dispose();
     planeFrame.geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-h, -h, 0), new THREE.Vector3(h, -h, 0), new THREE.Vector3(h, h, 0), new THREE.Vector3(-h, h, 0)]);
   }
-  function setGizmoMode(mode) {
-    state.cut.mode = mode;
+  function ringRadius() { return state.cut.R * 0.62; }
+  function attachGizmo() { // the arrow slides the plane; the rings tilt it
     tc.setMode('translate');
     tc.showX = false; tc.showY = false; tc.showZ = true;
-    if (mode === 'translate' && selectedPart()) { if (tc.object !== planeGroup) tc.attach(planeGroup); }
+    if (selectedPart()) { if (tc.object !== planeGroup) tc.attach(planeGroup); }
     else tc.detach();
-    planeSheet.material.opacity = mode === 'rotate' ? 0.17 : 0.08;
-    gripGroup.visible = mode === 'rotate';
     updateHint();
     markDirty();
   }
@@ -493,7 +523,7 @@
   function placeAreaTags() {
     const tags = tagLayer.children;
     if (!tags.length) return;
-    const show = !!selectedPart() && !state.cut.stale && !ptr.tilt && areaCount() > 1 && cameraOnClearSide();
+    const show = !!selectedPart() && !state.cut.stale && !ptr.ring && areaCount() > 1 && cameraOnClearSide();
     tagLayer.hidden = !show;
     if (!show) return;
     planeGroup.updateMatrixWorld(true);
@@ -618,7 +648,7 @@
       const up = new THREE.Vector3(0, 0, 1);
       setPlaneNormal(towardCamera(up));
       state.cut.keys = []; state.cut.auto = true; state.cut.skip = new Set(); state.cut.analysis = null; state.cut.evals = []; state.cut.active = -1;
-      setGizmoMode(state.cut.mode);
+      attachGizmo();
       scheduleAnalysis(0);
     }
     syncScene();
@@ -875,71 +905,110 @@
     const n = planeNormal();
     return n.dot(camera.position.clone().sub(planeGroup.position)) > 0;
   }
-  const ptr = { down: false, x: 0, y: 0, t: 0, dragKey: -1, tilt: null };
-  function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
+  const ptr = { down: false, x: 0, y: 0, t: 0, dragKey: -1, ring: null, hoverRing: null };
   function toScreen(v) {
     const r = canvas.getBoundingClientRect();
     const q = v.clone().project(camera);
     return [(q.x + 1) / 2 * r.width, (1 - q.y) / 2 * r.height];
   }
-  function startTilt(h, e) {
-    let L = Math.hypot(h.x, h.y);
-    const dir = L > 1e-6 ? { x: h.x / L, y: h.y / L } : { x: 1, y: 0 };
-    ptr.tilt = { dir, lever: Math.max(L, state.cut.R * 0.35), lastX: e.clientX, lastY: e.clientY };
+  // A point on a tilt ring, in the plane's local space: the x ring sweeps through local y and z, the y ring through x and z.
+  function ringLocal(ax, a) { const R = ringRadius(); return ax === 'x' ? new THREE.Vector3(0, R * Math.cos(a), R * Math.sin(a)) : new THREE.Vector3(R * Math.cos(a), 0, R * Math.sin(a)); }
+  function pickRing(e) {
+    if (!selectedPart()) return null;
+    const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld();
+    let best = null, bestD = coarse ? 22 : 11;
+    for (const ax of ['x', 'y']) {
+      let prev = null;
+      for (let i = 0; i <= 96; i++) {
+        const w = planeGroup.localToWorld(ringLocal(ax, (i / 96) * Math.PI * 2));
+        const q = w.clone().project(camera);
+        const s = q.z > 1 ? null : [(q.x + 1) / 2 * r.width, (1 - q.y) / 2 * r.height];
+        if (s && prev) {
+          const dx = s[0] - prev[0], dy = s[1] - prev[1], L = dx * dx + dy * dy;
+          let k = L > 0 ? ((mx - prev[0]) * dx + (my - prev[1]) * dy) / L : 0; k = Math.max(0, Math.min(1, k));
+          const d = Math.hypot(prev[0] + k * dx - mx, prev[1] + k * dy - my);
+          if (d < bestD) { bestD = d; best = { ax, a: ((i - 1 + k) / 96) * Math.PI * 2 }; }
+        }
+        prev = s;
+      }
+    }
+    return best;
+  }
+  function setRingHover(ax) {
+    if (ptr.hoverRing === ax) return;
+    ptr.hoverRing = ax;
+    for (const k of ['x', 'y']) rings[k].material.color.set(k === ax ? RING_HOVER : RING_COLOR);
+    markDirty();
+  }
+  function ringAxisWorld(ax) { return new THREE.Vector3(ax === 'x' ? 1 : 0, ax === 'y' ? 1 : 0, 0).applyQuaternion(planeGroup.quaternion).normalize(); }
+  function angleOnRing(e, d) { // where the pointer is around the ring, when the ring faces the camera well enough
+    setNdc(e);
+    if (Math.abs(raycaster.ray.direction.dot(d.axis)) < 0.22) return null;
+    const hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(d.axis, d.center), hit)) return null;
+    const v = hit.sub(d.center);
+    return Math.atan2(v.dot(d.b2), v.dot(d.b1));
+  }
+  function startRing(hit, e) {
+    const axis = ringAxisWorld(hit.ax), center = planeGroup.position.clone();
+    const b1 = planeGroup.localToWorld(ringLocal(hit.ax, hit.a)).sub(center).normalize();
+    const b2 = new THREE.Vector3().crossVectors(axis, b1).normalize();
+    ptr.ring = { ax: hit.ax, axis, center, b1, b2, q0: planeGroup.quaternion.clone(), raw: 0, grab: 0, last: null, lx: e.clientX, ly: e.clientY };
+    ptr.ring.last = angleOnRing(e, ptr.ring);
     orbit.enabled = false;
     canvas.setPointerCapture(e.pointerId);
     canvas.style.cursor = 'grabbing';
-    const half = state.cut.R * 1.15, z = Math.max(0.03, state.cut.R * 0.0009);
-    hinge.geometry.dispose();
-    hinge.geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(dir.y * half, -dir.x * half, z), new THREE.Vector3(-dir.y * half, dir.x * half, z)]);
-    hinge.visible = true;
     state.cut.stale = true;
     renderKeyMarkers();
   }
-  function moveTilt(e) {
-    const t = ptr.tilt;
-    const dx = e.clientX - t.lastX, dy = e.clientY - t.lastY;
-    t.lastX = e.clientX; t.lastY = e.clientY;
-    if (!dx && !dy) return;
-    planeGroup.updateMatrixWorld(true);
-    camera.updateMatrixWorld();
-    const n = planeNormal();
-    const pw = planeGroup.localToWorld(new THREE.Vector3(t.dir.x * t.lever, t.dir.y * t.lever, 0));
-    const eps = t.lever * 0.05;
-    const a = toScreen(pw), b = toScreen(pw.clone().add(n.clone().multiplyScalar(eps)));
-    const sx = (b[0] - a[0]) / eps, sy = (b[1] - a[1]) / eps; // screen pixels per mm along the normal
-    const view = pw.clone().sub(camera.position).normalize();
-    let perp = new THREE.Vector3().crossVectors(view, n);
-    if (perp.lengthSq() < 1e-6) perp = new THREE.Vector3().crossVectors(view, new THREE.Vector3(1, 0, 0));
-    perp.normalize();
-    const c = toScreen(pw.clone().add(perp.multiplyScalar(eps)));
-    const pxPerMm = Math.max(1e-6, Math.hypot(c[0] - a[0], c[1] - a[1]) / eps);
-    const s2 = sx * sx + sy * sy;
-    // Move the grabbed edge along the normal by however far the mouse moved in that direction on screen.
-    const lift = s2 > Math.pow(pxPerMm * 0.25, 2) ? (dx * sx + dy * sy) / s2 : -dy / pxPerMm;
-    const theta = Math.atan2(lift, t.lever) * (e.shiftKey ? 0.25 : 1);
-    planeGroup.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(t.dir.y, -t.dir.x, 0), theta));
+  function moveRing(e) {
+    const d = ptr.ring;
+    const a = angleOnRing(e, d);
+    let dA;
+    if (a !== null && d.last !== null) { dA = a - d.last; if (dA > Math.PI) dA -= 2 * Math.PI; if (dA < -Math.PI) dA += 2 * Math.PI; }
+    else { // seen edge-on: turn the ring by however far the pointer moves along it on screen
+      const p = d.center.clone().add(d.b1.clone().multiplyScalar(Math.cos(d.grab) * ringRadius())).add(d.b2.clone().multiplyScalar(Math.sin(d.grab) * ringRadius()));
+      const tng = new THREE.Vector3().crossVectors(d.axis, p.clone().sub(d.center));
+      const s0 = toScreen(p), s1 = toScreen(p.clone().add(tng.multiplyScalar(0.01)));
+      const tx = (s1[0] - s0[0]) / 0.01, ty = (s1[1] - s0[1]) / 0.01, L2 = Math.max(tx * tx + ty * ty, 400);
+      dA = ((e.clientX - d.lx) * tx + (e.clientY - d.ly) * ty) / L2;
+    }
+    d.last = a; d.lx = e.clientX; d.ly = e.clientY; d.grab += dA;
+    d.raw += dA;
+    const step = Math.PI / 36; // Shift snaps to 5°
+    d.applied = e.shiftKey ? Math.round(d.raw / step) * step : d.raw;
+    planeGroup.quaternion.copy(new THREE.Quaternion().setFromAxisAngle(d.axis, d.applied).multiply(d.q0));
+    showDragChip(e, `${d.applied >= 0 ? '+' : '−'}${Math.abs(d.applied * 180 / Math.PI).toFixed(e.shiftKey ? 0 : 1)}°`);
     onPlaneMoved();
   }
-  function endTilt() {
-    ptr.tilt = null;
-    hinge.visible = false;
+  function endRing() {
+    ptr.ring = null;
     orbit.enabled = true;
     canvas.style.cursor = '';
+    showDragChip(null);
     computeSliderRange();
     state.cut.skip.clear();
     scheduleAnalysis(40);
     renderInspector();
   }
+  const dragChip = $('#dragChip');
+  function showDragChip(e, text) {
+    if (!dragChip) return;
+    if (!e) { dragChip.hidden = true; return; }
+    const r = stage.getBoundingClientRect();
+    dragChip.textContent = text;
+    dragChip.hidden = false;
+    dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
+  }
+  // For the interface tests: where a tilt ring is on screen.
+  window.KeymasterDebug = { ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     if (tc.dragging || tc.axis) return;
-    ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = performance.now(); ptr.dragKey = -1; ptr.tilt = null;
-    if (selectedPart() && state.cut.mode === 'rotate') {
-      const h = planeHit(e);
-      if (onSheet(h)) startTilt(h, e);
-      return;
-    }
+    ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = performance.now(); ptr.dragKey = -1; ptr.ring = null;
+    const ring = pickRing(e);
+    if (ring) { startRing(ring, e); return; }
     const k = pickKey(e);
     if (k >= 0) {
       ptr.dragKey = k;
@@ -950,8 +1019,12 @@
     }
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (ptr.tilt) { moveTilt(e); return; }
-    if (!ptr.down && selectedPart() && state.cut.mode === 'rotate') { canvas.style.cursor = onSheet(planeHit(e)) ? 'grab' : ''; return; }
+    if (ptr.ring) { moveRing(e); return; }
+    if (!ptr.down && selectedPart() && !tc.dragging) {
+      const ring = tc.axis ? null : pickRing(e);
+      setRingHover(ring ? ring.ax : null);
+      if (ring) { canvas.style.cursor = 'grab'; return; }
+    }
     if (ptr.dragKey >= 0) {
       const h = planeHit(e);
       if (!h) return;
@@ -968,11 +1041,11 @@
     const ri = h ? K.regionAt(state.cut.analysis.base, h.x, h.y) : -1;
     return state.cut.skip.has(ri) ? ri : -1;
   }
-  canvas.addEventListener('pointercancel', () => { if (ptr.tilt) endTilt(); if (ptr.dragKey >= 0) { ptr.dragKey = -1; orbit.enabled = true; } ptr.down = false; });
+  canvas.addEventListener('pointercancel', () => { if (ptr.ring) endRing(); if (ptr.dragKey >= 0) { ptr.dragKey = -1; orbit.enabled = true; } ptr.down = false; });
   canvas.addEventListener('pointerup', (e) => {
     if (!ptr.down) return;
     ptr.down = false;
-    if (ptr.tilt) { endTilt(); return; }
+    if (ptr.ring) { endRing(); return; }
     if (ptr.dragKey >= 0) {
       ptr.dragKey = -1;
       orbit.enabled = true;
@@ -988,7 +1061,6 @@
   });
   function handleClick(e) {
     const p = selectedPart();
-    if (p && state.cut.mode === 'rotate' && onSheet(planeHit(e))) return;
     if (p && cameraOnClearSide() && state.cut.analysis && !state.cut.stale) {
       const h = planeHit(e);
       if (h) {
@@ -1036,8 +1108,6 @@
       case 'Enter': if (p) { e.preventDefault(); doCut(); } break;
       case 'Delete': case 'Backspace': if (p && state.cut.active >= 0) { e.preventDefault(); removeKey(state.cut.active); } break;
       case 'f': case 'F': frameAll(p || undefined); break;
-      case 'w': case 'W': if (p) { setGizmoMode('translate'); renderInspector(); } break;
-      case 'e': case 'E': if (p) { setGizmoMode('rotate'); renderInspector(); } break;
       case 'x': case 'X': if (p) alignPlane('x'); break;
       case 'y': case 'Y': if (p) alignPlane('y'); break;
       case 'z': case 'Z': if (p) alignPlane('z'); break;
@@ -1076,10 +1146,9 @@
     const p = selectedPart();
     if (!state.parts.length) t = '';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
-    else if (state.cut.mode === 'rotate') t = coarse ? 'Drag the yellow plane to tip it. Tap Slide to move it instead.' : 'Drag the yellow plane to tip it. Hold Shift for fine control. Press W to slide.';
     else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
-    else if (state.cfg.type === 'none') t = 'Drag the arrow to slide the cut, then press Enter to cut.';
-    else t = coarse ? 'Drag the arrow to slide the cut. Tap the cut face to add a key, drag keys to move them.' : 'Drag the arrow to slide the cut. Click the cut face to add a key, drag keys to move them, right-click to remove.';
+    else if (state.cfg.type === 'none') t = 'Drag the arrow to slide the cut, or a blue ring to tilt it. Then press Enter to cut.';
+    else t = coarse ? 'Drag the arrow to slide, or a ring to tilt. Tap the cut face to add a key, drag keys to move them.' : 'Drag the arrow to slide, or a ring to tilt. Click the cut face to add a key, drag keys to move them, right-click to remove.';
     el.textContent = t;
     el.hidden = !t;
   }
@@ -1266,20 +1335,21 @@
     </div>
     <div class="ins-section">
       <h3>Cut plane</h3>
-      ${seg('gizmo', state.cut.mode, [['translate', 'Slide'], ['rotate', 'Tilt']])}
-      <p class="muted small mode-help">${state.cut.mode === 'rotate'
-        ? 'Drag anywhere on the yellow plane to tip it. The edge you grab rises or falls, like lifting the edge of a tray. Hold Shift for fine control.'
-        : 'Drag the arrow to slide the cut through the part, or use the position slider.'}</p>
+      <p class="muted small mode-help">Drag the arrow to slide the cut. Drag a blue ring to tilt it${coarse ? '' : ', and hold Shift to snap to 5° steps'}. Or type exact values below.</p>
       <div class="row align">
         <span class="lbl">Align</span>
         ${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="align" data-value="${a}" title="Press ${a.toUpperCase()}">${a.toUpperCase()}</button>`).join('')}
         <button class="btn small" data-act="align" data-value="view">To view</button>
         <button class="btn small" data-act="flip" title="Swap the solid and clear halves">Flip</button>
       </div>
-      <label class="slider"><span class="lbl">Position</span>
-        <input type="range" id="cutPos" min="${state.cut.lo}" max="${state.cut.hi}" step="${(state.cut.hi - state.cut.lo) / 1000}" value="${planeOffset()}">
-        <output id="cutPosOut"></output></label>
-      <div class="angle-row"><span class="lbl">Angle</span><output id="tiltOut"></output><button class="btn small" data-act="straighten" title="Snap the cut square to the nearest axis">Straighten</button></div>
+      <div class="slider pos-row"><span class="lbl">Position</span>
+        <input type="range" id="cutPos" aria-label="Position" min="${state.cut.lo}" max="${state.cut.hi}" step="${(state.cut.hi - state.cut.lo) / 1000}" value="${planeOffset()}">
+        <span class="num-wrap"><input type="number" id="cutPosNum" inputmode="decimal" step="0.5" aria-label="Position in millimeters" value="${planeOffset().toFixed(1)}"><em>mm</em></span></div>
+      <span class="lbl angles-lbl">Angle</span>
+      <div class="angles">
+        ${['x', 'y', 'z'].map(a => `<label class="num"><span>${a.toUpperCase()}</span><span class="num-wrap"><input type="number" inputmode="decimal" step="1" data-angle="${a}" aria-label="Turn about ${a.toUpperCase()}" value="${fmtAngle(planeAngles()[a])}"><em>°</em></span></label>`).join('')}
+      </div>
+      <div class="angle-row"><output id="tiltOut"></output><button class="btn small" data-act="straighten" title="Snap the cut square to the nearest axis">Straighten</button></div>
       ${shown.length > 1 ? `<div class="areas"><p class="lbl">The cut face has ${shown.length} separate areas. Click an area’s label in the view, or untick it here, to leave it joined.</p>
         <ul>${shown.map((i, k) => `<li data-area-row="${i}"${i === state.cut.hoverArea ? ' class="is-hover"' : ''}><label><input type="checkbox" data-area="${i}" ${state.cut.skip.has(i) ? '' : 'checked'}> Area ${k + 1} <span class="muted">${fmt(regions[i].area)} mm²</span></label></li>`).join('')}</ul></div>` : ''}
     </div>
@@ -1317,10 +1387,14 @@
   }
   function updatePositionReadout() {
     const out = $('#cutPosOut'), range = $('#cutPos');
-    if (!out || !range) return;
+    if (!range) return;
     const s = planeOffset();
     if (document.activeElement !== range) { range.min = state.cut.lo; range.max = state.cut.hi; range.value = s; }
-    out.textContent = (s >= 0 ? '+' : '') + fmt(s) + ' mm';
+    if (out) out.textContent = (s >= 0 ? '+' : '') + fmt(s) + ' mm';
+    const num = $('#cutPosNum');
+    if (num && document.activeElement !== num) num.value = s.toFixed(1);
+    const ang = planeAngles();
+    for (const el of ins.querySelectorAll('[data-angle]')) if (document.activeElement !== el) el.value = fmtAngle(ang[el.dataset.angle]);
     const to = $('#tiltOut');
     if (to) { const t = tiltInfo(); to.textContent = t.deg < 0.05 ? `Square to ${t.axis}` : `${t.deg.toFixed(1)}° off ${t.axis}`; }
   }
@@ -1333,7 +1407,6 @@
     const c = state.cfg;
     switch (act) {
       case 'done': selectPart(null); break;
-      case 'gizmo': setGizmoMode(val); renderInspector(); updateHint(); break;
       case 'align': alignPlane(val); break;
       case 'flip': flipPlane(); break;
       case 'straighten': straighten(); break;
@@ -1379,6 +1452,19 @@
       if (t.checked === state.cut.skip.has(i)) toggleArea(i);
     } else if (t.id === 'cutPos') {
       computeSliderRange(); state.cut.skip.clear(); scheduleAnalysis(0);
+    } else if (t.id === 'cutPosNum') {
+      const v = parseFloat(t.value);
+      if (isFinite(v)) { setPlaneOffset(v); state.cut.skip.clear(); scheduleAnalysis(0); }
+      renderInspector();
+    } else if (t.dataset.angle) {
+      const v = parseFloat(t.value);
+      if (isFinite(v)) {
+        const a = planeAngles();
+        a[t.dataset.angle] = v;
+        setPlaneAngles(a);
+        state.cut.skip.clear(); scheduleAnalysis(0);
+      }
+      renderInspector();
     }
   });
   ins.addEventListener('mouseover', (e) => { const r = e.target.closest('[data-area-row]'); if (r) setHoverArea(+r.dataset.areaRow); });

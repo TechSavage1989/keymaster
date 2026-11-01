@@ -124,48 +124,74 @@ with sync_playwright() as p:
     pg.click('[data-act=shape][data-value=round]')
     pg.wait_for_timeout(400)
 
-    # tilt: drag on the plane, check the angle readout and that the arrow gizmo is detached
+    # tilt rings and typed angles
     check('angle starts square', 'Square to' in pg.inner_text('#tiltOut'), pg.inner_text('#tiltOut'))
-    pg.click('[data-act=gizmo][data-value=rotate]')
-    pg.wait_for_timeout(150)
-    check('tilt mode explains dragging', 'Drag anywhere on the yellow plane' in pg.inner_text('#inspector'))
-    pg.wait_for_timeout(300)
-    check('tilt mode stays on', pg.get_attribute('[data-act=gizmo][data-value=rotate]', 'aria-pressed') == 'true' and 'tip it' in pg.inner_text('#hint'), pg.inner_text('#hint'))
-    box = pg.locator('#stage canvas').bounding_box()
-    cx, cy = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
-    pg.mouse.move(cx + 120, cy + 10)
-    pg.mouse.down()
-    for i in range(1, 11):
-        pg.mouse.move(cx + 120, cy + 10 - 8 * i)
-    pg.mouse.up()
-    pg.wait_for_timeout(400)
-    tilt = pg.inner_text('#tiltOut')
-    check('dragging the plane tilts it', '° off' in tilt, tilt)
-    print('    after drag:', tilt)
     ins = pg.inner_text('#inspector')
-    check('keys re-checked after tilt', 'ready' in ins or 'attention' in ins or 'No room' in ins, ins[-300:])
-    # shift drag is finer
-    pg.mouse.move(cx + 120, cy - 70)
-    pg.keyboard.down('Shift'); pg.mouse.down()
-    for i in range(1, 11):
-        pg.mouse.move(cx + 120, cy - 70 - 8 * i)
-    pg.mouse.up(); pg.keyboard.up('Shift')
-    pg.wait_for_timeout(300)
-    t2 = pg.inner_text('#tiltOut')
-    print('    after shift drag:', t2)
-    d1 = float(tilt.split('°')[0]); d2 = float(t2.split('°')[0]) if '°' in t2 else 0
-    check('shift drag adds a smaller tilt', 0 < abs(d2 - d1) < d1, (d1, d2))
+    check('help explains the arrow and the rings', 'Drag the arrow to slide' in ins and 'Drag a blue ring to tilt' in ins, ins[:400])
+    check('no separate slide and tilt modes', pg.locator('[data-act=gizmo]').count() == 0)
+    check('three angle boxes and a position box', pg.locator('input[data-angle]').count() == 3 and pg.locator('#cutPosNum').count() == 1)
+    def angles():
+        return {a: float(pg.input_value(f'input[data-angle={a}]')) for a in 'xyz'}
+    def ring_drag(ax, a0, a1, shift=False, steps=12):
+        x0, y0 = pg.evaluate(f"KeymasterDebug.ringScreenPoint('{ax}', {a0})")
+        x1, y1 = pg.evaluate(f"KeymasterDebug.ringScreenPoint('{ax}', {a1})")
+        pg.mouse.move(x0, y0)
+        if shift: pg.keyboard.down('Shift')
+        pg.mouse.down()
+        for i in range(1, steps + 1):
+            pg.mouse.move(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps)
+        chip = pg.is_visible('#dragChip') and '°' in pg.inner_text('#dragChip')
+        pg.mouse.up()
+        if shift: pg.keyboard.up('Shift')
+        pg.wait_for_timeout(400)
+        return chip
+    a_before = angles()
+    # grab the rings low down, clear of any message along the top of the view
+    pg.mouse.move(*pg.evaluate("KeymasterDebug.ringScreenPoint('x', -70)"))
+    pg.wait_for_timeout(100)
+    check('hovering a ring shows a grab cursor', pg.evaluate("document.querySelector('#stage canvas').style.cursor") == 'grab')
+    chip = ring_drag('x', -70, -95)
+    tilt = pg.inner_text('#tiltOut')
+    a_after = angles()
+    print('    after ring drag:', tilt, a_after)
+    check('dragging a ring tilts the plane', '° off' in tilt and a_after != a_before, (tilt, a_after))
+    check('angle shows beside the pointer while dragging', chip)
+    check('angle boxes follow the ring', abs(float(tilt.split('°')[0])) > 1)
+    ins = pg.inner_text('#inspector')
+    check('keys re-checked after tilting', 'ready' in ins or 'attention' in ins or 'No room' in ins, ins[-300:])
     pg.click('[data-act=straighten]')
     pg.wait_for_timeout(300)
     check('straighten snaps square', 'Square to' in pg.inner_text('#tiltOut'), pg.inner_text('#tiltOut'))
-    pg.click('[data-act=gizmo][data-value=translate]')
-    pg.wait_for_timeout(300)
+    b0 = angles()
+    ring_drag('y', -60, -77, shift=True)
+    b1 = angles()
+    diffs = [abs(b1[a] - b0[a]) for a in 'xyz']
+    print('    after shift ring drag:', b1)
+    check('Shift snaps the ring to 5° steps', max(diffs) >= 4.9 and all(abs(d / 5 - round(d / 5)) < 0.02 or d < 0.05 for d in diffs), (b0, b1))
+    # typed angles: tip 30° about X, then swing it round with Z; the tilt stays 30°
+    pg.click('[data-act=straighten]'); pg.wait_for_timeout(200)
+    for a, v in (('x', '30'), ('y', '0'), ('z', '0')):
+        pg.fill(f'input[data-angle={a}]', v); pg.press(f'input[data-angle={a}]', 'Tab'); pg.wait_for_timeout(250)
+    check('typing X 30° tilts the cut 30°', '30.0° off Z' in pg.inner_text('#tiltOut') and pg.input_value('input[data-angle=x]') == '30.0', pg.inner_text('#tiltOut'))
+    pg.fill('input[data-angle=z]', '90'); pg.press('input[data-angle=z]', 'Tab'); pg.wait_for_timeout(300)
+    check('typing Z swings the tilt around, still 30°', '30.0° off Z' in pg.inner_text('#tiltOut') and pg.input_value('input[data-angle=z]') == '90.0', pg.inner_text('#tiltOut'))
+    pg.fill('input[data-angle=y]', '90'); pg.press('input[data-angle=y]', 'Tab'); pg.wait_for_timeout(300)
+    check('typing Y 90° makes an upright cut', 'off Z' not in pg.inner_text('#tiltOut') or 'Square to' in pg.inner_text('#tiltOut'), pg.inner_text('#tiltOut'))
+    pg.click('[data-act=straighten]'); pg.wait_for_timeout(300)
+    check('straighten after typing', 'Square to' in pg.inner_text('#tiltOut'))
+    pg.click('[data-act=align][data-value=z]'); pg.wait_for_timeout(300)
+    # typed position
+    lo, hi = float(pg.get_attribute('#cutPos', 'min')), float(pg.get_attribute('#cutPos', 'max'))
+    target = round(lo + (hi - lo) * 0.4, 1)
+    pg.fill('#cutPosNum', str(target)); pg.press('#cutPosNum', 'Tab'); pg.wait_for_timeout(400)
+    check('typing a position moves the cut there', abs(float(pg.input_value('#cutPosNum')) - target) < 0.05 and abs(float(pg.input_value('#cutPos')) - target) < 0.2, (pg.input_value('#cutPosNum'), target))
+    pg.fill('#cutPosNum', '0'); pg.press('#cutPosNum', 'Tab'); pg.wait_for_timeout(400)
 
     # slider moves plane
-    before = pg.inner_text('#cutPosOut')
+    before = pg.input_value('#cutPosNum')
     pg.evaluate("""() => { const r = document.querySelector('#cutPos'); r.value = (parseFloat(r.min) + parseFloat(r.max)) / 2 + (parseFloat(r.max) - parseFloat(r.min)) * 0.12; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }""")
     pg.wait_for_timeout(500)
-    after = pg.inner_text('#cutPosOut')
+    after = pg.input_value('#cutPosNum')
     check('position slider moves the plane', before != after, (before, after))
     ins = pg.inner_text('#inspector')
     check('keys re-placed after move', 'ready' in ins or 'attention' in ins, ins[-400:])

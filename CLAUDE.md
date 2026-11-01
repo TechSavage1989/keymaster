@@ -52,7 +52,8 @@ Key outlines come from `keyProfile(shape, r, d, angle, res)`. A socket is the pe
 - Yellow (`--cut`, `#F2B705`) means cutting: the hatched section face and the cut button. Do not use it for anything else.
 - Font: Barlow with tabular numbers. Colors come from CSS variables with light and dark values.
 - Each part gets a muted filament-like color from `PALETTE`. Pins are grey.
-- Keyboard: Enter cut, Esc done, W slide, E tilt, X/Y/Z align, F frame, Delete remove key, Ctrl+Z / Ctrl+Shift+Z.
+- Keyboard: Enter cut, Esc done, X/Y/Z align, F frame, Delete remove key, Ctrl+Z / Ctrl+Shift+Z.
+- The cut plane has one gizmo: the TransformControls arrow slides it, and two custom rings tilt it (Shift snaps to 5°). The panel's X/Y/Z angles are turns about the world axes applied X, then Y, then Z, starting from a level cut (`planeAngles` / `setPlaneAngles`). There are no separate slide and tilt modes.
 
 ## Working style
 
