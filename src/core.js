@@ -1705,6 +1705,234 @@ const KMCore = (() => {
     for (let i = 0; i < pairs.length; i += 4) if (groupOf[pairs[i]] !== groupOf[pairs[i + 1]]) borders.push(pairs[i], pairs[i + 1], pairs[i + 2], pairs[i + 3]);
     return { groupOf, count: order.length, areas: order.map(([, a]) => a), borders: new Int32Array(borders) };
   }
+  // The same result shape for any grouping of triangles (used by tests and by hand-made groupings).
+  function bordersFromGroups(P, I, groupOf) {
+    const nt = I.length / 3, nv = P.length / 3, first = new Map(), out = [];
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
+      const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a, f = first.get(key);
+      if (f === undefined) first.set(key, t); else { first.delete(key); if (groupOf[f] !== groupOf[t]) out.push(f, t, a, b); }
+    }
+    let count = 0; for (let t = 0; t < nt; t++) count = Math.max(count, groupOf[t] + 1);
+    return { groupOf, count, borders: new Int32Array(out) };
+  }
+
+  /* ---------- curved cuts along a border ----------
+     A border between two regions that runs all the way round (a sleeve hem, a collar) can split a part along
+     its existing edges. Each side gets its own copy of the border's vertices and an identical curved cap that
+     follows the border, so the pieces are sealed and fit together exactly. */
+  // Closed chains of border edges between the same two regions.
+  function borderLoops(P, seg) {
+    const b = seg.borders, byPair = new Map();
+    for (let e = 0; e < b.length / 4; e++) {
+      const g1 = seg.groupOf[b[4 * e]], g2 = seg.groupOf[b[4 * e + 1]], key = g1 < g2 ? `${g1},${g2}` : `${g2},${g1}`;
+      if (!byPair.has(key)) byPair.set(key, []);
+      byPair.get(key).push(e);
+    }
+    const loops = [];
+    for (const [key, edges] of byPair) {
+      const at = new Map();
+      for (const e of edges) for (const v of [b[4 * e + 2], b[4 * e + 3]]) { if (!at.has(v)) at.set(v, []); at.get(v).push(e); }
+      const used = new Set();
+      for (const e0 of edges) {
+        if (used.has(e0)) continue;
+        const verts = [b[4 * e0 + 2]], es = [e0];
+        used.add(e0);
+        let v = b[4 * e0 + 3], closed = false, simple = true;
+        for (let guard = 0; guard < edges.length + 2; guard++) {
+          if (v === verts[0]) { closed = true; break; }
+          if (verts.includes(v)) { simple = false; break; }
+          verts.push(v);
+          const next = (at.get(v) || []).filter(x => !used.has(x));
+          if (at.get(v).length !== 2) simple = false;
+          if (!next.length) break;
+          const e = next[0];
+          used.add(e); es.push(e);
+          v = b[4 * e + 2] === v ? b[4 * e + 3] : b[4 * e + 2];
+        }
+        let length = 0;
+        for (let i = 0; i < verts.length - (closed ? 0 : 1); i++) { const p = verts[i], q = verts[(i + 1) % verts.length]; length += Math.hypot(P[3 * p] - P[3 * q], P[3 * p + 1] - P[3 * q + 1], P[3 * p + 2] - P[3 * q + 2]); }
+        loops.push({ pair: key.split(',').map(Number), verts, edges: es, closed: closed && simple, length });
+      }
+    }
+    return loops;
+  }
+  // Each region's whole outline, as closed loops: the line a cut takes to free that region, even where the outline
+  // runs past several neighbouring regions (a sleeve hem with a seam crossing it, a panel among other panels).
+  function regionOutlines(P, I, seg) {
+    const b = seg.borders, nv = P.length / 3, out = [];
+    const byGroup = new Map(); // group -> directed outline edges (a -> b as its own triangles run)
+    const dir = (t, a, c) => { for (let k = 0; k < 3; k++) if (I[3 * t + k] === a && I[3 * t + (k + 1) % 3] === c) return true; return false; };
+    for (let e = 0; e < b.length / 4; e++) {
+      const t0 = b[4 * e], t1 = b[4 * e + 1], a = b[4 * e + 2], c = b[4 * e + 3];
+      for (const tt of [t0, t1]) {
+        const g = seg.groupOf[tt], fwd = dir(tt, a, c);
+        if (!byGroup.has(g)) byGroup.set(g, []);
+        byGroup.get(g).push({ from: fwd ? a : c, to: fwd ? c : a, e });
+      }
+    }
+    for (const [g, edges] of byGroup) {
+      const next = new Map();
+      for (const d of edges) { if (!next.has(d.from)) next.set(d.from, []); next.get(d.from).push(d); }
+      const used = new Set();
+      for (const d0 of edges) {
+        if (used.has(d0)) continue;
+        const verts = [], es = [];
+        let d = d0, simple = true, closed = false;
+        for (let guard = 0; guard <= edges.length; guard++) {
+          used.add(d); verts.push(d.from); es.push(d.e);
+          if (d.to === d0.from) { closed = true; break; }
+          const opts = (next.get(d.to) || []).filter(x => !used.has(x));
+          if (opts.length !== 1) simple = false;
+          if (!opts.length) break;
+          d = opts[0];
+        }
+        if (new Set(verts).size !== verts.length) simple = false;
+        let length = 0;
+        for (let i = 0; i < verts.length; i++) { const p = verts[i], q = verts[(i + 1) % verts.length]; length += Math.hypot(P[3 * p] - P[3 * q], P[3 * p + 1] - P[3 * q + 1], P[3 * p + 2] - P[3 * q + 2]); }
+        out.push({ region: g, verts, edges: es, closed: closed && simple, length });
+      }
+    }
+    return out;
+  }
+  // Every line a curved cut can follow: borders between two regions, and whole region outlines, without repeats.
+  function cutLines(P, I, seg) {
+    const all = borderLoops(P, seg).concat(regionOutlines(P, I, seg)), seen = new Set(), out = [];
+    for (const l of all) {
+      const key = l.edges.slice().sort((x, y) => x - y).join(',');
+      if (seen.has(key)) continue;
+      seen.add(key); out.push(l);
+    }
+    return out;
+  }
+  // The border edge nearest a point on the surface, and the shortest closed line through it (or any line if none
+  // through it closes, so the interface can say why it can't be cut).
+  function borderLoopNear(P, seg, loops, point) {
+    const b = seg.borders;
+    let best = -1, bd = Infinity;
+    for (let e = 0; e < b.length / 4; e++) {
+      const a = 3 * b[4 * e + 2], c = 3 * b[4 * e + 3];
+      const d = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]], L = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+      let s = L > 0 ? ((point[0] - P[a]) * d[0] + (point[1] - P[a + 1]) * d[1] + (point[2] - P[a + 2]) * d[2]) / L : 0; s = Math.max(0, Math.min(1, s));
+      const dist = Math.hypot(P[a] + s * d[0] - point[0], P[a + 1] + s * d[1] - point[1], P[a + 2] + s * d[2] - point[2]);
+      if (dist < bd) { bd = dist; best = e; }
+    }
+    if (best < 0) return null;
+    const through = loops.filter(l => l.edges.includes(best));
+    const closed = through.filter(l => l.closed).sort((x, y) => x.length - y.length);
+    const loop = closed[0] || through[0];
+    return loop ? { loop, distance: bd, edge: best } : null;
+  }
+  function cutAlongLoop(P, I, loop) {
+    if (!loop.closed) throw new Error('This border doesn’t go all the way round, so it can’t split the part. Pick one that circles a limb or the edge of a sleeve.');
+    const nv = P.length / 3, nt = I.length / 3, ring = loop.verts, n = ring.length;
+    const cutEdge = new Set();
+    for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; cutEdge.add(a < b ? a * nv + b : b * nv + a); }
+    // neighbours across every edge that isn't on the border
+    const first = new Map(), nb = new Int32Array(nt * 3).fill(-1);
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
+      const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a;
+      if (cutEdge.has(key)) continue;
+      const f = first.get(key);
+      if (f === undefined) first.set(key, 3 * t + k); else { first.delete(key); nb[3 * t + k] = Math.floor(f / 3); nb[f] = t; }
+    }
+    // which triangle on each side of the first border edge
+    let tA = -1, tB = -1;
+    const a0 = ring[0], b0 = ring[1];
+    for (let t = 0; t < nt && (tA < 0 || tB < 0); t++) for (let k = 0; k < 3; k++) {
+      const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3];
+      if (a === a0 && b === b0) tA = t; else if (a === b0 && b === a0) tB = t;
+    }
+    if (tA < 0 || tB < 0) throw new Error('This border runs along an edge of the surface that isn’t closed. Fill holes in the model panel first.');
+    const side = new Int8Array(nt);
+    const flood = (start, s) => { const st = [start]; side[start] = s; while (st.length) { const t = st.pop(); for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && !side[q]) { side[q] = s; st.push(q); } } } };
+    flood(tA, 1);
+    if (side[tB]) throw new Error('Cutting along this border wouldn’t split the part in two (the surface joins up around it). Pick a border that goes right round a limb or a sleeve.');
+    flood(tB, 2);
+    // side 2 gets its own copy of the border's vertices
+    const copy = new Map();
+    ring.forEach((v, i) => copy.set(v, nv + i));
+    const pos = new Float32Array((nv + n + 2) * 3); // plus a centre point for each cap, should it need one
+    pos.set(P);
+    ring.forEach((v, i) => { pos[3 * (nv + i)] = P[3 * v]; pos[3 * (nv + i) + 1] = P[3 * v + 1]; pos[3 * (nv + i) + 2] = P[3 * v + 2]; });
+    const tris = [[], [], []];
+    for (let t = 0; t < nt; t++) {
+      const s = side[t];
+      let a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
+      if (s === 2) { if (copy.has(a)) a = copy.get(a); if (copy.has(b)) b = copy.get(b); if (copy.has(c)) c = copy.get(c); }
+      tris[s].push(a, b, c);
+    }
+    // the cap: the border projected on its best-fit plane, triangulated with the same safeguards as flat cuts
+    let nx = 0, ny = 0, nz = 0, cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < n; i++) {
+      const p = 3 * ring[i], q = 3 * ring[(i + 1) % n];
+      nx += (P[p + 1] - P[q + 1]) * (P[p + 2] + P[q + 2]); ny += (P[p + 2] - P[q + 2]) * (P[p] + P[q]); nz += (P[p] - P[q]) * (P[p + 1] + P[q + 1]);
+      cx += P[p]; cy += P[p + 1]; cz += P[p + 2];
+    }
+    const F = frameFromNormal(norm3([nx, ny, nz]), [cx / n, cy / n, cz / n]);
+    const xy = new Float64Array(2 * n);
+    for (let i = 0; i < n; i++) { const p = 3 * ring[i], d = [P[p] - F.o[0], P[p + 1] - F.o[1], P[p + 2] - F.o[2]]; xy[2 * i] = d[0] * F.u[0] + d[1] * F.u[1] + d[2] * F.u[2]; xy[2 * i + 1] = d[0] * F.v[0] + d[1] * F.v[1] + d[2] * F.v[2]; }
+    const ringXY = new Map(ring.map((v, i) => [v, [xy[2 * i], xy[2 * i + 1]]]));
+    const keep = untangledRing(xy), flat = [], ids = [];
+    for (const k of keep) { ids.push(ring[k]); flat.push(xy[2 * k], xy[2 * k + 1]); }
+    // side 1 holds the border in some direction; its cap must run the other way
+    const at = (t, a, b) => { for (let k = 0; k < 3; k++) if (I[3 * t + k] === a && I[3 * t + (k + 1) % 3] === b) return true; return false; };
+    const side1Along = at(tA, a0, b0) ? side[tA] === 1 : side[tB] === 1 && at(tB, a0, b0);
+    let area2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; area2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
+    const ccw = area2 > 0, capAlong = !side1Along, wantCCW = capAlong ? ccw : !ccw;
+    const loc = earcut(flat, []);
+    let sum = 0; for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
+    const flip = wantCCW ? sum < 0 : sum > 0, cap = [];
+    for (let i = 0; i < loc.length; i += 3) { if (flip) cap.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]); else cap.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]); }
+    fixTJunctions(cap, ring);
+    const xyOf = (id) => ringXY.get(id);
+    splitThroughPoints(cap, [ring], xyOf);
+    patchCap(cap, [ring], xyOf, wantCCW);
+    // A border that zig-zags along triangle edges can have triangles with all three corners on it. A cap edge
+    // between two border points could then double up an existing edge of the surface. If it would, or the
+    // border folds over itself when flattened, fan the cap from a centre point instead: a fan only joins border
+    // points to the centre, so it can never repeat a surface edge.
+    const surf = new Set();
+    for (let i = 0; i < tris[1].length; i += 3) for (let k = 0; k < 3; k++) { const a = tris[1][i + k], b = tris[1][i + (k + 1) % 3]; surf.add(a < b ? a * (nv + n + 2) + b : b * (nv + n + 2) + a); }
+    let clash = keep.length < n;
+    for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) { const a = cap[i + k], b = cap[i + (k + 1) % 3]; if (surf.has(a < b ? a * (nv + n + 2) + b : b * (nv + n + 2) + a)) { clash = true; break; } }
+    if (clash) {
+      const c1 = nv + n, c2 = nv + n + 1;
+      for (const c of [c1, c2]) { pos[3 * c] = cx / n; pos[3 * c + 1] = cy / n; pos[3 * c + 2] = cz / n; }
+      cap.length = 0;
+      for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; cap.push(c1, b, a); } // runs against side 1's border, like the earcut cap
+      tris[1].push(...cap);
+      for (let i = 0; i < cap.length; i += 3) tris[2].push(c2, copy.get(cap[i + 2]), copy.get(cap[i + 1]));
+    } else {
+      tris[1].push(...cap);
+      for (let i = 0; i < cap.length; i += 3) tris[2].push(copy.get(cap[i]), copy.get(cap[i + 2]), copy.get(cap[i + 1])); // the same cap, facing the other piece
+    }
+    const build = (list) => {
+      const map = new Map(), out = [], idx = new Uint32Array(list.length);
+      for (let i = 0; i < list.length; i++) { const v = list[i]; let w = map.get(v); if (w === undefined) { w = out.length / 3; map.set(v, w); out.push(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]); } idx[i] = w; }
+      const positions = new Float32Array(out);
+      return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions) };
+    };
+    const parts = [build(tris[1]), build(tris[2])];
+    // other shells the border never touched (eyes, separate pieces) stay with the piece around them, or the bigger one
+    if (tris[0].length) {
+      const loose = separateShells(...(() => { const m = build(tris[0]); return [m.positions, m.indices]; })());
+      const shells = loose.length ? loose : [build(tris[0])];
+      for (const sh of shells) {
+        const c = sh.bbox.center;
+        const inside = parts.filter(q => c.every((v, i) => v >= q.bbox.min[i] && v <= q.bbox.max[i]));
+        const host = (inside.length ? inside : parts).reduce((x, y) => (inside.length ? (x.volume < y.volume ? x : y) : (x.volume > y.volume ? x : y)));
+        const m = mergeMeshes([host, sh]);
+        host.positions = m.positions; host.indices = m.indices; host.volume = volume(m.positions, m.indices); host.bbox = bounds(m.positions);
+      }
+    }
+    if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // the line rings a dip, so the "piece" would be empty air
+      throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
+    for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
+    parts.sort((x, y) => y.volume - x.volume);
+    return { parts, length: loop.length };
+  }
+
+
   // Border edges as line segments, nudged a hair off the surface so they draw on top of it.
   function regionBorderLines(P, I, seg, lift) {
     const b = seg.borders, out = new Float32Array((b.length / 4) * 6), N = (t) => {
@@ -2112,7 +2340,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
 })();

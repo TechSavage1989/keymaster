@@ -54,6 +54,10 @@ Key outlines come from `keyProfile(shape, r, d, angle, res)`. A socket is the pe
 
 `segmentSurface` joins neighbouring triangles whose normals differ by less than `angle` (default 35°), like ZBrush polygroups by normals, then melts regions under `minFrac` of the area (0.3%) into the neighbour they share the longest border with. It returns `groupOf` per triangle, region areas, and `borders` (pairs of triangles and their shared edge). `regionBorderLines` turns the borders into line segments lifted a hair off the surface. In the app, the view-tools button colours every part by region (`applyRegions`), with the threshold slider in a small panel; the cut preview steps aside while regions show, and cutting turns them off. Hard-surface models split well; smooth organic sculpts have few sharp turns, so they need a second method (by concave folds and thickness changes) before curved cuts can find sleeves on them.
 
+## Curved cuts along a border
+
+`cutLines` lists the lines a curved cut can follow: borders between two regions (`borderLoops`) and whole region outlines (`regionOutlines`), which can run past several neighbours. `borderLoopNear` picks the shortest closed line through the border edge nearest a clicked point. `cutAlongLoop` splits the surface along that line's existing edges: it floods the triangles on each side (refusing a line that doesn't split the part), gives side 2 its own copy of the line's vertices, and caps both sides with the same triangulation facing opposite ways. The cap is the line projected on its best-fit (Newell) plane and triangulated with the flat-cut safeguards; if any cap edge would repeat a surface edge (a border zig-zagging along triangle edges) or the line folds over when flattened, it fans from a centre point instead. A line round a dip gives a piece of negative volume and is refused with its own message. Untouched shells join the piece around them. Curved cuts don't add keys yet.
+
 ## Interface conventions
 
 - Copy: sentence case, plain verbs, say what a button does ("Cut part", "Export parts"). Errors say what happened and how to fix it, without apologizing.

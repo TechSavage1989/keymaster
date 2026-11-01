@@ -305,6 +305,9 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .regions-panel .slider { grid-template-columns: auto 1fr auto; margin-top: 8px; gap: 8px; }
 .regions-panel .slider output { min-width: 34px; font-size: 12.5px; }
 .regions-panel p { margin-top: 6px; font-size: 12px; line-height: 1.35; }
+.cut-line-info { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.cut-line-info .status { margin-top: 0; font-size: 12.5px; }
+.cut-line-info .btn.cut { width: 100%; margin-top: 8px; min-height: 34px; font-size: 13.5px; }
 /* compact key settings, so everything fits without scrolling */
 .ins-section.head { padding: 10px 16px 8px; }
 .ins-section.head h2 { font-size: 15px; }
@@ -444,7 +447,8 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
       <div class="regions-panel" id="regionsPanel" hidden>
         <div class="rp-head"><strong>Surface regions</strong><output id="regionsCount"></output></div>
         <label class="slider"><span class="lbl">Split at turns over</span><input type="range" id="regionsAngle" min="10" max="80" step="5" value="35" aria-label="Split the surface where it turns more sharply than this"><output id="regionsAngleOut">35°</output></label>
-        <p class="muted small">Colours show where the surface turns sharply, like ZBrush polygroups. Curved cuts along these borders are coming next.</p>
+        <p class="muted small">Colours show where the surface turns sharply, like ZBrush polygroups.</p>
+        <div id="cutLineInfo" class="cut-line-info"></div>
       </div>
       <p class="hint" id="hint" hidden></p>
       <div class="plane-bar" id="planeBar" aria-label="Cut plane" hidden></div>

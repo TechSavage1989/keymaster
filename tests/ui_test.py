@@ -513,6 +513,39 @@ with sync_playwright() as p:
     check('each piece gets its own regions after a cut', 'region' in pg.inner_text('#regionsCount'))
     pg.click('#regionsBtn'); pg.wait_for_timeout(200)
     check('regions toggle off', not pg.is_visible('#regionsPanel'))
+
+    # curved cut along a border: the seam where the dumbbell's bar meets a ball goes all the way round
+    import math
+    pg.set_input_files('#fileInput', str(OUT / 'dumbbell.stl'))
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1", timeout=20000)
+    pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000); pg.wait_for_timeout(300)
+    pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 35; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
+    pg.wait_for_timeout(400)
+    check('with regions on, the hint says to click a border line', 'border line' in pg.inner_text('#hint') and 'Click a dark border line' in pg.inner_text('#cutLineInfo'))
+    ax = [0.55, 0.3, 0.78]; L = math.sqrt(sum(v * v for v in ax)); ax = [v / L for v in ax]
+    u = [ax[1], -ax[0], 0]; L = math.sqrt(sum(v * v for v in u)); u = [v / L for v in u]
+    z = 12 + math.sqrt(144 - 2.5 ** 2)  # where the 5 mm bar meets the first ball
+    seam = [ax[k] * z + u[k] * 2.5 for k in range(3)]
+    res = pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam})")
+    pg.wait_for_timeout(200)
+    info = pg.inner_text('#cutLineInfo')
+    print('    picked line:', res, info.replace('\n', ' ')[:140])
+    check('clicking the seam picks a line all the way round, ready to cut', bool(res) and res['closed'] and res['ok'] and 'all the way round' in info and pg.locator('[data-act=cut-line]').count() == 1, (res, info))
+    pg.click('[data-act=cut-line]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
+    names = pg.locator('#partList .part-name').all_inner_texts()
+    check('cutting along the line gives two pieces', len(names) == 2 and all(n.endswith((' A', ' B')) for n in names), names)
+    check('regions stay on to keep cutting', pg.get_attribute('#regionsBtn', 'aria-pressed') == 'true' and 'Cut along the line' in pg.inner_text('#toast'))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    check('undo puts the dumbbell back together', pg.locator('#partList li[data-id]').count() == 1)
+    res2 = pg.evaluate("KeymasterDebug.pickCutLineAt(0, [500, 500, 500])")
+    pg.wait_for_timeout(200)
+    check('a click far from any line says where to click', res2 is None and 'border lines' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam})"); pg.wait_for_timeout(100)
+    pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
+    check('Esc drops the picked line', pg.locator('[data-act=cut-line]').count() == 0)
+    pg.screenshot(path=str(OUT / 'shot_curved.png'))
+    pg.click('#regionsBtn'); pg.wait_for_timeout(200)
     b.close()
 
 print('\nconsole errors:', errors if errors else 'none')
