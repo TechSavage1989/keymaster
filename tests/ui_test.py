@@ -145,7 +145,7 @@ with sync_playwright() as p:
     check('angle starts square', 'Square to' in pg.inner_text('#tiltOut'), pg.inner_text('#tiltOut'))
     ins = pg.inner_text('#inspector')
     check('help explains the arrow and the rings', 'Drag the arrow to slide' in ins and 'Drag a blue ring to tilt' in ins, ins[:400])
-    check('no separate slide and tilt modes', pg.locator('[data-act=gizmo]').count() == 0)
+    check('slide and tilt modes offered, slide first', pg.locator('[data-act=gizmo]').count() == 2 and pg.get_attribute('[data-act=gizmo][data-value=translate]', 'aria-pressed') == 'true')
     check('three angle boxes and a position box', pg.locator('input[data-angle]').count() == 3 and pg.locator('#cutPosNum').count() == 1)
     def angles():
         return {a: float(pg.input_value(f'input[data-angle={a}]')) for a in 'xyz'}
@@ -196,6 +196,44 @@ with sync_playwright() as p:
     check('typing Y 90° makes an upright cut', 'off Z' not in pg.inner_text('#tiltOut') or 'Square to' in pg.inner_text('#tiltOut'), pg.inner_text('#tiltOut'))
     pg.click('[data-act=straighten]'); pg.wait_for_timeout(300)
     check('straighten after typing', 'Square to' in pg.inner_text('#tiltOut'))
+    pg.click('[data-act=align][data-value=z]'); pg.wait_for_timeout(300)
+    # Tilt mode: drag anywhere on the plane to tip it, like the edge of a tray; the rings still work there
+    pg.click('[data-act=gizmo][data-value=rotate]')
+    pg.wait_for_timeout(300)
+    check('tilt mode explains dragging the plane', 'Drag anywhere on the yellow plane' in pg.inner_text('#inspector') and 'tip it' in pg.inner_text('#hint'), pg.inner_text('#hint'))
+    check('tilt mode stays on', pg.get_attribute('[data-act=gizmo][data-value=rotate]', 'aria-pressed') == 'true')
+    box = pg.locator('#stage canvas').bounding_box()
+    cx, cy = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
+    pg.mouse.move(cx + 120, cy + 10)
+    pg.mouse.down()
+    for i in range(1, 11):
+        pg.mouse.move(cx + 120, cy + 10 - 8 * i)
+    tray_chip = pg.is_visible('#dragChip') and 'off' in pg.inner_text('#dragChip')
+    pg.mouse.up()
+    pg.wait_for_timeout(400)
+    tilt = pg.inner_text('#tiltOut')
+    print('    after dragging the plane:', tilt)
+    check('dragging the plane tilts it', '° off' in tilt, tilt)
+    check('the angle shows by the pointer while tipping', tray_chip)
+    check('angle boxes follow the plane drag', any(abs(v) > 0.5 for v in angles().values()), angles())
+    pg.mouse.move(cx + 120, cy - 70)
+    pg.keyboard.down('Shift'); pg.mouse.down()
+    for i in range(1, 11):
+        pg.mouse.move(cx + 120, cy - 70 - 8 * i)
+    pg.mouse.up(); pg.keyboard.up('Shift')
+    pg.wait_for_timeout(300)
+    t2 = pg.inner_text('#tiltOut')
+    d1 = float(tilt.split('°')[0]); d2 = float(t2.split('°')[0]) if '°' in t2 else 0
+    check('Shift tips the plane more finely', 0 < abs(d2 - d1) < d1, (d1, d2))
+    r0 = pg.inner_text('#tiltOut')
+    ring_drag('x', -70, -85)
+    check('rings work in tilt mode too', pg.inner_text('#tiltOut') != r0, (r0, pg.inner_text('#tiltOut')))
+    n_keys = pg.locator('#partList li[data-id]').count()
+    pg.keyboard.press('w'); pg.wait_for_timeout(200)
+    check('W returns to slide mode', pg.get_attribute('[data-act=gizmo][data-value=translate]', 'aria-pressed') == 'true')
+    pg.keyboard.press('e'); pg.wait_for_timeout(200)
+    check('E switches to tilt mode', pg.get_attribute('[data-act=gizmo][data-value=rotate]', 'aria-pressed') == 'true')
+    pg.click('[data-act=gizmo][data-value=translate]')
     pg.click('[data-act=align][data-value=z]'); pg.wait_for_timeout(300)
     # typed position
     lo, hi = float(pg.get_attribute('#cutPos', 'min')), float(pg.get_attribute('#cutPos', 'max'))

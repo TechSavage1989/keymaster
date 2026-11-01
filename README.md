@@ -6,7 +6,7 @@ Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com*
 
 ## What it does
 
-- **Live cut preview.** Drag the arrow to slide the cut and the blue rings to tilt it (hold Shift to snap to 5° steps), or type an exact position and X, Y and Z angles. The cut face appears as a hatched section while you drag, even on dense sculpts.
+- **Live cut preview.** Drag the arrow to slide the cut and the blue rings to tilt it (hold Shift to snap to 5° steps). In Tilt mode, drag anywhere on the plane to tip it like the edge of a tray. Or type an exact position and X, Y and Z angles. The cut face appears as a hatched section while you drag, even on dense sculpts.
 - **Cut as many times as you need.** Every piece lands in the parts list and can be cut again. Undo and redo cover every step.
 - **Keys that fit.** Choose pegs (tapered by any amount, right down to a point, with a hole that matches or stays straight), dowel holes with printable pins, or magnet pockets. Keys come in seven shapes: round, square, hexagon, cross, oval, slot, and a D-shape that only fits one way round. Shaped keys line up with each area's long side, and the fit gap is even all the way round. Keys are placed automatically, and you can click the cut face to add one, drag to move it, or right-click to remove it.
 - **Checked before you cut.** Each key is tested for thin walls and for sockets that would break through the surface. Problem keys turn red and explain why.
@@ -23,7 +23,7 @@ Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com*
 5. Press **Cut part** or Enter. Repeat on any piece.
 6. Press **Export parts** to save everything.
 
-Shortcuts: Enter cut, Esc done, X/Y/Z align, F frame, Delete remove key, Ctrl+Z undo, Ctrl+Shift+Z redo.
+Shortcuts: Enter cut, Esc done, W slide, E tilt, X/Y/Z align, F frame, Delete remove key, Ctrl+Z undo, Ctrl+Shift+Z redo.
 
 **Before printing a large piece, print a small test cut.** The right fit depends on your printer, material, orientation and post-processing.
 
