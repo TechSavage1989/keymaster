@@ -14,27 +14,30 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Area labels in the view: click a label to leave that area joined or cut it again, hover to match an area to its row.
 - Hole filling, inside-out repair, quarter turns, scaling, printer bed fit check.
 - ZIP export of binary STLs.
+- Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 
 ## Next
 
-1. **Confirm on real sculpts.** Test with three or four real figure files (dense ZBrush exports, files with separate shells, files with small defects) and fix whatever comes up. Record timings in the PR.
-2. **Limit the cut to a region.** Draw a circle or box on the plane so only what's inside is cut, even where the cut face is one connected area (take off a hand without slicing into a cape behind it).
-3. **Per-area key settings.** Choose key type, size and count separately for each area of a cut face.
-4. **Finer per-key control.** Size, shape and rotation for individual keys, chamfered socket entrances, and separate peg and socket depths.
-5. **Locking joints.** Twist-lock (push in and turn) and dovetail slide-in keys that hold pieces together before gluing. Needs test prints from the owner to tune the fit.
-6. **Snap-fit pegs.** Split-tip pegs with a barb that clicks into a groove in the socket. Needs test prints from the owner to tune the fit.
-7. **Cuts in a background thread.** Move `KMCore` into a Web Worker so the screen never freezes on dense models. Show progress. `core.js` already has no dependencies, so it should move unchanged.
-8. **Faster picking and display on huge meshes.** Use a bounding-volume hierarchy for clicks and a lighter display mesh above about 2 million triangles, keeping the full mesh for cutting.
-9. **Save and reopen projects.** A `.keymaster` file holding the parts, names, colors and settings.
-10. **Seam-hiding cut shapes.** Zigzag, stepped and dovetail cuts so seams are less visible and pieces can't slide.
-11. **Hollowing and drain holes.** Shell a part to a chosen wall thickness, with drain holes placed for resin printing.
-12. **Part labels.** Emboss a small part number on a hidden face of each piece.
-13. **Split to fit the bed.** Suggest cuts that make every piece fit the printer bed.
-14. **3MF export** with all parts in one file, already arranged.
-15. **Measure tool.** Click two points to read a distance.
+1. **Adjustable taper for every key shape.** A taper amount from none to a full point (cone or pyramid), with a choice of a matching tapered socket or a straight one.
+2. **Easier slide and tilt, with exact angles.** Clearer handles, a rotation dial or rings like 3D apps, and typed angles around each axis for precise tilts.
+3. **Cut suggestions from the model's shape.** Detect natural break points (narrow necks such as wrists and ankles, separate parts, sharp creases and panel lines) and offer them as one-click cut positions.
+4. **Paint a cut.** Brush along the surface to mark where the seam should go, and cut there.
+5. **Limit the cut to a region.** Draw a circle or box on the plane so only what's inside is cut, even where the cut face is one connected area (take off a hand without slicing into a cape behind it).
+6. **Per-area key settings.** Choose key type, size and count separately for each area of a cut face.
+7. **Finer per-key control.** Size, shape and rotation for individual keys, chamfered socket entrances, and separate peg and socket depths.
+8. **Locking joints.** Twist-lock (push in and turn) and dovetail slide-in keys that hold pieces together before gluing. Needs test prints from the owner to tune the fit.
+9. **Snap-fit pegs.** Split-tip pegs with a barb that clicks into a groove in the socket. Needs test prints from the owner to tune the fit.
+10. **Cuts in a background thread.** Move `KMCore` into a Web Worker so the screen never freezes on dense models. Show progress. `core.js` already has no dependencies, so it should move unchanged.
+11. **Faster picking and display on huge meshes.** Use a bounding-volume hierarchy for clicks and a lighter display mesh above about 2 million triangles, keeping the full mesh for cutting.
+12. **Save and reopen projects.** A `.keymaster` file holding the parts, names, colors and settings.
+13. **Seam-hiding cut shapes.** Zigzag, stepped and dovetail cuts so seams are less visible and pieces can't slide.
+14. **Hollowing and drain holes.** Shell a part to a chosen wall thickness, with drain holes placed for resin printing.
+15. **Part labels.** Emboss a small part number on a hidden face of each piece.
+16. **Split to fit the bed.** Suggest cuts that make every piece fit the printer bed.
+17. **3MF export** with all parts in one file, already arranged.
+18. **Measure tool.** Click two points to read a distance.
 
 ## Ideas to weigh later
 
-- Freeform cuts along a drawn path, such as a collar line or hairline.
 - Print orientation hints for each piece.
 - Desktop wrapper, if very large files need more memory than a browser allows.

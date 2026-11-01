@@ -465,10 +465,16 @@
   }
   /* ---------------- area labels in the view ---------------- */
   const tagLayer = $('#areaTags');
-  function areaCount() {
+  // Areas worth showing: real sculpts give cut faces with specks (a fraction of a square millimetre, or a
+  // microscopic void touching the surface). Those are still cut and capped, just not listed or labelled.
+  function shownAreas() {
     const an = state.cut.analysis;
-    return an && !an.base.error ? an.base.regions.length : 0;
+    if (!an || an.base.error) return [];
+    const out = [];
+    an.base.regions.forEach((r, i) => { if (!r.inverted && r.area >= 0.05) out.push(i); });
+    return out;
   }
+  function areaCount() { return shownAreas().length; }
   function updateLabelPoints() {
     if (!state.cut.labels.length) return;
     const avoid = state.cfg.type === 'none' ? 0 : K.keyGeometrySpec(state.cfg).outer + state.cfg.margin;
@@ -476,10 +482,10 @@
     for (const l of state.cut.labels) Object.assign(l, K.pickLabelPoint(l.samples, keys, avoid));
   }
   function renderAreaTags() {
-    const n = areaCount();
-    tagLayer.innerHTML = n > 1 ? state.cut.labels.map((l, i) => {
+    const shown = shownAreas();
+    tagLayer.innerHTML = shown.length > 1 ? shown.map((i, k) => {
       const cut = !state.cut.skip.has(i);
-      return `<button class="area-tag${i === state.cut.hoverArea ? ' is-hover' : ''}" data-area-tag="${i}" aria-pressed="${cut}" title="${cut ? `Area ${i + 1} will be cut. Click to leave it joined.` : `Area ${i + 1} stays joined. Click to cut it.`}"><b>${i + 1}</b>${cut ? 'Cut' : 'Joined'}</button>`;
+      return `<button class="area-tag${i === state.cut.hoverArea ? ' is-hover' : ''}" data-area-tag="${i}" aria-pressed="${cut}" title="${cut ? `Area ${k + 1} will be cut. Click to leave it joined.` : `Area ${k + 1} stays joined. Click to cut it.`}"><b>${k + 1}</b>${cut ? 'Cut' : 'Joined'}</button>`;
     }).join('') : '';
     updateLabelPoints();
     placeAreaTags();
@@ -493,8 +499,8 @@
     planeGroup.updateMatrixWorld(true);
     camera.updateMatrixWorld();
     const W = canvas.clientWidth, H = canvas.clientHeight;
-    for (let i = 0; i < tags.length; i++) {
-      const l = state.cut.labels[i], el = tags[i];
+    for (const el of tags) {
+      const l = state.cut.labels[+el.dataset.areaTag];
       if (!l) continue;
       const q = planeGroup.localToWorld(new THREE.Vector3(l.x, l.y, 0)).project(camera);
       const off = q.z > 1 || q.x < -1.05 || q.x > 1.05 || q.y < -1.05 || q.y > 1.05;
@@ -513,7 +519,7 @@
     markDirty();
   }
   function toggleArea(i) {
-    if (i < 0 || i >= areaCount()) return;
+    if (!shownAreas().includes(i)) return;
     if (state.cut.skip.has(i)) state.cut.skip.delete(i); else state.cut.skip.add(i);
     if (state.cut.auto) state.cut.keys = K.autoPlaceKeys(state.cut.analysis, coreCfg(), state.cfg.perArea, state.cut.skip);
     state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
@@ -677,9 +683,11 @@
     $('#empty').hidden = true;
     syncScene();
     frameAll();
-    if (m.report.flipped) toast('The model was inside out, so Keymaster flipped it to print correctly.');
+    const specks = m.report.specks ? ` Removed ${m.report.specks} loose ${m.report.specks === 1 ? 'speck' : 'specks'} too small to print.` : '';
+    if (m.report.flipped) toast('The model was inside out, so Keymaster flipped it to print correctly.' + specks);
     else if (!m.report.closed) toast('This model has gaps in its surface. Fill holes in the model panel before cutting.', 'warn');
-    else if (state.model.tris > 3e6) toast('This is a very dense model. Cuts may take a few seconds.', 'warn');
+    else if (state.model.tris > 3e6) toast('This is a very dense model. Cuts may take a few seconds.' + specks, 'warn');
+    else if (specks) toast(specks.trim());
   }
   function frameAll(target) {
     const b = target ? target.bbox : modelBounds();
@@ -706,7 +714,8 @@
       toast(an && an.base.error ? 'The surface is broken where this cut crosses it. Move the cut or repair the model.' : 'The cut plane doesn’t pass through this part. Slide it into the model first.', 'error');
       return;
     }
-    if (state.cut.skip.size >= an.base.regions.length) {
+    const shownNow = shownAreas();
+    if (shownNow.length && shownNow.every(i => state.cut.skip.has(i))) {
       toast('Every area is set to stay joined, so nothing would be cut. Click an area’s label to cut it.', 'error');
       return;
     }
@@ -1222,6 +1231,7 @@
     const c = state.cfg;
     const an = state.cut.analysis;
     const regions = an && !an.base.error ? an.base.regions : [];
+    const shown = shownAreas();
     const evals = state.cut.evals;
     const bad = evals.filter(e => !e.ok);
     const s = p.bbox.size;
@@ -1258,8 +1268,8 @@
         <input type="range" id="cutPos" min="${state.cut.lo}" max="${state.cut.hi}" step="${(state.cut.hi - state.cut.lo) / 1000}" value="${planeOffset()}">
         <output id="cutPosOut"></output></label>
       <div class="angle-row"><span class="lbl">Angle</span><output id="tiltOut"></output><button class="btn small" data-act="straighten" title="Snap the cut square to the nearest axis">Straighten</button></div>
-      ${regions.length > 1 ? `<div class="areas"><p class="lbl">The cut face has ${regions.length} separate areas. Click an area’s label in the view, or untick it here, to leave it joined.</p>
-        <ul>${regions.map((r, i) => `<li data-area-row="${i}"${i === state.cut.hoverArea ? ' class="is-hover"' : ''}><label><input type="checkbox" data-area="${i}" ${state.cut.skip.has(i) ? '' : 'checked'}> Area ${i + 1} <span class="muted">${fmt(r.area)} mm²</span></label></li>`).join('')}</ul></div>` : ''}
+      ${shown.length > 1 ? `<div class="areas"><p class="lbl">The cut face has ${shown.length} separate areas. Click an area’s label in the view, or untick it here, to leave it joined.</p>
+        <ul>${shown.map((i, k) => `<li data-area-row="${i}"${i === state.cut.hoverArea ? ' class="is-hover"' : ''}><label><input type="checkbox" data-area="${i}" ${state.cut.skip.has(i) ? '' : 'checked'}> Area ${k + 1} <span class="muted">${fmt(regions[i].area)} mm²</span></label></li>`).join('')}</ul></div>` : ''}
     </div>
     <div class="ins-section">
       <h3>Keys</h3>

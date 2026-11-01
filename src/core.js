@@ -530,11 +530,53 @@ const KMCore = (() => {
     const tol = Math.max(diag(b0) * 1e-7, 1e-9);
     const m = weld(raw.positions, raw.indices, tol);
     if (!m.indices.length) throw new Error('The model has no usable triangles.');
+    const specks = removeSpecks(m);
+    if (!m.indices.length) throw new Error('The model has no usable triangles.');
     const rep = edgeReport(m.indices);
     let vol = volume(m.positions, m.indices);
     let flipped = false;
     if (vol < 0) { flipAll(m.indices); vol = -vol; flipped = true; }
-    return { positions: m.positions, indices: m.indices, report: { ...rep, flipped, volume: vol } };
+    return { positions: m.positions, indices: m.indices, report: { ...rep, flipped, volume: vol, specks } };
+  }
+  // Loose specks: separate shells too small to print, such as a single triangle stored back to back with a copy
+  // of itself (zero volume). Real sculpt exports carry dozens of these, and their flat cross-sections confuse
+  // capping. A shell is a speck when it encloses less than 0.001 mm³ (a 0.1 mm cube) and is under 0.5 mm across.
+  function removeSpecks(m) {
+    const P = m.positions, I = m.indices, nv = P.length / 3, nt = I.length / 3;
+    const par = new Int32Array(nv);
+    for (let i = 0; i < nv; i++) par[i] = i;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let t = 0; t < nt; t++) { const a = find(I[3 * t]), b = find(I[3 * t + 1]), c = find(I[3 * t + 2]); par[a] = b; par[find(c)] = b; }
+    const info = new Map();
+    for (let t = 0; t < nt; t++) {
+      const r = find(I[3 * t]);
+      let s = info.get(r);
+      if (!s) { s = { vol: 0, lo: [Infinity, Infinity, Infinity], hi: [-Infinity, -Infinity, -Infinity], tris: 0 }; info.set(r, s); }
+      s.tris++;
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      s.vol += (P[a] * (P[b + 1] * P[c + 2] - P[b + 2] * P[c + 1]) - P[a + 1] * (P[b] * P[c + 2] - P[b + 2] * P[c]) + P[a + 2] * (P[b] * P[c + 1] - P[b + 1] * P[c])) / 6;
+      for (const v of [a, b, c]) for (let k = 0; k < 3; k++) { if (P[v + k] < s.lo[k]) s.lo[k] = P[v + k]; if (P[v + k] > s.hi[k]) s.hi[k] = P[v + k]; }
+    }
+    if (info.size < 2) return 0;
+    const drop = new Set();
+    for (const [r, s] of info) {
+      const size = Math.max(s.hi[0] - s.lo[0], s.hi[1] - s.lo[1], s.hi[2] - s.lo[2]);
+      if (Math.abs(s.vol) < 1e-3 && size < 0.5) drop.add(r);
+    }
+    if (!drop.size || drop.size === info.size) return 0;
+    const keep = [];
+    for (let t = 0; t < nt; t++) if (!drop.has(find(I[3 * t]))) keep.push(I[3 * t], I[3 * t + 1], I[3 * t + 2]);
+    // compact the vertices so dropped ones don't linger
+    const remap = new Int32Array(nv).fill(-1), pos = [];
+    const idx = new Uint32Array(keep.length);
+    for (let i = 0; i < keep.length; i++) {
+      const v = keep[i];
+      if (remap[v] < 0) { remap[v] = pos.length / 3; pos.push(P[3 * v], P[3 * v + 1], P[3 * v + 2]); }
+      idx[i] = remap[v];
+    }
+    m.positions = new Float32Array(pos);
+    m.indices = idx;
+    return drop.size;
   }
 
   /* ---------- hole filling ---------- */
@@ -675,6 +717,84 @@ const KMCore = (() => {
     for (const v of out) tris.push(v);
   }
 
+  // True when triangles over loop points 0..L-1 form one clean disk: every loop edge used once, every
+  // other edge used once in each direction (orientation is fixed afterwards, so either winding counts).
+  function diskTriangulation(loc, L) {
+    if (loc.length !== 3 * (L - 2)) return false;
+    let rev = 0, fwd = 0;
+    for (let i = 0; i < loc.length; i += 3) for (let k = 0; k < 3; k++) { const a = loc[i + k], b = loc[i + (k + 1) % 3]; if (b === (a + 1) % L) fwd++; else if (a === (b + 1) % L) rev++; }
+    const flip = rev > fwd, seen = new Set();
+    for (let i = 0; i < loc.length; i += 3) for (let k = 0; k < 3; k++) {
+      let a = loc[i + k], b = loc[i + (k + 1) % 3];
+      if (flip) { const s = a; a = b; b = s; }
+      const e = a * L + b;
+      if (seen.has(e) || a === b) return false;
+      seen.add(e);
+    }
+    for (const e of seen) { const a = Math.floor(e / L), b = e % L; if (b !== (a + 1) % L && !seen.has(b * L + a)) return false; }
+    for (let a = 0; a < L; a++) if (!seen.has(a * L + (a + 1) % L)) return false;
+    return true;
+  }
+  // Last safety net for a cap: earcut can silently drop a sliver triangle where two ring points nearly touch
+  // (seen on real sculpts, with points 0.001 mm apart). Compare the cap's boundary with the rings it should
+  // fill and triangulate whatever loop is left over, so the cap always meets the side walls exactly.
+  function patchCap(tris, rings, xyOf, wantCCW) {
+    const cnt = new Map();
+    const key = (a, b) => a + ',' + b;
+    for (let t = 0; t < tris.length; t += 3) for (let k = 0; k < 3; k++) { const e = key(tris[t + k], tris[t + (k + 1) % 3]); cnt.set(e, (cnt.get(e) || 0) + 1); }
+    const need = new Set();
+    rings.forEach((r, ri) => {
+      // the cap's edge runs round the outer ring the same way as the cap faces, and round holes the other way
+      let s = 0;
+      for (let i = 0; i < r.length; i++) { const a = xyOf(r[i]), b = xyOf(r[(i + 1) % r.length]); s += a[0] * b[1] - b[0] * a[1]; }
+      const ccw = s > 0, along = ri === 0 ? ccw === wantCCW : ccw !== wantCCW;
+      for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; need.add(along ? key(a, b) : key(b, a)); }
+    });
+    const loopEdges = [];
+    for (const e of need) if (!cnt.has(e)) loopEdges.push(e.split(',').map(Number)); // boundary the cap is missing
+    for (const [e] of cnt) {
+      const [a, b] = e.split(',').map(Number);
+      if (!cnt.has(key(b, a)) && !need.has(e)) loopEdges.push([b, a]); // cap boundary that shouldn't be there, reversed
+    }
+    if (!loopEdges.length) return 0;
+    const out = new Map();
+    for (const [a, b] of loopEdges) { if (!out.has(a)) out.set(a, []); out.get(a).push(b); }
+    let added = 0;
+    for (const [start] of out) {
+      while (out.get(start) && out.get(start).length) {
+        const loop = [start];
+        let v = out.get(start).pop(), guard = loopEdges.length + 1;
+        while (v !== start && guard-- > 0) {
+          loop.push(v);
+          const nx = out.get(v);
+          if (!nx || !nx.length) { loop.length = 0; break; }
+          v = nx.pop();
+        }
+        if (loop.length < 3 || v !== start) continue;
+        // triangulate the loop keeping its direction, so every new edge pairs with the edge it closes
+        const flat = [];
+        for (const id of loop) { const p = xyOf(id); flat.push(p[0], p[1]); }
+        let loc = loop.length > 3 ? earcut(flat, []) : [0, 1, 2];
+        if (!diskTriangulation(loc, loop.length)) { loc = []; for (let i = 1; i + 1 < loop.length; i++) loc.push(0, i, i + 1); }
+        // Orient by topology, not area: these leftover loops are often slivers of zero width, where any
+        // area test is meaningless. Triangles must run round the loop in its own order.
+        const L = loop.length;
+        let fwdE = 0, revE = 0;
+        for (let i = 0; i < loc.length; i += 3) for (let k = 0; k < 3; k++) {
+          const a = loc[i + k], b = loc[i + (k + 1) % 3];
+          if (b === (a + 1) % L) fwdE++; else if (a === (b + 1) % L) revE++;
+        }
+        const rev = revE > fwdE;
+        for (let i = 0; i < loc.length; i += 3) {
+          const a = loc[i], b = loc[i + 1], c = loc[i + 2];
+          if (rev) tris.push(loop[a], loop[c], loop[b]); else tris.push(loop[a], loop[b], loop[c]);
+          added++;
+        }
+      }
+    }
+    return added;
+  }
+
   /* ---------- frames and planes ---------- */
   function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
   function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
@@ -689,23 +809,33 @@ const KMCore = (() => {
 
   /* ---------- plane sections ---------- */
   // Returns closed loops of the mesh cross-section. Each loop lists section-point ids and the triangle each segment came from.
-  function computeSection(P, I, F, scale) {
+  function computeSection(P, I, F, scale) { return buildSection(P, I, F, scale, 0); }
+  function buildSection(P, I, F, scale, base) {
     const nv = P.length / 3, nt = I.length / 3;
     const nx = F.n[0], ny = F.n[1], nz = F.n[2];
-    const tol = (scale || 1) * 1e-7;
+    // Keep every vertex well clear of the plane. A vertex almost on it makes a cluster of section points closer
+    // together than the exported float32 positions can tell apart (seen on real sculpts at 0.00001 mm), so move
+    // the plane to the middle of the widest gap among nearby vertices. The move is at most W, a few microns.
+    const tol = (scale || 1) * 1e-6, W = (scale || 1) * 2e-5;
     const dist = new Float64Array(nv);
-    let shift = 0;
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const ox = F.o[0] + nx * shift, oy = F.o[1] + ny * shift, oz = F.o[2] + nz * shift;
-      let bad = false;
-      for (let i = 0, j = 0; i < nv; i++, j += 3) {
-        const d = (P[j] - ox) * nx + (P[j + 1] - oy) * ny + (P[j + 2] - oz) * nz;
-        dist[i] = d;
-        if (d > -tol && d < tol) bad = true;
-      }
-      if (!bad) break;
-      shift = (scale || 1) * 3.1e-6 * (attempt + 1) * (attempt % 2 ? -1 : 1);
+    const near = [];
+    for (let i = 0, j = 0; i < nv; i++, j += 3) {
+      const d = (P[j] - F.o[0]) * nx + (P[j + 1] - F.o[1]) * ny + (P[j + 2] - F.o[2]) * nz - base;
+      dist[i] = d;
+      if (d > -W && d < W) near.push(d);
     }
+    let shift = 0;
+    if (near.some(d => d > -tol && d < tol)) {
+      near.push(-W, W);
+      near.sort((a, b) => a - b);
+      let best = -1;
+      for (let k = 0; k + 1 < near.length; k++) {
+        const gap = near[k + 1] - near[k];
+        if (gap > best) { best = gap; shift = (near[k] + near[k + 1]) / 2; }
+      }
+      for (let i = 0; i < nv; i++) dist[i] -= shift;
+    }
+    shift += base;
     // count crossing triangles
     let crossing = 0;
     for (let t = 0; t < nt; t++) {
@@ -769,6 +899,67 @@ const KMCore = (() => {
     }
     return res;
   }
+
+  // Indices of an outline's points with self-crossing tangles removed: at each crossing, drop the shorter arc
+  // between the two crossing edges. Real sculpts have microscopic folds that make cut outlines cross themselves,
+  // and earcut can return overlapping triangles for those.
+  function untangledRing(xy) {
+    let keep = [];
+    for (let i = 0; i < xy.length / 2; i++) keep.push(i);
+    for (let iter = 0; iter < 64 && keep.length > 3; iter++) {
+      const sub = new Float64Array(keep.length * 2);
+      keep.forEach((k, i) => { sub[2 * i] = xy[2 * k]; sub[2 * i + 1] = xy[2 * k + 1]; });
+      const hits = findSelfCrossings(sub);
+      if (!hits.length) break;
+      const [k, m] = hits[0], n = keep.length;
+      const inner = m - k; // points k+1..m lie between the two crossing edges on one side
+      let drop;
+      if (inner <= n - inner) { drop = new Set(); for (let i = k + 1; i <= m; i++) drop.add(i); }
+      else { drop = new Set(); for (let i = m + 1; i < n; i++) drop.add(i); for (let i = 0; i <= k; i++) drop.add(i); }
+      if (n - drop.size < 3) break;
+      keep = keep.filter((_, i) => !drop.has(i));
+    }
+    return keep;
+  }
+  // Proper crossings between non-adjacent edges of one outline, found with a uniform grid.
+  function findSelfCrossings(xy) {
+    const n = xy.length / 2;
+    if (n < 4) return [];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, len = 0;
+    for (let i = 0; i < n; i++) {
+      const x = xy[2 * i], y = xy[2 * i + 1], j = (i + 1) % n;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      len += Math.hypot(xy[2 * j] - x, xy[2 * j + 1] - y);
+    }
+    const cell = Math.max(len / n * 2, Math.max(x1 - x0, y1 - y0) / 512, 1e-9);
+    const cols = Math.floor((x1 - x0) / cell) + 1;
+    const grid = new Map();
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ax = Math.floor((Math.min(xy[2 * i], xy[2 * j]) - x0) / cell), bx = Math.floor((Math.max(xy[2 * i], xy[2 * j]) - x0) / cell);
+      const ay = Math.floor((Math.min(xy[2 * i + 1], xy[2 * j + 1]) - y0) / cell), by = Math.floor((Math.max(xy[2 * i + 1], xy[2 * j + 1]) - y0) / cell);
+      for (let cx = ax; cx <= bx; cx++) for (let cy = ay; cy <= by; cy++) { const key = cy * cols + cx; let l = grid.get(key); if (!l) grid.set(key, l = []); l.push(i); }
+    }
+    const seen = new Set(), hits = [];
+    for (const list of grid.values()) {
+      for (let p = 0; p < list.length; p++) for (let q = p + 1; q < list.length; q++) {
+        let k = list[p], m = list[q];
+        if (k > m) { const s = k; k = m; m = s; }
+        if (m === k + 1 || (k === 0 && m === n - 1)) continue;
+        const key = k * n + m;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const ax = xy[2 * k], ay = xy[2 * k + 1], bx = xy[2 * ((k + 1) % n)], by = xy[2 * ((k + 1) % n) + 1];
+        const cx = xy[2 * m], cy = xy[2 * m + 1], dx = xy[2 * ((m + 1) % n)], dy = xy[2 * ((m + 1) % n) + 1];
+        const den = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx);
+        if (den === 0) continue;
+        const tk = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / den;
+        const tm = ((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / den;
+        if (tk > 1e-9 && tk < 1 - 1e-9 && tm > 1e-9 && tm < 1 - 1e-9) hits.push([k, m, tk, tm]);
+      }
+    }
+    return hits;
+  }
   function makeLoop(ids, segs, xy) {
     let a = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     const n = xy.length / 2;
@@ -820,13 +1011,30 @@ const KMCore = (() => {
       }
       depth[i] = count; parent[i] = best;
     }
+    // A loop inside an area's outline is a hole when it runs the opposite way. One running the same way is a
+    // separate solid overlapping the first (real sculpts have these, such as a pin modelled inside a leg):
+    // it becomes its own area, marked nested, and the outer area treats it as an obstacle for keys.
+    const order = [...Array(L).keys()].sort((a, b) => depth[a] - depth[b]);
+    let dom = 0; // solid outlines run the same way as the largest loop
+    for (let i = 0; i < L; i++) if (Math.abs(loops[i].area) > Math.abs(dom)) dom = loops[i].area;
+    const isOuter = new Uint8Array(L);
     const regions = [];
     const regionOfOuter = new Map();
-    for (let i = 0; i < L; i++) if (depth[i] % 2 === 0) { regionOfOuter.set(i, regions.length); regions.push({ outer: i, holes: [], area: Math.abs(loops[i].area), bbox: loops[i].bbox }); }
-    for (let i = 0; i < L; i++) {
-      if (depth[i] % 2 === 1 && parent[i] >= 0 && regionOfOuter.has(parent[i])) {
-        const r = regions[regionOfOuter.get(parent[i])];
+    for (const i of order) {
+      const pa = parent[i];
+      const hole = pa >= 0 && isOuter[pa] && Math.sign(loops[i].area) !== Math.sign(loops[pa].area);
+      if (hole) {
+        const r = regions[regionOfOuter.get(pa)];
         r.holes.push(i); r.area -= Math.abs(loops[i].area);
+      } else {
+        isOuter[i] = 1;
+        regionOfOuter.set(i, regions.length);
+        const nested = pa >= 0 && isOuter[pa];
+        // a lone loop running backwards is a hole whose containing outline couldn't be found (a speck of a void
+        // touching the surface): it is still capped, facing the other way, but never gets keys
+        const inverted = pa < 0 && Math.sign(loops[i].area) !== Math.sign(dom);
+        regions.push({ outer: i, holes: [], islands: [], nested, inverted, area: Math.abs(loops[i].area), bbox: loops[i].bbox });
+        if (nested) regions[regionOfOuter.get(pa)].islands.push(i);
       }
     }
     regions.sort((a, b) => b.area - a.area);
@@ -837,13 +1045,17 @@ const KMCore = (() => {
     for (const h of r.holes) if (inBox(loops[h].bbox, x, y) && pointInRing(loops[h].xy, x, y)) return false;
     return true;
   }
-  function regionAt(sec, x, y) {
-    for (let i = 0; i < sec.regions.length; i++) if (regionContains(sec.loops, sec.regions[i], x, y)) return i;
-    return -1;
+  function regionAt(sec, x, y) { // the innermost area containing the point (an overlapping inner solid wins)
+    let best = -1;
+    for (let i = 0; i < sec.regions.length; i++) {
+      if ((best < 0 || sec.regions[i].area < sec.regions[best].area) && regionContains(sec.loops, sec.regions[i], x, y)) best = i;
+    }
+    return best;
   }
   function regionClearance(loops, r, x, y) {
     let d = distToRing(loops[r.outer].xy, x, y);
     for (const h of r.holes) d = Math.min(d, distToRing(loops[h].xy, x, y));
+    if (r.islands) for (const h of r.islands) d = Math.min(d, distToRing(loops[h].xy, x, y));
     return d;
   }
   // Grid of points inside one area, each with its distance to the area's edge. Computed once per analysis
@@ -861,10 +1073,10 @@ const KMCore = (() => {
       for (let i = 0; i < n; i += step) o.push(xy[2 * i], xy[2 * i + 1]);
       return o;
     };
-    const rings = [reg.outer, ...reg.holes].map(li => thin(sec.loops[li].xy));
+    const rings = [reg.outer, ...reg.holes, ...(reg.islands || [])].map(li => thin(sec.loops[li].xy));
     const out = [];
     for (let x = x0 + h / 2; x < x1; x += h) for (let y = y0 + h / 2; y < y1; y += h) {
-      if (!regionContains(sec.loops, reg, x, y)) continue;
+      if (!regionContains(sec.loops, reg, x, y) || (reg.islands && reg.islands.length && regionAt(sec, x, y) !== ri)) continue;
       let clear = Infinity;
       for (const r of rings) clear = Math.min(clear, distToRing(r, x, y));
       out.push({ x, y, clear });
@@ -1048,6 +1260,8 @@ const KMCore = (() => {
     const ri = regionAt(an.base, x, y);
     if (ri < 0) return { ok: false, reason: 'Not on the cut face', region: -1, score: -Infinity };
     if (skip && skip.has(ri)) return { ok: false, reason: 'In an area you chose not to cut', region: ri, score: -Infinity };
+    if (an.base.regions[ri].inverted) return { ok: false, reason: 'Not on the cut face', region: -1, score: -Infinity };
+    if (an.base.regions[ri].nested) return { ok: false, reason: 'On a part of the model that overlaps another', region: ri, score: -Infinity };
     let fp = fps && fps[ri];
     if (!fp) { fp = footprintOf(spec, keyAngle(an.base, ri, cfg)); if (fps) fps[ri] = fp; }
     let score = footprintClear(an.base, an.base.regions[ri], x, y, fp, m);
@@ -1082,7 +1296,7 @@ const KMCore = (() => {
     const R = spec.outer, m = cfg.margin;
     an.base.regions.forEach((reg, ri) => {
       if (skip && skip.has(ri)) return;
-      if (reg.area < Math.PI * (R + m) * (R + m)) return;
+      if (reg.nested || reg.inverted || reg.area < Math.PI * (R + m) * (R + m)) return;
       const [x0, y0, x1, y1] = reg.bbox;
       let h = Math.max(R * 0.3, Math.sqrt(reg.area / 1400));
       while (((x1 - x0) / h) * ((y1 - y0) / h) > 5000) h *= 1.25;
@@ -1115,7 +1329,22 @@ const KMCore = (() => {
   }
 
   /* ---------- the cut ---------- */
+  // Every exported part must be a closed solid. Real sculpts carry microscopic defects (self-crossing folds,
+  // near-duplicate points) that can still defeat the cap at one exact plane position, so check the result and,
+  // if any part is open, redo the cut a hundredth of a millimetre or so either side. The keys keep their place.
   function cutMesh(P, I, F, opts) {
+    const scale = opts.scale || 1, step = scale * 5e-5;
+    for (const k of [0, 1, -1, 2, -2, 4, -4]) {
+      const Fk = k ? shiftFrame(F, k * step) : F;
+      const res = cutOnce(P, I, Fk, opts);
+      if (res.parts.every(q => edgeReport(q.indices).closed) && res.pins.every(q => edgeReport(q.indices).closed)) {
+        res.retries = Math.abs(k) && [0, 1, -1, 2, -2, 4, -4].indexOf(k);
+        return res;
+      }
+    }
+    throw new Error('Keymaster couldn’t make sealed pieces at this exact spot because the model has a tiny flaw here. Move the cut slightly and try again.');
+  }
+  function cutOnce(P, I, F, opts) {
     const scale = opts.scale || 1;
     const cfg = opts.cfg || { type: 'none' };
     const skip = opts.skip || new Set();
@@ -1179,15 +1408,21 @@ const KMCore = (() => {
       if (skip.has(ri)) return;
       const myKeys = keys.filter(k => k.region === ri);
       for (const side of [-1, +1]) { // -1 = below the plane (cap faces +n), +1 = above (cap faces -n)
-        const flat = [], ids = [], holes = [], rings = [];
-        const pushRing = (ringIds, xy) => {
-          if (rings.length) holes.push(ids.length);
+        const flat = [], ids = [], holes = [], rings = [], ringXY = new Map();
+        const pushRing = (ringIds, xy, area) => {
           rings.push(ringIds);
-          for (let k = 0; k < ringIds.length; k++) { ids.push(ringIds[k]); flat.push(xy[2 * k], xy[2 * k + 1]); }
+          for (let k = 0; k < ringIds.length; k++) ringXY.set(ringIds[k], [xy[2 * k], xy[2 * k + 1]]);
+          // a microscopic hole (a speck of void, often among tangled folds) is left out of earcut, which can't
+          // place it reliably; patchCap closes it exactly from its ring
+          if (rings.length > 1 && area !== undefined && Math.abs(area) < 1e-3) return;
+          if (rings.length > 1) holes.push(ids.length);
+          // earcut gets the outline with any tiny self-crossing tangles snipped out; fixTJunctions and patchCap
+          // then stitch the snipped points back in, so the cap still meets every wall edge
+          for (const k of untangledRing(xy)) { ids.push(ringIds[k]); flat.push(xy[2 * k], xy[2 * k + 1]); }
         };
         const off = nv + (side === -1 ? 0 : np);
         pushRing(loops[reg.outer].ids.map(q => off + q), loops[reg.outer].xy);
-        for (const h of reg.holes) pushRing(loops[h].ids.map(q => off + q), loops[h].xy);
+        for (const h of reg.holes) pushRing(loops[h].ids.map(q => off + q), loops[h].xy, loops[h].area);
         const tubes = [];
         for (const k of myKeys) {
           let role, grow, depth, dir, tipR = spec.r;
@@ -1210,7 +1445,7 @@ const KMCore = (() => {
         const loc = earcut(flat, holes);
         let sum = 0;
         for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
-        const wantCCW = side === -1; // u x v = n, so CCW faces +n
+        const wantCCW = (side === -1) !== !!reg.inverted; // u x v = n, so CCW faces +n; a backwards speck faces the other way
         const flip = wantCCW ? sum < 0 : sum > 0;
         const capTris = [];
         for (let i = 0; i < loc.length; i += 3) {
@@ -1218,9 +1453,9 @@ const KMCore = (() => {
           else capTris.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]);
         }
         for (const r of rings) fixTJunctions(capTris, r);
-        const localOf = new Map();
-        ids.forEach((id, li) => localOf.set(id, li));
-        splitThroughPoints(capTris, rings, (id) => { const li = localOf.get(id); return [flat[2 * li], flat[2 * li + 1]]; });
+        const xyOf = (id) => ringXY.get(id);
+        splitThroughPoints(capTris, rings, xyOf);
+        patchCap(capTris, rings, xyOf, wantCCW);
         for (let i = 0; i < capTris.length; i += 3) T.push3(capTris[i], capTris[i + 1], capTris[i + 2]);
         for (const tb of tubes) {
           const z = tb.dir * tb.depth;
