@@ -530,6 +530,50 @@ console.log('cut suggestions');
   check('a single solid has no separate pieces', K.separateShells(uvSphere(10, 24, 16).positions, uvSphere(10, 24, 16).indices).length === 0);
 }
 
+console.log('surface regions');
+{
+  const lathe = (radius, len, seg = 48, rings = 160) => {
+    const pos = [0, 0, 0];
+    for (let i = 1; i < rings; i++) { const z = (i / rings) * len, r = radius(z); for (let j = 0; j < seg; j++) { const a = (j / seg) * 2 * Math.PI; pos.push(Math.cos(a) * r, Math.sin(a) * r, z); } }
+    pos.push(0, 0, len);
+    const S = pos.length / 3 - 1, idx = [];
+    for (let j = 0; j < seg; j++) idx.push(0, 1 + (j + 1) % seg, 1 + j);
+    for (let i = 0; i < rings - 2; i++) for (let j = 0; j < seg; j++) { const p0 = 1 + i * seg + j, p1 = 1 + i * seg + (j + 1) % seg; idx.push(p0, p1, p1 + seg, p0, p1 + seg, p0 + seg); }
+    const base = 1 + (rings - 2) * seg;
+    for (let j = 0; j < seg; j++) idx.push(S, base + j, base + (j + 1) % seg);
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  };
+  const sph = K.prepareMesh(uvSphere(20, 64, 40));
+  check('a smooth sphere is one region', K.segmentSurface(sph.positions, sph.indices).count === 1);
+  // an arm in a sleeve: the sleeve ends in a sharp step down to the arm, which is where a curved cut should go
+  const arm = lathe(z => (z < 2 ? Math.max(0.3, z * 4) : z < 40 ? 8 : z < 41 ? 8 - (z - 40) * 2.5 : z < 78 ? 5.5 : Math.max(0.3, 5.5 * Math.sqrt(1 - Math.pow((z - 78) / 2, 2)))), 80);
+  check('sleeve test shape closed', arm.report.closed, arm.report);
+  const seg = K.segmentSurface(arm.positions, arm.indices, { angle: 35 });
+  const zOf = (t) => (arm.positions[3 * arm.indices[3 * t] + 2] + arm.positions[3 * arm.indices[3 * t + 1] + 2] + arm.positions[3 * arm.indices[3 * t + 2] + 2]) / 3;
+  const groupAt = (z) => { for (let t = 0; t < arm.indices.length / 3; t++) if (Math.abs(zOf(t) - z) < 0.3) return seg.groupOf[t]; return -1; };
+  check('the sleeve and the arm are separate regions', groupAt(20) >= 0 && groupAt(60) >= 0 && groupAt(20) !== groupAt(60), [groupAt(20), groupAt(60), seg.count]);
+  let hem = Infinity; const b = seg.borders;
+  for (let i = 0; i < b.length; i += 4) for (const v of [b[i + 2], b[i + 3]]) { const z = arm.positions[3 * v + 2]; if (z > 30 && z < 50) hem = Math.min(hem, Math.abs(z - 40)); }
+  check('a border runs round the sleeve hem', hem < 1.2, hem);
+  // a stepped tower splits into its flat faces
+  const pos = [], idx = [];
+  const quad = (a, bq, c, d) => { const o = pos.length / 3; pos.push(...a, ...bq, ...c, ...d); idx.push(o, o + 1, o + 2, o, o + 2, o + 3); };
+  const ring = (h, z) => [[-h, -h, z], [h, -h, z], [h, h, z], [-h, h, z]];
+  const L0 = ring(10, 0), L1 = ring(10, 10), U0 = ring(9, 10), U1 = ring(9, 20);
+  for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; quad(L0[i], L0[j], L1[j], L1[i]); quad(U0[i], U0[j], U1[j], U1[i]); quad(L1[i], L1[j], U0[j], U0[i]); }
+  quad(L0[3], L0[2], L0[1], L0[0]); quad(U1[0], U1[1], U1[2], U1[3]);
+  const tower = K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  check('a stepped tower splits into its 11 flat faces', K.segmentSurface(tower.positions, tower.indices, { minFrac: 0 }).count === 11, K.segmentSurface(tower.positions, tower.indices, { minFrac: 0 }).count);
+  // small specks melt into their neighbour: a sphere with a few sharp little dents is still one region
+  const dent = K.prepareMesh(uvSphere(20, 64, 40));
+  for (const v of [100, 900, 1700]) for (let k = 0; k < 3; k++) dent.positions[3 * v + k] *= 0.93;
+  const sd = K.segmentSurface(dent.positions, dent.indices, { angle: 10 });
+  check('tiny dents melt into the region around them', sd.count === 1, sd.count);
+  check('a gentler threshold finds more regions', K.segmentSurface(arm.positions, arm.indices, { angle: 15 }).count >= seg.count);
+  const lines = K.regionBorderLines(arm.positions, arm.indices, seg, 0.01);
+  check('border lines: one segment per border edge', lines.length === (seg.borders.length / 4) * 6);
+}
+
 console.log('separate shells stay with their piece');
 {
   const body = uvSphere(20, 48, 32), eye = uvSphere(2, 16, 12, [0, 0, 12]);

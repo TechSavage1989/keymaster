@@ -121,6 +121,7 @@
     Scene: class extends Object3D {},
     Group: class extends Object3D {},
     LineLoop: class extends Mesh {},
+    LineSegments: class extends Mesh {},
     Line: class extends Mesh {},
     SphereGeometry: class extends BufferGeometry {},
     HemisphereLight: class extends Object3D {},

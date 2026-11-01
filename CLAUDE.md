@@ -50,6 +50,10 @@ Key outlines come from `keyProfile(shape, r, d, angle, res)`. A socket is the pe
 
 `neckSweep` slices the part along `sweepDirections` (13 fixed plus the principal axes), follows each area from slice to slice, and flags a cross-section that pinches below 60% of the wider ones on both sides. `refineNecks` merges these, tilts each plane until it sits square across the neck, and keeps one spot per even neck. `creaseEdges` and `creasePlanes` find planes where inward creases cover at least a quarter of the cut outline. `separateShells` finds solids that don't touch (inner shells stay with their host). The app runs the search a direction at a time between frames, caches results per part, and letters the suggestions (areas are numbered). A narrow-point suggestion sets `state.cut.focus`, and the next analysis leaves every other area joined.
 
+## Surface regions
+
+`segmentSurface` joins neighbouring triangles whose normals differ by less than `angle` (default 35°), like ZBrush polygroups by normals, then melts regions under `minFrac` of the area (0.3%) into the neighbour they share the longest border with. It returns `groupOf` per triangle, region areas, and `borders` (pairs of triangles and their shared edge). `regionBorderLines` turns the borders into line segments lifted a hair off the surface. In the app, the view-tools button colours every part by region (`applyRegions`), with the threshold slider in a small panel; the cut preview steps aside while regions show, and cutting turns them off. Hard-surface models split well; smooth organic sculpts have few sharp turns, so they need a second method (by concave folds and thickness changes) before curved cuts can find sleeves on them.
+
 ## Interface conventions
 
 - Copy: sentence case, plain verbs, say what a button does ("Cut part", "Export parts"). Errors say what happened and how to fix it, without apologizing.
