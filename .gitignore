@@ -1,11 +1,5 @@
+tests/test.html
+tests/output/
 __pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-build/
-dist/
-*.egg-info/
-*.spec
-*.log
-.vscode/
-.idea/
+node_modules/
+.DS_Store
