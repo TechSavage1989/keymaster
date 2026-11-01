@@ -56,8 +56,9 @@ Key outlines come from `keyProfile(shape, r, d, angle, res)`. A socket is the pe
 - Yellow (`--cut`, `#F2B705`) means cutting: the hatched section face and the cut button. Do not use it for anything else.
 - Font: Barlow with tabular numbers. Colors come from CSS variables with light and dark values.
 - Each part gets a muted filament-like color from `PALETTE`. Pins are grey.
-- Keyboard: Enter cut, Esc done, W slide, E tilt, X/Y/Z align, F frame, Delete remove key, Ctrl+Z / Ctrl+Shift+Z.
-- Cut plane controls: two custom rings tilt it in either mode (Shift snaps to 5°). Slide mode adds the TransformControls arrow; Tilt mode hides it and lets you drag anywhere on the plane to tip it like the edge of a tray (Shift for fine control; clicks there don't add keys). The owner asked to keep both ways of tilting. The panel's X/Y/Z angles are turns about the world axes applied X, then Y, then Z, starting from a level cut (`planeAngles` / `setPlaneAngles`).
+- Keyboard: Enter cut, Esc done, X/Y/Z align, F frame, Delete remove key, Ctrl+Z / Ctrl+Shift+Z.
+- Cut plane controls, all available at once with no modes (the owner's request): the TransformControls arrow slides it, the two rings tilt it (Shift snaps to 5°), and a drag anywhere on the plane tips it like the edge of a tray (Shift for fine control). A plain click on the cut face still adds a key, because a plane drag only starts after the pointer moves 4 px. Dragging off the plane orbits, and Alt-drag orbits from anywhere. The X/Y/Z angles are turns about the world axes applied X, then Y, then Z, starting from a level cut (`planeAngles` / `setPlaneAngles`).
+- **Every setting must be visible without scrolling** on screens from 1280×800 up (the owner's request; `ui_test.py` checks 1280×800, 1366×768, 1440×900 and 1920×1080). The cut plane controls and the area chips live in the toolbar along the bottom of the view (`planeBarHTML`), suggested cuts in the left panel, and key settings in the right panel, with labels beside their boxes. Key status and warnings sit in the pinned footer above **Cut part**, so they show however the panel is scrolled. When adding a setting, make room for it; don't let the panel grow past the screen.
 
 ## Working style
 

@@ -5,7 +5,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 ## Done in 1.0
 
 - Single-file browser app with live stencil-capped cut preview.
-- Cut plane controls: an arrow to slide, rings to tilt (Shift snaps to 5°), Tilt mode to tip the plane by dragging it, and typed position and X/Y/Z angles. Align to X/Y/Z or the view, flip, straighten.
+- Cut plane controls with no modes: an arrow to slide, rings or a drag on the plane to tilt, and a toolbar under the view with typed position, X/Y/Z angles, align, flip, straighten and area chips. Every setting fits on one screen without scrolling (1280×800 and up), and warnings sit by the Cut button.
 - Unlimited cuts with a parts list, undo and redo, rename, hide, exploded view.
 - Pegs (round, square, tapered), dowels with printable pins, magnet pockets. Auto-placement, manual add, drag and remove.
 - Seven key shapes: round, square, hexagon, cross, oval, slot and a one-way D-shape, with an even fit gap on every side. Shaped keys line up with each area's long side, with an adjustable turn.
