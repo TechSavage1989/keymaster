@@ -1269,9 +1269,10 @@ const KMCore = (() => {
   // Settings a key may change for itself; the key type and the side pegs go on stay the same for the whole cut.
   const KEY_OVERRIDES = ['shape', 'diameter', 'length', 'clearance', 'taper', 'taperSocket', 'turn', 'align'];
   function keyCfg(cfg, key) {
-    if (!key || !key.o) return cfg;
+    if (!key || (!key.o && !key.a)) return cfg;
     const out = { ...cfg };
-    for (const f of KEY_OVERRIDES) if (key.o[f] !== undefined) out[f] = key.o[f];
+    if (key.a) { out.diameter = key.a.diameter; out.length = key.a.length; } // the size picked to fit its area
+    if (key.o) for (const f of KEY_OVERRIDES) if (key.o[f] !== undefined) out[f] = key.o[f]; // what the owner set
     return out;
   }
   // The depth sections a key's own sockets need. They match the analysis when its depths do; otherwise they are
@@ -1311,9 +1312,9 @@ const KMCore = (() => {
   }
   function evaluateKeys(an, keys, cfg, skip) {
     const spec = keyGeometrySpec(cfg), fps = [];
-    const specs = keys.map(k => (k.o ? keyGeometrySpec(keyCfg(cfg, k)) : spec));
+    const specs = keys.map(k => (k.o || k.a ? keyGeometrySpec(keyCfg(cfg, k)) : spec));
     const res = keys.map((k, i) => {
-      if (!k.o) return keyScore(an, cfg, k.x, k.y, skip, spec, fps);
+      if (!k.o && !k.a) return keyScore(an, cfg, k.x, k.y, skip, spec, fps);
       const kc = keyCfg(cfg, k);
       return keyScore(an, kc, k.x, k.y, skip, specs[i], null, false, depthFor(an, kc));
     });
@@ -1324,10 +1325,50 @@ const KMCore = (() => {
     }
     return res;
   }
+  /* Keys sized to fit each area, within what prints reliably. Tries sizes from the largest allowed down to the
+     smallest, and keeps the first that fits. Pegs are 1.2 times as long as they are wide; dowel pins 2.5 times;
+     magnets come from standard disc sizes. */
+  const PRINTERS = { resin: { min: 1, gap: 0.1, wall: 0.8 }, fdm: { min: 2.5, gap: 0.2, wall: 1.2 } };
+  const KEY_SIZES = [12, 10, 8, 7, 6, 5, 4.5, 4, 3.5, 3, 2.5, 2, 1.6, 1.2, 1];
+  const MAGNET_SIZES = [[10, 3], [8, 3], [6, 3], [5, 2], [4, 2], [3, 1.5], [3, 1], [2, 1]]; // diameter × thickness, mm
+  function sizeLadder(cfg) {
+    const max = cfg.sizeMax || cfg.diameter, min = cfg.sizeMin || PRINTERS[cfg.printer === 'resin' ? 'resin' : 'fdm'].min;
+    if (cfg.type === 'magnet') return MAGNET_SIZES.filter(([d]) => d <= max + 1e-9 && d >= Math.min(min, 2) - 1e-9);
+    const ds = [max, ...KEY_SIZES.filter(d => d < max - 1e-9 && d >= min - 1e-9)];
+    const len = (d) => cfg.type === 'dowel' ? Math.max(2, Math.round(d * 2.5 * 2) / 2) : Math.max(1, Math.round(d * 1.2 * 2) / 2);
+    return ds.map(d => [d, len(d)]);
+  }
+  function autoFitKeys(an, cfg, perRegion, skip) {
+    const keys = [], empty = [];
+    if (cfg.type === 'none' || an.base.error) { keys.empty = empty; return keys; }
+    const ladder = sizeLadder(cfg);
+    an.base.regions.forEach((reg, ri) => {
+      if ((skip && skip.has(ri)) || reg.nested || reg.inverted) return;
+      // the widest key that could fit (twice the clearance at the area's roomiest spot, less wall and gap), and no
+      // more than half the area's width, so the walls round it stay sturdy; magnets hold better the bigger they are
+      let room = 0;
+      for (const s of regionSamples(an.base, ri)) room = Math.max(room, s.clear);
+      const fits = 2 * (room - cfg.margin - cfg.clearance);
+      const bound = cfg.type === 'magnet' ? fits : Math.min(fits, room);
+      const others = new Set(skip || []);
+      an.base.regions.forEach((_, j) => { if (j !== ri) others.add(j); });
+      let reason = 'Area too small';
+      for (const [d, L] of ladder) {
+        if (d > bound * 1.05 && d !== ladder[ladder.length - 1][0]) continue;
+        const kc = { ...cfg, diameter: d, length: L };
+        const ks = autoPlaceKeys(an, kc, perRegion, others);
+        if (ks.length) { for (const k of ks) keys.push({ x: k.x, y: k.y, a: { diameter: d, length: L } }); return; }
+        if (ks.empty && ks.empty[0]) reason = ks.empty[0].reason;
+      }
+      empty.push({ region: ri, reason, smallest: true });
+    });
+    keys.empty = empty;
+    return keys;
+  }
   function autoPlaceKeys(an, cfg, perRegion, skip) {
     const keys = [];
     if (cfg.type === 'none' || an.base.error) return keys;
-    const spec = keyGeometrySpec(cfg), fps = [];
+    const spec = keyGeometrySpec(cfg), fps = [], depth = depthFor(an, cfg); // checked at the depths this size needs
     const R = spec.outer, m = cfg.margin;
     const empty = []; // areas left without a key, with the reason, so the interface can say why
     an.base.regions.forEach((reg, ri) => {
@@ -1341,7 +1382,7 @@ const KMCore = (() => {
       const cands = [], tried = [];
       const test = (x, y, exact) => {
         if (!regionContains(an.base.loops, reg, x, y)) return;
-        const s = keyScore(an, cfg, x, y, skip, spec, fps, exact);
+        const s = keyScore(an, cfg, x, y, skip, spec, fps, exact, depth);
         if (s.ok && s.region === ri) cands.push({ x, y, score: s.score });
         else if (s.region === ri && isFinite(s.slack)) tried.push({ x, y, score: s.slack, reason: s.reason });
       };
@@ -2019,7 +2060,7 @@ const KMCore = (() => {
     const spec = keyGeometrySpec(cfg);
     const keys = (cfg.type === 'none' ? [] : (opts.keys || [])).map(k => ({ ...k, region: -1 }));
     const tmpSec = { loops, regions };
-    for (const k of keys) { k.region = regionAt(tmpSec, k.x, k.y); k.cfg = keyCfg(cfg, k); k.spec = k.o ? keyGeometrySpec(k.cfg) : spec; k.angle = keyAngle(tmpSec, k.region, k.cfg); }
+    for (const k of keys) { k.region = regionAt(tmpSec, k.x, k.y); k.cfg = keyCfg(cfg, k); k.spec = k.o || k.a ? keyGeometrySpec(k.cfg) : spec; k.angle = keyAngle(tmpSec, k.region, k.cfg); }
     const pins = [];
 
     regions.forEach((reg, ri) => {
@@ -2338,7 +2379,7 @@ const KMCore = (() => {
   return {
     parseSTL, parseOBJ, prepareMesh, fillHoles, edgeReport, volume, bounds, diag,
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
-    KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES,
+    KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
     segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,

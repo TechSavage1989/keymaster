@@ -19,6 +19,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Individually configurable keys: click a key to give it its own shape, size, length, gap, taper and turn, checked and cut at its own size.
 - Curved cuts along a border: with surface regions showing, click a border line that goes all the way round and cut along it, with sealed curved faces.
 - Surface regions: colour a model by where its surface turns sharply, like ZBrush polygroups, with an adjustable threshold.
+- Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 
 ## Next

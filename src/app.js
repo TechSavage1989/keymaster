@@ -26,7 +26,7 @@
     wire: false,
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, pegSide: 'below', perArea: 2, align: true, turn: 0 },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0 },
     cut: { keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, angle: 35 };
@@ -435,7 +435,12 @@
   tc.addEventListener('objectChange', onPlaneMoved);
 
   /* ---------------- analysis, keys ---------------- */
-  function coreCfg() { return { ...state.cfg }; }
+  function coreCfg() { return { ...state.cfg, sizeMax: state.cfg.diameter }; }
+  // Keys for the current cut: sized to fit each area (the default), or all at the size set in the panel.
+  function placeKeys(an) {
+    if (!an || an.base.error) return [];
+    return state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, coreCfg(), state.cfg.perArea, state.cut.skip) : K.autoFitKeys(an, coreCfg(), state.cfg.perArea, state.cut.skip);
+  }
   let analysisTimer = 0;
   function scheduleAnalysis(delay = 140) {
     state.cut.stale = true;
@@ -462,7 +467,7 @@
       }
       state.cut.focus = null;
     }
-    if (state.cut.auto) { state.cut.keys = an.base.error ? [] : K.autoPlaceKeys(an, coreCfg(), state.cfg.perArea, state.cut.skip); state.cut.why = whyMap(state.cut.keys); }
+    if (state.cut.auto) { state.cut.keys = placeKeys(an); state.cut.why = whyMap(state.cut.keys); }
     state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
     evaluateKeys();
     renderRegions();
@@ -550,6 +555,10 @@
     const reasons = [...new Set(list.map(i => said[why.get(i)]).filter(Boolean))];
     const because = reasons.length === 1 ? `: ${reasons[0]}` : '';
     const head = everywhere ? 'No room for keys on this cut' : `No room for a key in ${names}`;
+    if (state.cfg.sizeMode !== 'set' && state.cfg.type !== 'magnet') {
+      const tip = state.cfg.printer === 'resin' ? 'Try a smaller Smallest size or a thinner wall' : 'For smaller keys, choose Resin under Printer (click Done), or a smaller Smallest size';
+      return `${head}${because}, even at ${fmt(state.cfg.sizeMin)} mm. ${tip}.`;
+    }
     return `${head}${because}. Try smaller keys or a thinner wall, or click the cut face to place one.`;
   }
   function updateLabelPoints() {
@@ -598,7 +607,7 @@
   function toggleArea(i) {
     if (!shownAreas().includes(i)) return;
     if (state.cut.skip.has(i)) state.cut.skip.delete(i); else state.cut.skip.add(i);
-    if (state.cut.auto) { state.cut.keys = K.autoPlaceKeys(state.cut.analysis, coreCfg(), state.cfg.perArea, state.cut.skip); state.cut.why = whyMap(state.cut.keys); }
+    if (state.cut.auto) { state.cut.keys = placeKeys(state.cut.analysis); state.cut.why = whyMap(state.cut.keys); }
     state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
     evaluateKeys(); renderRegions(); renderKeyMarkers(); renderInspector(); renderAreaTags();
   }
@@ -1458,13 +1467,13 @@
   }
   const SHAPE_NAMES = { round: 'Round', square: 'Square', hexagon: 'Hexagon', cross: 'Cross', oval: 'Oval', slot: 'Slot', dshape: 'D-shape' };
   const SHAPE_HELP = {
-    round: 'Easiest to fit. Use two or more so the pieces can’t turn.',
-    square: 'Stops the pieces turning, even with a single key.',
-    hexagon: 'Stops the pieces turning, even with a single key.',
-    cross: 'Grips firmly and stops the pieces turning, even with a single key.',
-    oval: 'For narrow areas. Half again as long as it is wide, and stops the pieces turning.',
-    slot: 'For long, narrow areas. Twice as long as it is wide, and stops the pieces turning.',
-    dshape: 'Fits only one way round, so a piece can’t be glued on backwards.',
+    round: 'Easiest to fit. Use two so pieces can’t turn.',
+    square: 'Stops pieces turning, even on its own.',
+    hexagon: 'Stops pieces turning, even on its own.',
+    cross: 'Grips firmly. Stops pieces turning.',
+    oval: 'For narrow areas: 1.5× as long as wide.',
+    slot: 'For long, narrow areas: 2× as long as wide.',
+    dshape: 'Fits only one way round, so no mix-ups.',
   };
   const shapeIcons = {};
   function shapeIcon(s) {
@@ -1489,7 +1498,7 @@
     const f = (field, label, value, opts) => inlineField(field, label, value, opts).replace('data-cfg=', 'data-kcfg=');
     return `<div class="ins-section keys key-edit" aria-label="Selected key">
       <div class="head-row"><h3>Key ${i + 1}${k.o ? ' <span class="badge">own settings</span>' : ''}</h3><button class="btn ghost small" data-act="key-done" title="Esc">Back to all keys</button></div>
-      <p class="muted small">Changes here apply to this key only. The other keys keep the general settings.</p>
+      <p class="muted small">${k.a && !(k.o && k.o.diameter !== undefined) ? `Sized to fit this area: ${fmt(k.a.diameter)} mm. ` : ''}Changes here apply to this key only.</p>
       <div class="shape-head"><span class="lbl">Shape</span><span class="shape-name">${SHAPE_NAMES[spec.shape]}</span></div>
       ${shapePicker(kc, 'kshape')}
       <p class="muted small shape-help">${SHAPE_HELP[spec.shape]}</p>
@@ -1597,7 +1606,10 @@
       </div>
     </div>
     <div class="ins-section">
-      <h3>Printer bed</h3>
+      <h3>Printer</h3>
+      ${seg('printer', state.cfg.printer === 'resin' ? 'resin' : 'fdm', [['fdm', 'Filament (FDM)'], ['resin', 'Resin']])}
+      <p class="muted small printer-help">Sets the smallest keys, gap and walls that print reliably. Resin suits miniatures.</p>
+      <span class="lbl bed-lbl">Bed size</span>
       <div class="row three">
         ${['w', 'd', 'h'].map(k => `<label class="num"><span>${{ w: 'Width', d: 'Depth', h: 'Height' }[k]}</span><span class="num-wrap"><input type="number" data-bed="${k}" value="${state.bed[k]}" min="10" step="1"><em>mm</em></span></label>`).join('')}
       </div>
@@ -1632,7 +1644,7 @@
     const shownShape = K.keyGeometrySpec(c).shape;
     const typeLine = { peg: 'A peg on one piece fits a socket in the other.', dowel: 'Holes in both pieces, with printable pins. Metal rods work too.', magnet: 'Pockets in both pieces, sized for disc magnets.' }[c.type];
     return `<div class="ins-section head">
-      <div class="head-row"><h2>${esc(p.name)}</h2><button class="btn ghost small" data-act="done">Done</button></div>
+      <div class="head-row"><h2>${esc(p.name)}</h2><span><button class="btn ghost small" data-act="export-one" title="Export this part on its own">Export</button><button class="btn ghost small" data-act="done">Done</button></span></div>
       <p class="muted small">${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm, ${fmtInt(p.tris)} triangles</p>
     </div>
     ${state.cut.active >= 0 && state.cut.keys[state.cut.active] && c.type !== 'none' ? keyEditor(state.cut.active) : `<div class="ins-section keys" aria-label="Keys">
@@ -1642,10 +1654,11 @@
       <div class="shape-head"><span class="lbl">Shape</span><span class="shape-name">${SHAPE_NAMES[shownShape]}</span></div>
       ${shapePicker(c)}
       <p class="muted small shape-help">${SHAPE_HELP[shownShape]}</p>
-      <div class="grid2">
-        ${inlineField('diameter', shownShape === 'round' ? 'Diameter' : 'Width', c.diameter, { min: 1, step: 0.5 })}
-        ${inlineField('length', lenLabel, c.length, { min: 0.5, step: 0.5 })}
-      </div>
+      <div class="inline"><span class="lbl">Size</span>${seg('sizemode', c.sizeMode === 'set' ? 'set' : 'auto', [['auto', 'Fit each area'], ['set', 'One size']])}</div>
+      <div class="grid2">${c.sizeMode === 'set'
+        ? `${inlineField('diameter', shownShape === 'round' ? 'Diameter' : 'Width', c.diameter, { min: 1, step: 0.5 })}${inlineField('length', lenLabel, c.length, { min: 0.5, step: 0.5 })}`
+        : c.type === 'magnet' ? `${inlineField('diameter', 'Largest', c.diameter, { min: 2, step: 1, aria: 'Largest magnet' })}<span class="muted small size-note">Standard magnet sizes</span>`
+        : `${inlineField('diameter', 'Largest', c.diameter, { min: 1, step: 0.5, aria: 'Largest key width' })}${inlineField('sizeMin', 'Smallest', c.sizeMin, { min: 0.5, step: 0.5, aria: 'Smallest key width' })}`}</div>
       <div class="inline"><span class="lbl">Fit</span>${seg('fit', c.clearance, [['0.1', 'Snug'], ['0.2', 'Standard'], ['0.3', 'Loose']])}</div>
       <div class="grid2">${inlineField('clearance', 'Gap', c.clearance, { min: 0, step: 0.05, aria: 'Gap per side' })}${inlineField('margin', 'Wall', c.margin, { min: 0.4, step: 0.2, aria: 'Wall around keys' })}</div>
       ${shownShape !== 'round' ? `<div class="grid2 direction"><label class="check"><input type="checkbox" data-cfg="align" ${c.align !== false ? 'checked' : ''}> Line up with area</label>
@@ -1661,7 +1674,6 @@
     <div class="ins-section cut-action">
       <div class="key-status" id="keyStatus">${keyStatus}</div>
       <button class="btn cut" data-act="cut">${ICONS.cut}<span>Cut part</span><kbd>Enter</kbd></button>
-      <button class="btn ghost small" data-act="export-one">Export this part</button>
     </div>`;
   }
   function updatePositionReadout() {
@@ -1703,6 +1715,14 @@
       }
       case 'shape': c.shape = val; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
       case 'fit': c.clearance = +val; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
+      case 'sizemode': c.sizeMode = val; state.cut.auto = true; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
+      case 'printer': {
+        const pr = K.PRINTERS[val];
+        c.printer = val; c.sizeMin = pr.min; c.clearance = pr.gap; c.margin = pr.wall;
+        savePrefs(); renderInspector();
+        toast(val === 'resin' ? 'Set up for resin: keys down to 1 mm, 0.1 mm gap, 0.8 mm walls.' : 'Set up for filament: keys down to 2.5 mm, 0.2 mm gap, 1.2 mm walls.');
+        break;
+      }
       case 'pegside': c.pegSide = val; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
       case 'auto-keys': state.cut.auto = true; state.cut.active = -1; scheduleAnalysis(0); renderInspector(); break;
       case 'remove-bad': removeBadKeys(); break;
