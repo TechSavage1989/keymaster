@@ -2,7 +2,7 @@
 
 Cut 3D-printable sculptures and figures into pieces, with keys that line the pieces up when you glue them.
 
-Keymaster runs entirely in your browser. Open the page, drop in an STL or OBJ, and nothing is installed or uploaded.
+Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com**. Open the page, drop in an STL or OBJ, and nothing is installed or uploaded.
 
 ## What it does
 
@@ -10,7 +10,7 @@ Keymaster runs entirely in your browser. Open the page, drop in an STL or OBJ, a
 - **Cut as many times as you need.** Every piece lands in the parts list and can be cut again. Undo and redo cover every step.
 - **Keys that fit.** Choose pegs (round or square, optionally tapered), dowel holes with printable pins, or magnet pockets. Keys are placed automatically, and you can click the cut face to add one, drag to move it, or right-click to remove it.
 - **Checked before you cut.** Each key is tested for thin walls and for sockets that would break through the surface. Problem keys turn red and explain why.
-- **Leave areas joined.** When a cut crosses several separate areas, untick any area to keep it attached.
+- **Leave areas joined.** When a cut crosses several separate areas, each gets a label in the view. Click a label (or untick the area in the side panel) to keep that area attached, and click it again to cut it.
 - **Model tools.** Fill holes, fix inside-out models, turn the model a quarter turn, scale it (including inches to millimeters), and see which parts fit your printer bed.
 - **Export.** Every part is saved as its own STL, bundled in one ZIP.
 

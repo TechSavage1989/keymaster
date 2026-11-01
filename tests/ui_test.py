@@ -48,6 +48,42 @@ with sync_playwright() as p:
     r1 = pg.evaluate('window.__renders')
     check('no redraws while idle', r1 - r0 <= 1, r1 - r0)
 
+    # area labels in the view: one per area, toggle cut/joined, hover links label and list row
+    tags = pg.locator('#areaTags [data-area-tag]')
+    check('one label per area in the view', areas > 1 and tags.count() == areas and pg.is_visible('#areaTags [data-area-tag]'), (areas, tags.count()))
+    check('labels start as cut', all(tags.nth(i).get_attribute('aria-pressed') == 'true' for i in range(tags.count())))
+    pg.locator('#areaTags [data-area-tag="1"]').hover()
+    pg.wait_for_timeout(100)
+    check('hovering a label highlights its row', pg.locator('[data-area-row="1"].is-hover').count() == 1)
+    pg.locator('[data-area-row="2"] label').hover()
+    pg.wait_for_timeout(100)
+    check('hovering a row highlights its label', 'is-hover' in (pg.get_attribute('#areaTags [data-area-tag="2"]', 'class') or ''))
+    pg.click('#areaTags [data-area-tag="1"]')
+    pg.wait_for_timeout(150)
+    t1 = pg.locator('#areaTags [data-area-tag="1"]')
+    check('clicking a label leaves that area joined', t1.get_attribute('aria-pressed') == 'false' and 'Joined' in t1.inner_text() and not pg.is_checked('[data-area="1"]'))
+    # clicking the grey area itself in the view brings it back
+    tb = t1.bounding_box()
+    pg.evaluate("document.querySelector('#areaTags').style.display = 'none'")
+    pg.mouse.click(tb['x'] + tb['width'] / 2, tb['y'] + tb['height'] / 2)
+    pg.evaluate("document.querySelector('#areaTags').style.display = ''")
+    pg.wait_for_timeout(150)
+    check('clicking a joined area in the view cuts it again', pg.is_checked('[data-area="1"]') and t1.get_attribute('aria-pressed') == 'true')
+    pg.locator('[data-area="0"]').uncheck()
+    pg.wait_for_timeout(100)
+    check('unticking a row updates its label', pg.get_attribute('#areaTags [data-area-tag="0"]', 'aria-pressed') == 'false')
+    for i in range(1, areas):
+        pg.locator(f'[data-area="{i}"]').uncheck()
+    pg.click('[data-act=cut]')
+    pg.wait_for_timeout(200)
+    check('cutting with every area joined explains why', 'Every area is set to stay joined' in pg.inner_text('#toast') and pg.locator('#partList li[data-id]').count() == 1, pg.inner_text('#toast'))
+    for i in range(areas):
+        pg.locator(f'#areaTags [data-area-tag="{i}"]').click()
+    pg.wait_for_timeout(200)
+    check('every area cut again', all(pg.is_checked(f'[data-area="{i}"]') for i in range(areas)))
+    pg.mouse.move(5, 5)
+    pg.screenshot(path=str(OUT / 'shot_area_tags.png'))
+
     # tilt: drag on the plane, check the angle readout and that the arrow gizmo is detached
     check('angle starts square', 'Square to' in pg.inner_text('#tiltOut'), pg.inner_text('#tiltOut'))
     pg.click('[data-act=gizmo][data-value=rotate]')

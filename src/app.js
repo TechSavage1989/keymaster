@@ -27,7 +27,7 @@
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: false, pegSide: 'below', perArea: 2 },
-    cut: { mode: 'translate', keys: [], auto: true, skip: new Set(), analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
+    cut: { mode: 'translate', keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   const history = { past: [], future: [] };
   let uid = 1;
@@ -197,7 +197,7 @@
       }
       dirty = true;
     }
-    if (moved || dirty) { renderer.render(scene, camera); dirty = false; }
+    if (moved || dirty) { renderer.render(scene, camera); placeAreaTags(); dirty = false; }
   }
   function animate(dur, step) {
     if (reduceMotion) { step(1); markDirty(); return; }
@@ -401,12 +401,15 @@
     const an = K.analyzePlane(p.positions, p.indices, f, coreCfg(), K.diag(p.bbox));
     state.cut.analysis = an;
     state.cut.stale = false;
+    state.cut.hoverArea = -1;
+    state.cut.labels = an.base.error ? [] : an.base.regions.map((r, ri) => ({ samples: K.regionSamples(an.base, ri), x: 0, y: 0 }));
     if (state.cut.auto) state.cut.keys = an.base.error ? [] : K.autoPlaceKeys(an, coreCfg(), state.cfg.perArea, state.cut.skip);
     state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
     evaluateKeys();
     renderRegions();
     renderKeyMarkers();
     renderInspector();
+    renderAreaTags();
     updateHint();
     markDirty();
   }
@@ -438,7 +441,8 @@
         line.renderOrder = 4;
         g.add(line);
       }
-      if (skipped) {
+      const hover = ri === state.cut.hoverArea;
+      if (skipped || hover) {
         const flat = [], holes = [];
         const rings = [reg.outer, ...reg.holes];
         rings.forEach((li, k) => { if (k) holes.push(flat.length / 2); flat.push(...an.base.loops[li].xy); });
@@ -448,15 +452,82 @@
         for (let i = 0; i < flat.length / 2; i++) { pos[3 * i] = flat[2 * i]; pos[3 * i + 1] = flat[2 * i + 1]; pos[3 * i + 2] = z * 0.6; }
         geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
         geom.setIndex(tri);
-        const fill = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({ color: 0x9ea4aa, side: THREE.DoubleSide }));
+        // joined areas are flat grey; the hovered area brightens so it can be matched to its label
+        const mat = skipped
+          ? new THREE.MeshBasicMaterial({ color: hover ? 0xc4c8cc : 0x9ea4aa, side: THREE.DoubleSide })
+          : new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.45, depthWrite: false });
+        const fill = new THREE.Mesh(geom, mat);
         fill.renderOrder = 4;
         g.add(fill);
       }
       regionGroup.add(g);
     });
   }
+  /* ---------------- area labels in the view ---------------- */
+  const tagLayer = $('#areaTags');
+  function areaCount() {
+    const an = state.cut.analysis;
+    return an && !an.base.error ? an.base.regions.length : 0;
+  }
+  function updateLabelPoints() {
+    if (!state.cut.labels.length) return;
+    const avoid = state.cfg.type === 'none' ? 0 : K.keyGeometrySpec(state.cfg).outer + state.cfg.margin;
+    const keys = state.cfg.type === 'none' ? [] : state.cut.keys;
+    for (const l of state.cut.labels) Object.assign(l, K.pickLabelPoint(l.samples, keys, avoid));
+  }
+  function renderAreaTags() {
+    const n = areaCount();
+    tagLayer.innerHTML = n > 1 ? state.cut.labels.map((l, i) => {
+      const cut = !state.cut.skip.has(i);
+      return `<button class="area-tag${i === state.cut.hoverArea ? ' is-hover' : ''}" data-area-tag="${i}" aria-pressed="${cut}" title="${cut ? `Area ${i + 1} will be cut. Click to leave it joined.` : `Area ${i + 1} stays joined. Click to cut it.`}"><b>${i + 1}</b>${cut ? 'Cut' : 'Joined'}</button>`;
+    }).join('') : '';
+    updateLabelPoints();
+    placeAreaTags();
+  }
+  function placeAreaTags() {
+    const tags = tagLayer.children;
+    if (!tags.length) return;
+    const show = !!selectedPart() && !state.cut.stale && !ptr.tilt && areaCount() > 1 && cameraOnClearSide();
+    tagLayer.hidden = !show;
+    if (!show) return;
+    planeGroup.updateMatrixWorld(true);
+    camera.updateMatrixWorld();
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    for (let i = 0; i < tags.length; i++) {
+      const l = state.cut.labels[i], el = tags[i];
+      if (!l) continue;
+      const q = planeGroup.localToWorld(new THREE.Vector3(l.x, l.y, 0)).project(camera);
+      const off = q.z > 1 || q.x < -1.05 || q.x > 1.05 || q.y < -1.05 || q.y > 1.05;
+      el.style.visibility = off ? 'hidden' : '';
+      if (off) continue;
+      const x = (q.x + 1) / 2 * W, y = (1 - q.y) / 2 * H;
+      el.style.transform = `translate(${Math.round(x - el.offsetWidth / 2)}px, ${Math.round(y - el.offsetHeight / 2)}px)`;
+    }
+  }
+  function setHoverArea(i) {
+    if (state.cut.hoverArea === i) return;
+    state.cut.hoverArea = i;
+    renderRegions();
+    for (const el of tagLayer.children) el.classList.toggle('is-hover', +el.dataset.areaTag === i);
+    for (const li of ins.querySelectorAll('[data-area-row]')) li.classList.toggle('is-hover', +li.dataset.areaRow === i);
+    markDirty();
+  }
+  function toggleArea(i) {
+    if (i < 0 || i >= areaCount()) return;
+    if (state.cut.skip.has(i)) state.cut.skip.delete(i); else state.cut.skip.add(i);
+    if (state.cut.auto) state.cut.keys = K.autoPlaceKeys(state.cut.analysis, coreCfg(), state.cfg.perArea, state.cut.skip);
+    state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
+    evaluateKeys(); renderRegions(); renderKeyMarkers(); renderInspector(); renderAreaTags();
+  }
+  tagLayer.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-area-tag]');
+    if (b) toggleArea(+b.dataset.areaTag);
+  });
+  tagLayer.addEventListener('mouseover', (e) => { const b = e.target.closest('[data-area-tag]'); if (b) setHoverArea(+b.dataset.areaTag); });
+  tagLayer.addEventListener('mouseout', (e) => { if (!e.relatedTarget || !tagLayer.contains(e.relatedTarget)) setHoverArea(-1); });
   function renderKeyMarkers() {
     clearGroup(keyGroup);
+    updateLabelPoints();
     const cfg = state.cfg;
     if (!selectedPart() || cfg.type === 'none') { markDirty(); return; }
     const spec = K.keyGeometrySpec(cfg);
@@ -597,6 +668,10 @@
     const an = state.cut.analysis;
     if (!an || an.base.error || !an.base.regions.length) {
       toast(an && an.base.error ? 'The surface is broken where this cut crosses it. Move the cut or repair the model.' : 'The cut plane doesn’t pass through this part. Slide it into the model first.', 'error');
+      return;
+    }
+    if (state.cut.skip.size >= an.base.regions.length) {
+      toast('Every area is set to stay joined, so nothing would be cut. Click an area’s label to cut it.', 'error');
       return;
     }
     const bad = state.cut.evals.filter(e => !e.ok).length;
@@ -840,8 +915,14 @@
       evaluateKeys(); renderKeyMarkers();
       return;
     }
-    if (!ptr.down && selectedPart()) canvas.style.cursor = pickKey(e) >= 0 ? 'grab' : '';
+    if (!ptr.down && selectedPart()) canvas.style.cursor = pickKey(e) >= 0 ? 'grab' : joinedAreaAt(e) >= 0 ? 'pointer' : '';
   });
+  function joinedAreaAt(e) {
+    if (!state.cut.skip.size || !state.cut.analysis || state.cut.stale || !cameraOnClearSide()) return -1;
+    const h = planeHit(e);
+    const ri = h ? K.regionAt(state.cut.analysis.base, h.x, h.y) : -1;
+    return state.cut.skip.has(ri) ? ri : -1;
+  }
   canvas.addEventListener('pointercancel', () => { if (ptr.tilt) endTilt(); if (ptr.dragKey >= 0) { ptr.dragKey = -1; orbit.enabled = true; } ptr.down = false; });
   canvas.addEventListener('pointerup', (e) => {
     if (!ptr.down) return;
@@ -863,11 +944,12 @@
   function handleClick(e) {
     const p = selectedPart();
     if (p && state.cut.mode === 'rotate' && onSheet(planeHit(e))) return;
-    if (p && state.cfg.type !== 'none' && cameraOnClearSide() && state.cut.analysis && !state.cut.stale) {
+    if (p && cameraOnClearSide() && state.cut.analysis && !state.cut.stale) {
       const h = planeHit(e);
       if (h) {
         const ri = K.regionAt(state.cut.analysis.base, h.x, h.y);
-        if (ri >= 0 && !state.cut.skip.has(ri)) { addKey(h); return; }
+        if (ri >= 0 && state.cut.skip.has(ri)) { toggleArea(ri); return; }
+        if (ri >= 0 && state.cfg.type !== 'none') { addKey(h); return; }
       }
     }
     setNdc(e);
@@ -1113,8 +1195,8 @@
         <input type="range" id="cutPos" min="${state.cut.lo}" max="${state.cut.hi}" step="${(state.cut.hi - state.cut.lo) / 1000}" value="${planeOffset()}">
         <output id="cutPosOut"></output></label>
       <div class="angle-row"><span class="lbl">Angle</span><output id="tiltOut"></output><button class="btn small" data-act="straighten" title="Snap the cut square to the nearest axis">Straighten</button></div>
-      ${regions.length > 1 ? `<div class="areas"><p class="lbl">The cut face has ${regions.length} separate areas. Untick an area to leave it joined.</p>
-        <ul>${regions.map((r, i) => `<li><label><input type="checkbox" data-area="${i}" ${state.cut.skip.has(i) ? '' : 'checked'}> Area ${i + 1} <span class="muted">${fmt(r.area)} mm²</span></label></li>`).join('')}</ul></div>` : ''}
+      ${regions.length > 1 ? `<div class="areas"><p class="lbl">The cut face has ${regions.length} separate areas. Click an area’s label in the view, or untick it here, to leave it joined.</p>
+        <ul>${regions.map((r, i) => `<li data-area-row="${i}"${i === state.cut.hoverArea ? ' class="is-hover"' : ''}><label><input type="checkbox" data-area="${i}" ${state.cut.skip.has(i) ? '' : 'checked'}> Area ${i + 1} <span class="muted">${fmt(r.area)} mm²</span></label></li>`).join('')}</ul></div>` : ''}
     </div>
     <div class="ins-section">
       <h3>Keys</h3>
@@ -1205,12 +1287,15 @@
       if (isFinite(v) && v > 0) { state.bed[t.dataset.bed] = v; savePrefs(); renderParts(); }
     } else if (t.dataset.area !== undefined) {
       const i = +t.dataset.area;
-      if (t.checked) state.cut.skip.delete(i); else state.cut.skip.add(i);
-      if (state.cut.auto) state.cut.keys = K.autoPlaceKeys(state.cut.analysis, coreCfg(), state.cfg.perArea, state.cut.skip);
-      evaluateKeys(); renderRegions(); renderKeyMarkers(); renderInspector();
+      if (t.checked === state.cut.skip.has(i)) toggleArea(i);
     } else if (t.id === 'cutPos') {
       computeSliderRange(); state.cut.skip.clear(); scheduleAnalysis(0);
     }
+  });
+  ins.addEventListener('mouseover', (e) => { const r = e.target.closest('[data-area-row]'); if (r) setHoverArea(+r.dataset.areaRow); });
+  ins.addEventListener('mouseout', (e) => {
+    const r = e.target.closest('[data-area-row]');
+    if (r && !(e.relatedTarget && r.contains(e.relatedTarget))) setHoverArea(-1);
   });
   ins.addEventListener('input', (e) => {
     const t = e.target;
