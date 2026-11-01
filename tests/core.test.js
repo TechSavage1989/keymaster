@@ -574,6 +574,94 @@ console.log('surface regions');
   check('border lines: one segment per border edge', lines.length === (seg.borders.length / 4) * 6);
 }
 
+console.log('curved cuts along a border');
+{
+  const lathe = (radius, len, seg = 48, rings = 160) => {
+    const pos = [0, 0, 0];
+    for (let i = 1; i < rings; i++) { const z = (i / rings) * len, r = radius(z); for (let j = 0; j < seg; j++) { const a = (j / seg) * 2 * Math.PI; pos.push(Math.cos(a) * r, Math.sin(a) * r, z); } }
+    pos.push(0, 0, len);
+    const S = pos.length / 3 - 1, idx = [];
+    for (let j = 0; j < seg; j++) idx.push(0, 1 + (j + 1) % seg, 1 + j);
+    for (let i = 0; i < rings - 2; i++) for (let j = 0; j < seg; j++) { const p0 = 1 + i * seg + j, p1 = 1 + i * seg + (j + 1) % seg; idx.push(p0, p1, p1 + seg, p0, p1 + seg, p0 + seg); }
+    const base = 1 + (rings - 2) * seg;
+    for (let j = 0; j < seg; j++) idx.push(S, base + j, base + (j + 1) % seg);
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  };
+  // an arm in a sleeve: cut it off at the hem
+  const arm = lathe(z => (z < 2 ? Math.max(0.3, z * 4) : z < 40 ? 8 : z < 41 ? 8 - (z - 40) * 2.5 : z < 78 ? 5.5 : Math.max(0.3, 5.5 * Math.sqrt(1 - Math.pow((z - 78) / 2, 2)))), 80);
+  const seg = K.segmentSurface(arm.positions, arm.indices);
+  const loops = K.borderLoops(arm.positions, seg);
+  const hem = K.borderLoopNear(arm.positions, seg, loops, [8, 0, 40]);
+  check('the sleeve hem is a border that goes all the way round', !!hem && hem.loop.closed && Math.abs(hem.loop.length - 2 * Math.PI * 8) < 2, hem && [hem.loop.closed, hem.loop.length]);
+  const cut = K.cutAlongLoop(arm.positions, arm.indices, hem.loop);
+  check('cutting along the hem gives two sealed pieces', cut.parts.length === 2 && allClosed(cut.parts), cut.parts.map(q => K.edgeReport(q.indices)));
+  check('the pieces keep the whole volume', Math.abs(sumVol(cut.parts) - arm.report.volume) / arm.report.volume < 1e-6, [sumVol(cut.parts), arm.report.volume]);
+  const zr = (q) => { let lo = Infinity, hi = -Infinity; for (let i = 2; i < q.positions.length; i += 3) { lo = Math.min(lo, q.positions[i]); hi = Math.max(hi, q.positions[i]); } return [lo, hi]; };
+  const [za, zb] = cut.parts.map(zr);
+  check('the cut falls exactly at the hem', [za, zb].some(r => Math.abs(r[1] - 40) < 0.6) && [za, zb].some(r => Math.abs(r[0] - 40) < 0.6), [za, zb]);
+  // a wavy border on a sphere: the cut follows it, curved, and both pieces still close
+  const sp = K.prepareMesh(uvSphere(20, 96, 64));
+  const ntS = sp.indices.length / 3, gS = new Int32Array(ntS);
+  for (let q = 0; q < ntS; q++) {
+    let x = 0, y = 0, z = 0; for (let k = 0; k < 3; k++) { const v = 3 * sp.indices[3 * q + k]; x += sp.positions[v]; y += sp.positions[v + 1]; z += sp.positions[v + 2]; }
+    gS[q] = z / 3 > 4 * Math.sin(3 * Math.atan2(y, x)) + 2 ? 1 : 0;
+  }
+  const segW = K.bordersFromGroups(sp.positions, sp.indices, gS), loopsW = K.borderLoops(sp.positions, segW);
+  check('a wavy border round a sphere is one closed loop', loopsW.length === 1 && loopsW[0].closed, loopsW.map(l => [l.closed, l.verts.length]));
+  let wz0 = Infinity, wz1 = -Infinity; for (const v of loopsW[0].verts) { wz0 = Math.min(wz0, sp.positions[3 * v + 2]); wz1 = Math.max(wz1, sp.positions[3 * v + 2]); }
+  check('the wavy border really is curved (rises and falls 8 mm)', wz1 - wz0 > 6, [wz0, wz1]);
+  const cw = K.cutAlongLoop(sp.positions, sp.indices, loopsW[0]);
+  check('cutting along a wavy border gives two sealed pieces', cw.parts.length === 2 && allClosed(cw.parts), cw.parts.map(q => K.edgeReport(q.indices)));
+  check('wavy cut keeps the volume', Math.abs(sumVol(cw.parts) - sp.report.volume) / sp.report.volume < 1e-6, [sumVol(cw.parts), sp.report.volume]);
+  // borders that can't split the part are refused with a reason
+  const tower = (() => {
+    const pos = [], idx = [];
+    const quad = (a, b, c, d) => { const o = pos.length / 3; pos.push(...a, ...b, ...c, ...d); idx.push(o, o + 1, o + 2, o, o + 2, o + 3); };
+    const ring = (h, z) => [[-h, -h, z], [h, -h, z], [h, h, z], [-h, h, z]];
+    const L0 = ring(10, 0), L1 = ring(10, 10), U0 = ring(9, 10), U1 = ring(9, 20);
+    for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; quad(L0[i], L0[j], L1[j], L1[i]); quad(U0[i], U0[j], U1[j], U1[i]); quad(L1[i], L1[j], U0[j], U0[i]); }
+    quad(L0[3], L0[2], L0[1], L0[0]); quad(U1[0], U1[1], U1[2], U1[3]);
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  })();
+  const st = K.segmentSurface(tower.positions, tower.indices, { minFrac: 0 }), lt = K.borderLoops(tower.positions, st);
+  const side = K.borderLoopNear(tower.positions, st, lt, [10, 0, 5]); // a vertical corner between two side faces
+  check('a border that stops at a corner is not closed', !!side && !side.loop.closed);
+  let msg = ''; try { K.cutAlongLoop(tower.positions, tower.indices, side.loop); } catch (e) { msg = e.message; }
+  check('cutting along it explains why not', /all the way round/.test(msg), msg);
+  // a ring round one side of a doughnut joins up on the other side, so it can't split it
+  const tor = (() => { const pos = [], idx = [], A = 32, B = 16; for (let i = 0; i < A; i++) for (let j = 0; j < B; j++) { const u = i / A * 2 * Math.PI, v = j / B * 2 * Math.PI; pos.push((20 + 6 * Math.cos(v)) * Math.cos(u), (20 + 6 * Math.cos(v)) * Math.sin(u), 6 * Math.sin(v)); } for (let i = 0; i < A; i++) for (let j = 0; j < B; j++) { const a = i * B + j, b = ((i + 1) % A) * B + j, c = ((i + 1) % A) * B + (j + 1) % B, d = i * B + (j + 1) % B; idx.push(a, b, c, a, c, d); } return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) }); })();
+  const ntT = tor.indices.length / 3, gT = new Int32Array(ntT);
+  for (let q = 0; q < ntT; q++) { let x = 0; for (let k = 0; k < 3; k++) x += tor.positions[3 * tor.indices[3 * q + k]]; gT[q] = x > 0 ? 1 : 0; }
+  const segT = K.bordersFromGroups(tor.positions, tor.indices, gT), lT = K.borderLoops(tor.positions, segT);
+  let msg2 = ''; try { K.cutAlongLoop(tor.positions, tor.indices, lT.find(l => l.closed)); } catch (e) { msg2 = e.message; }
+  check('a border that doesn’t split the part is refused with a reason', lT.filter(l => l.closed).length === 2 && /wouldn’t split the part/.test(msg2), [lT.length, msg2]);
+  // a line round the rim of a hollow would free only empty air: refused with a reason
+  const cup = (() => { // revolve the profile (r, z): a solid with a 6 mm wide, 5 mm deep hollow in its top
+    const prof = [[10, 0], [10, 20], [6, 20], [6, 15]], seg = 48, pos = [0, 0, 0], idx = [];
+    for (const [r, z] of prof) for (let j = 0; j < seg; j++) { const a = j / seg * 2 * Math.PI; pos.push(r * Math.cos(a), r * Math.sin(a), z); }
+    pos.push(0, 0, 15);
+    const ring = (k) => 1 + k * seg, top = pos.length / 3 - 1;
+    for (let j = 0; j < seg; j++) { const j1 = (j + 1) % seg; idx.push(0, ring(0) + j1, ring(0) + j); for (let k = 0; k < prof.length - 1; k++) { const a = ring(k) + j, b = ring(k) + j1, c = ring(k + 1) + j1, d = ring(k + 1) + j; idx.push(a, b, c, a, c, d); } idx.push(top, ring(prof.length - 1) + j, ring(prof.length - 1) + j1); }
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  })();
+  check('cup test shape closed', cup.report.closed, cup.report);
+  const sc = K.segmentSurface(cup.positions, cup.indices, { minFrac: 0 }), lc = K.cutLines(cup.positions, cup.indices, sc);
+  const rim = K.borderLoopNear(cup.positions, sc, lc, [6, 0, 20]);
+  let msg3 = ''; try { K.cutAlongLoop(cup.positions, cup.indices, rim.loop); } catch (e) { msg3 = e.message; }
+  check('a line round a hollow is refused: it would only free air', rim.loop.closed && /dip or hollow/.test(msg3), msg3);
+  // a whole region's outline is a cut line even where it runs past several neighbours
+  const outlines = K.regionOutlines(tower.positions, tower.indices, st).filter(l => l.closed);
+  check('every flat face of the tower has a closed outline', outlines.length >= 11, outlines.length);
+  // an eye inside the head stays with the head
+  const head = K.prepareMesh(K.mergeMeshes([uvSphere(20, 96, 64), uvSphere(3, 16, 12, [0, 0, 12])]));
+  const ntH = head.indices.length / 3, gH = new Int32Array(ntH);
+  for (let q = 0; q < ntH; q++) { let z = 0, r = 0; for (let k = 0; k < 3; k++) { const v = 3 * head.indices[3 * q + k]; z += head.positions[v + 2]; r = Math.max(r, Math.hypot(head.positions[v], head.positions[v + 1], head.positions[v + 2])); } gH[q] = r < 10 ? 2 : z / 3 > 2 ? 1 : 0; }
+  const segH = K.bordersFromGroups(head.positions, head.indices, gH), lH = K.borderLoops(head.positions, segH).filter(l => l.closed);
+  const ch = K.cutAlongLoop(head.positions, head.indices, lH[0]);
+  const top = ch.parts.find(q => q.bbox.max[2] > 19);
+  check('a separate eye stays with the piece around it', ch.parts.length === 2 && allClosed(ch.parts) && top.bbox.min[2] < 5 && Math.abs(sumVol(ch.parts) - head.report.volume) / head.report.volume < 1e-6 && K.separateShells(top.positions, top.indices).length === 0, ch.parts.map(q => q.volume));
+}
+
 console.log('separate shells stay with their piece');
 {
   const body = uvSphere(20, 48, 32), eye = uvSphere(2, 16, 12, [0, 0, 12]);
