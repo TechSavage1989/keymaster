@@ -27,7 +27,7 @@
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, pegSide: 'below', perArea: 2, align: true, turn: 0 },
-    cut: { mode: 'translate', keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
+    cut: { keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   const history = { past: [], future: [] };
   let uid = 1;
@@ -298,8 +298,7 @@
     preview.stencil = makeStencilGroup(v.geom, clipBelow);
     scene.add(preview.ghost, preview.stencil);
     planeGroup.visible = true;
-    if (state.cut.mode === 'translate') { if (tc.object !== planeGroup) tc.attach(planeGroup); }
-    else tc.detach();
+    if (tc.object !== planeGroup) tc.attach(planeGroup);
     preview.partId = p.id;
   }
 
@@ -394,7 +393,7 @@
     const tile = Math.max(3, R / 9);
     hatch.repeat.set((R * 3.2) / tile, (R * 3.2) / tile);
     const h = s / 2;
-    const gr = Math.max(0.6, R * 0.035);
+    const gr = Math.max(0.45, R * 0.02);
     [[h, 0], [-h, 0], [0, h], [0, -h]].forEach(([x, y], i) => { const g = gripGroup.children[i]; g.position.set(x, y, 0); g.scale.set(gr, gr, gr); });
     const ringR = ringRadius(), tube = Math.max(0.18, R * 0.011);
     for (const ax of ['x', 'y']) {
@@ -407,19 +406,17 @@
     planeFrame.geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-h, -h, 0), new THREE.Vector3(h, -h, 0), new THREE.Vector3(h, h, 0), new THREE.Vector3(-h, h, 0)]);
   }
   function ringRadius() { return state.cut.R * 0.62; }
-  // Slide mode shows the arrow; Tilt mode hides it and lets you tip the plane by dragging it. The rings work in both.
+  // The arrow slides the plane. The rings, or a drag anywhere on the plane, tilt it; the grips mark its edges.
   function attachGizmo() {
-    const mode = state.cut.mode;
     tc.setMode('translate');
     tc.showX = false; tc.showY = false; tc.showZ = true;
-    if (mode === 'translate' && selectedPart()) { if (tc.object !== planeGroup) tc.attach(planeGroup); }
+    if (selectedPart()) { if (tc.object !== planeGroup) tc.attach(planeGroup); }
     else tc.detach();
-    planeSheet.material.opacity = mode === 'rotate' ? 0.17 : 0.08;
-    gripGroup.visible = mode === 'rotate';
+    planeSheet.material.opacity = 0.12;
+    gripGroup.visible = !!selectedPart();
     updateHint();
     markDirty();
   }
-  function setGizmoMode(mode) { state.cut.mode = mode; attachGizmo(); }
   tc.addEventListener('dragging-changed', (e) => {
     orbit.enabled = !e.value;
     if (e.value) { state.cut.stale = true; renderKeyMarkers(); }
@@ -548,7 +545,7 @@
     const reasons = [...new Set(list.map(i => said[why.get(i)]).filter(Boolean))];
     const because = reasons.length === 1 ? `: ${reasons[0]}` : '';
     const head = everywhere ? 'No room for keys on this cut' : `No room for a key in ${names}`;
-    return `${head}${because}. Use smaller keys or a thinner wall, or click the cut face to place one yourself.`;
+    return `${head}${because}. Try smaller keys or a thinner wall, or click the cut face to place one.`;
   }
   function updateLabelPoints() {
     if (!state.cut.labels.length) return;
@@ -590,7 +587,7 @@
     state.cut.hoverArea = i;
     renderRegions();
     for (const el of tagLayer.children) el.classList.toggle('is-hover', +el.dataset.areaTag === i);
-    for (const li of ins.querySelectorAll('[data-area-row]')) li.classList.toggle('is-hover', +li.dataset.areaRow === i);
+    for (const li of document.querySelectorAll('[data-area-row]')) li.classList.toggle('is-hover', +li.dataset.areaRow === i);
     markDirty();
   }
   function toggleArea(i) {
@@ -1068,7 +1065,7 @@
     const n = planeNormal();
     return n.dot(camera.position.clone().sub(planeGroup.position)) > 0;
   }
-  const ptr = { down: false, x: 0, y: 0, t: 0, dragKey: -1, ring: null, hoverRing: null, tilt: null };
+  const ptr = { down: false, x: 0, y: 0, t: 0, dragKey: -1, ring: null, hoverRing: null, tilt: null, sheet: null };
   function toScreen(v) {
     const r = canvas.getBoundingClientRect();
     const q = v.clone().project(camera);
@@ -1165,7 +1162,7 @@
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -1222,14 +1219,10 @@
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     if (tc.dragging || tc.axis) return;
-    ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = performance.now(); ptr.dragKey = -1; ptr.ring = null; ptr.tilt = null;
+    ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = performance.now(); ptr.dragKey = -1; ptr.ring = null; ptr.tilt = null; ptr.sheet = null;
+    if (e.altKey) return; // Alt-drag always orbits
     const ring = pickRing(e);
     if (ring) { startRing(ring, e); return; }
-    if (selectedPart() && state.cut.mode === 'rotate') {
-      const h = planeHit(e);
-      if (onSheet(h)) startTilt(h, e);
-      return;
-    }
     const k = pickKey(e);
     if (k >= 0) {
       ptr.dragKey = k;
@@ -1237,16 +1230,25 @@
       orbit.enabled = false;
       canvas.setPointerCapture(e.pointerId);
       renderKeyMarkers();
+      return;
     }
+    // On the plane: a drag tips it like the edge of a tray, a plain click falls through to adding a key
+    const h = selectedPart() ? planeHit(e) : null;
+    if (onSheet(h)) { ptr.sheet = { h, id: e.pointerId }; orbit.enabled = false; }
   });
   canvas.addEventListener('pointermove', (e) => {
     if (ptr.ring) { moveRing(e); return; }
     if (ptr.tilt) { moveTilt(e); return; }
+    if (ptr.sheet && Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y) > 4) {
+      const s = ptr.sheet; ptr.sheet = null;
+      startTilt(s.h, { clientX: ptr.x, clientY: ptr.y, pointerId: s.id });
+      moveTilt(e);
+      return;
+    }
     if (!ptr.down && selectedPart() && !tc.dragging) {
       const ring = tc.axis ? null : pickRing(e);
       setRingHover(ring ? ring.ax : null);
       if (ring) { canvas.style.cursor = 'grab'; return; }
-      if (state.cut.mode === 'rotate') { canvas.style.cursor = onSheet(planeHit(e)) ? 'grab' : ''; return; }
     }
     if (ptr.dragKey >= 0) {
       const h = planeHit(e);
@@ -1256,7 +1258,7 @@
       evaluateKeys(); renderKeyMarkers();
       return;
     }
-    if (!ptr.down && selectedPart()) canvas.style.cursor = pickKey(e) >= 0 ? 'grab' : joinedAreaAt(e) >= 0 ? 'pointer' : '';
+    if (!ptr.down && selectedPart()) canvas.style.cursor = pickKey(e) >= 0 ? 'grab' : joinedAreaAt(e) >= 0 ? 'pointer' : e.altKey ? '' : onSheet(planeHit(e)) ? 'grab' : '';
   });
   function joinedAreaAt(e) {
     if (!state.cut.skip.size || !state.cut.analysis || state.cut.stale || !cameraOnClearSide()) return -1;
@@ -1264,12 +1266,13 @@
     const ri = h ? K.regionAt(state.cut.analysis.base, h.x, h.y) : -1;
     return state.cut.skip.has(ri) ? ri : -1;
   }
-  canvas.addEventListener('pointercancel', () => { if (ptr.ring) endRing(); if (ptr.tilt) endTilt(); if (ptr.dragKey >= 0) { ptr.dragKey = -1; orbit.enabled = true; } ptr.down = false; });
+  canvas.addEventListener('pointercancel', () => { if (ptr.ring) endRing(); if (ptr.tilt) endTilt(); if (ptr.sheet) { ptr.sheet = null; orbit.enabled = true; } if (ptr.dragKey >= 0) { ptr.dragKey = -1; orbit.enabled = true; } ptr.down = false; });
   canvas.addEventListener('pointerup', (e) => {
     if (!ptr.down) return;
     ptr.down = false;
     if (ptr.ring) { endRing(); return; }
     if (ptr.tilt) { endTilt(); return; }
+    if (ptr.sheet) { ptr.sheet = null; orbit.enabled = true; }
     if (ptr.dragKey >= 0) {
       ptr.dragKey = -1;
       orbit.enabled = true;
@@ -1285,7 +1288,6 @@
   });
   function handleClick(e) {
     const p = selectedPart();
-    if (p && state.cut.mode === 'rotate' && onSheet(planeHit(e))) return;
     if (p && cameraOnClearSide() && state.cut.analysis && !state.cut.stale) {
       const h = planeHit(e);
       if (h) {
@@ -1333,8 +1335,6 @@
       case 'Enter': if (p) { e.preventDefault(); doCut(); } break;
       case 'Delete': case 'Backspace': if (p && state.cut.active >= 0) { e.preventDefault(); removeKey(state.cut.active); } break;
       case 'f': case 'F': frameAll(p || undefined); break;
-      case 'w': case 'W': if (p) { setGizmoMode('translate'); renderInspector(); } break;
-      case 'e': case 'E': if (p) { setGizmoMode('rotate'); renderInspector(); } break;
       case 'x': case 'X': if (p) alignPlane('x'); break;
       case 'y': case 'Y': if (p) alignPlane('y'); break;
       case 'z': case 'Z': if (p) alignPlane('z'); break;
@@ -1373,10 +1373,9 @@
     const p = selectedPart();
     if (!state.parts.length) t = '';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
-    else if (state.cut.mode === 'rotate') t = coarse ? 'Drag the yellow plane or a blue ring to tip it. Tap Slide to move it instead.' : 'Drag the yellow plane or a blue ring to tip it. Hold Shift for fine control. Press W to slide.';
     else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
-    else if (state.cfg.type === 'none') t = 'Drag the arrow to slide the cut, or a blue ring to tilt it. Then press Enter to cut.';
-    else t = coarse ? 'Drag the arrow to slide, or a ring to tilt. Tap the cut face to add a key, drag keys to move them.' : 'Drag the arrow to slide, or a ring to tilt. Click the cut face to add a key, drag keys to move them, right-click to remove.';
+    else if (state.cfg.type === 'none') t = coarse ? 'Drag the arrow to slide the cut, the plane or a ring to tilt it. Drag outside the plane to orbit.' : 'Drag the arrow to slide the cut, the plane or a ring to tilt it (Shift for fine steps). Drag outside the plane, or hold Alt, to orbit.';
+    else t = coarse ? 'Drag the arrow to slide, the plane or a ring to tilt. Tap the cut face to add a key. Drag outside the plane to orbit.' : 'Drag the arrow to slide, the plane or a ring to tilt. Click the cut face to add a key. Drag outside the plane, or hold Alt, to orbit.';
     el.textContent = t;
     el.hidden = !t;
   }
@@ -1465,18 +1464,21 @@
       `<button type="button" data-act="shape" data-value="${s}" aria-pressed="${s === cur}" title="${SHAPE_NAMES[s]}">${shapeIcon(s)}<span>${SHAPE_NAMES[s]}</span></button>`).join('')}</div>`;
   }
   function taperField(c) {
-    const pct = K.keyGeometrySpec(c).taperPct;
-    const shape = K.keyGeometrySpec(c).shape;
-    const point = { round: 'a cone', square: 'a four-sided pyramid', hexagon: 'a six-sided pyramid', cross: 'a cross-shaped point', oval: 'an oval cone', slot: 'a wedge-like point', dshape: 'a cone with a flat side' }[shape];
+    const spec = K.keyGeometrySpec(c), pct = spec.taperPct;
+    const point = { round: 'a cone', square: 'a four-sided pyramid', hexagon: 'a six-sided pyramid', cross: 'a cross-shaped point', oval: 'an oval cone', slot: 'a wedge-like point', dshape: 'a cone with a flat side' }[spec.shape];
     const desc = pct === 0 ? 'Straight sides.' : pct >= 100 ? `Comes to a point, like ${point}.` : `The tip is ${100 - pct}% of the base width.`;
-    return `<div class="taper"><label class="slider"><span class="lbl">Taper</span>
-        <input type="range" id="taperPct" data-cfg="taper" min="0" max="100" step="5" value="${pct}" aria-describedby="taperDesc">
-        <output id="taperOut">${pct}%</output></label>
-      <p class="muted small" id="taperDesc">${desc} Tapered pegs find their way in more easily.</p>
-      ${pct > 0 ? `<label class="check"><input type="checkbox" data-cfg="taperSocket" ${c.taperSocket !== false ? 'checked' : ''}> Match the hole to the taper</label>
-      <p class="muted small">${c.taperSocket !== false ? 'The hole narrows with the peg for a snug, even fit.' : 'The hole stays straight, so the peg slides in easily but has more play.'}</p>` : ''}</div>`;
+    const hole = pct > 0 ? (c.taperSocket !== false ? ' Hole narrows to match.' : ' The hole stays straight, with more play.') : ' Tapering helps pegs find their way in.';
+    return `<div class="taper"><div class="slider"><span class="lbl">Taper</span>
+        <input type="range" id="taperPct" data-cfg="taper" min="0" max="100" step="5" value="${pct}" aria-label="Taper" aria-describedby="taperDesc">
+        <output id="taperOut">${pct}%</output></div>
+      ${pct > 0 ? `<label class="check"><input type="checkbox" data-cfg="taperSocket" ${c.taperSocket !== false ? 'checked' : ''}> Match the hole to the taper</label>` : ''}
+      <p class="muted small" id="taperDesc">${desc}${hole}</p></div>`;
   }
   function normTurn(v) { let a = ((Math.round(v) % 360) + 360) % 360; if (a > 180) a -= 360; return a; }
+  // A number box with its label beside it, to keep the panel short enough to need no scrolling.
+  function inlineField(field, label, value, opts = {}) {
+    return `<label class="numi"><span>${label}</span><span class="num-wrap"><input type="number" inputmode="decimal" data-cfg="${field}" value="${value}" step="${opts.step || 0.1}" min="${opts.min || 0}" ${opts.max ? `max="${opts.max}"` : ''} aria-label="${opts.aria || label}"><em>${opts.unit || 'mm'}</em></span></label>`;
+  }
   function numField(field, label, value, opts = {}) {
     return `<label class="num"><span>${label}</span><span class="num-wrap"><input type="number" inputmode="decimal" data-cfg="${field}" value="${value}" step="${opts.step || 0.1}" min="${opts.min || 0}" ${opts.max ? `max="${opts.max}"` : ''}><em>${opts.unit || 'mm'}</em></span></label>`;
   }
@@ -1490,7 +1492,29 @@
     }
     const p = selectedPart();
     el.innerHTML = p ? cutPanel(p) : modelPanel();
+    planeBar.hidden = !p;
+    planeBar.innerHTML = p ? planeBarHTML() : '';
+    suggestPanel.innerHTML = p ? suggestSection() : '';
+    stage.style.setProperty('--bar-h', p ? `${planeBar.offsetHeight}px` : '0px');
     updatePositionReadout();
+  }
+  // The cut plane's controls, in a toolbar along the bottom of the view.
+  function planeBarHTML() {
+    const ang = planeAngles();
+    return `<div class="pb-group" role="group" aria-label="Align the cut">
+        ${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="align" data-value="${a}" title="Cut square to ${a.toUpperCase()} (press ${a.toUpperCase()})">${a.toUpperCase()}</button>`).join('')}
+        <button class="btn small" data-act="align" data-value="view" title="Cut square to the view">View</button>
+        <button class="btn small" data-act="flip" title="Swap the solid and clear halves">Flip</button>
+        <button class="btn small" data-act="straighten" title="Snap the cut square to the nearest axis">Straighten</button>
+      </div>
+      <div class="pb-group pb-pos"><span class="lbl">Position</span>
+        <input type="range" id="cutPos" aria-label="Position" min="${state.cut.lo}" max="${state.cut.hi}" step="${(state.cut.hi - state.cut.lo) / 1000}" value="${planeOffset()}">
+        <span class="num-wrap"><input type="number" id="cutPosNum" inputmode="decimal" step="0.5" aria-label="Position in millimeters" value="${planeOffset().toFixed(1)}"><em>mm</em></span></div>
+      <div class="pb-group pb-angles"><span class="lbl">Angle</span>
+        ${['x', 'y', 'z'].map(a => `<label class="pb-angle"><span>${a.toUpperCase()}</span><span class="num-wrap"><input type="number" inputmode="decimal" step="1" data-angle="${a}" aria-label="Turn about ${a.toUpperCase()}" value="${fmtAngle(ang[a])}"><em>°</em></span></label>`).join('')}
+        <output id="tiltOut"></output></div>
+      ${(() => { const shown = shownAreas(); return shown.length > 1 ? `<div class="pb-group pb-areas" role="group" aria-label="Areas on the cut face"><span class="lbl" title="Untick an area, or click its label in the view, to leave it joined">Areas</span>
+        ${shown.map((i, k) => `<label class="area-chip${i === state.cut.hoverArea ? ' is-hover' : ''}" data-area-row="${i}" title="Area ${k + 1}, ${fmt(state.cut.analysis.base.regions[i].area)} mm². Untick to leave it joined."><input type="checkbox" data-area="${i}" ${state.cut.skip.has(i) ? '' : 'checked'}>${k + 1}</label>`).join('')}</div>` : ''; })()}`;
   }
   function modelPanel() {
     const b = modelBounds();
@@ -1559,62 +1583,36 @@
     }
     const lenLabel = c.type === 'magnet' ? 'Thickness' : 'Length';
     const shownShape = K.keyGeometrySpec(c).shape;
+    const typeLine = { peg: 'A peg on one piece fits a socket in the other.', dowel: 'Holes in both pieces, with printable pins. Metal rods work too.', magnet: 'Pockets in both pieces, sized for disc magnets.' }[c.type];
     return `<div class="ins-section head">
       <div class="head-row"><h2>${esc(p.name)}</h2><button class="btn ghost small" data-act="done">Done</button></div>
       <p class="muted small">${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm, ${fmtInt(p.tris)} triangles</p>
     </div>
-    <div class="ins-section">
-      <h3>Cut plane</h3>
-      ${seg('gizmo', state.cut.mode, [['translate', 'Slide'], ['rotate', 'Tilt']])}
-      <p class="muted small mode-help">${state.cut.mode === 'rotate'
-        ? `Drag anywhere on the yellow plane to tip it. The edge you grab rises or falls, like lifting the edge of a tray${coarse ? '' : '. Hold Shift for fine control'}. The blue rings and the values below work too.`
-        : `Drag the arrow to slide the cut. Drag a blue ring to tilt it${coarse ? '' : ', and hold Shift to snap to 5° steps'}. Or type exact values below.`}</p>
-      <div class="row align">
-        <span class="lbl">Align</span>
-        ${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="align" data-value="${a}" title="Press ${a.toUpperCase()}">${a.toUpperCase()}</button>`).join('')}
-        <button class="btn small" data-act="align" data-value="view">To view</button>
-        <button class="btn small" data-act="flip" title="Swap the solid and clear halves">Flip</button>
-      </div>
-      <div class="slider pos-row"><span class="lbl">Position</span>
-        <input type="range" id="cutPos" aria-label="Position" min="${state.cut.lo}" max="${state.cut.hi}" step="${(state.cut.hi - state.cut.lo) / 1000}" value="${planeOffset()}">
-        <span class="num-wrap"><input type="number" id="cutPosNum" inputmode="decimal" step="0.5" aria-label="Position in millimeters" value="${planeOffset().toFixed(1)}"><em>mm</em></span></div>
-      <span class="lbl angles-lbl">Angle</span>
-      <div class="angles">
-        ${['x', 'y', 'z'].map(a => `<label class="num"><span>${a.toUpperCase()}</span><span class="num-wrap"><input type="number" inputmode="decimal" step="1" data-angle="${a}" aria-label="Turn about ${a.toUpperCase()}" value="${fmtAngle(planeAngles()[a])}"><em>°</em></span></label>`).join('')}
-      </div>
-      <div class="angle-row"><output id="tiltOut"></output><button class="btn small" data-act="straighten" title="Snap the cut square to the nearest axis">Straighten</button></div>
-      ${shown.length > 1 ? `<div class="areas"><p class="lbl">The cut face has ${shown.length} separate areas. Click an area’s label in the view, or untick it here, to leave it joined.</p>
-        <ul>${shown.map((i, k) => `<li data-area-row="${i}"${i === state.cut.hoverArea ? ' class="is-hover"' : ''}><label><input type="checkbox" data-area="${i}" ${state.cut.skip.has(i) ? '' : 'checked'}> Area ${k + 1} <span class="muted">${fmt(regions[i].area)} mm²</span></label></li>`).join('')}</ul></div>` : ''}
-    </div>
-    ${suggestSection()}
-    <div class="ins-section">
-      <h3>Keys</h3>
-      ${seg('keytype', c.type, [['peg', 'Pegs'], ['dowel', 'Dowels'], ['magnet', 'Magnets'], ['none', 'None']])}
+    <div class="ins-section keys" aria-label="Keys">
+      ${seg('keytype', c.type, [['peg', 'Pegs'], ['dowel', 'Dowels'], ['magnet', 'Magnets'], ['none', 'None']]).replace(/data-value="(\w+)"/g, (m, v) => `${m} title="${({ peg: 'A peg on one piece fits a socket in the other', dowel: 'Holes in both pieces, with printable pins. Metal rods work too', magnet: 'Pockets in both pieces, sized for disc magnets', none: 'No keys: flat faces' })[v]}"`)}
       ${c.type === 'none' ? '<p class="muted small">The pieces will have flat faces with nothing to line them up.</p>' : `
-      <p class="muted small">${{ peg: 'A peg on one piece fits a socket in the other.', dowel: 'Both pieces get holes, and Keymaster adds printable pins. Metal rods work too.', magnet: 'Both pieces get pockets sized for disc magnets.' }[c.type]}</p>
+      ${c.type !== 'peg' ? `<p class="muted small type-line">${typeLine}</p>` : ''}
+      <div class="shape-head"><span class="lbl">Shape</span><span class="shape-name">${SHAPE_NAMES[shownShape]}</span></div>
       ${shapePicker(c)}
       <p class="muted small shape-help">${SHAPE_HELP[shownShape]}</p>
-      <div class="row two">
-        ${numField('diameter', shownShape === 'round' ? 'Diameter' : 'Width', c.diameter, { min: 1, step: 0.5 })}
-        ${numField('length', lenLabel, c.length, { min: 0.5, step: 0.5 })}
+      <div class="grid2">
+        ${inlineField('diameter', shownShape === 'round' ? 'Diameter' : 'Width', c.diameter, { min: 1, step: 0.5 })}
+        ${inlineField('length', lenLabel, c.length, { min: 0.5, step: 0.5 })}
       </div>
-      <div class="field"><span class="lbl">Fit</span>
-        ${seg('fit', c.clearance, [['0.1', 'Snug'], ['0.2', 'Standard'], ['0.3', 'Loose']])}
-        <div class="row two">${numField('clearance', 'Gap per side', c.clearance, { min: 0, step: 0.05 })}${numField('margin', 'Wall around keys', c.margin, { min: 0.4, step: 0.2 })}</div>
-      </div>
-      ${shownShape !== 'round' ? `<div class="field direction"><span class="lbl">Direction</span>
-        <label class="check"><input type="checkbox" data-cfg="align" ${c.align !== false ? 'checked' : ''}> Line up with each area’s long side</label>
-        <div class="row two">${numField('turn', 'Turn by', c.turn || 0, { min: -180, max: 180, step: 15, unit: '°' })}</div></div>` : ''}
-      ${c.type === 'peg' ? `<div class="field"><span class="lbl">Pegs go on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}
-        ${taperField(c)}</div>` : ''}
+      <div class="inline"><span class="lbl">Fit</span>${seg('fit', c.clearance, [['0.1', 'Snug'], ['0.2', 'Standard'], ['0.3', 'Loose']])}</div>
+      <div class="grid2">${inlineField('clearance', 'Gap', c.clearance, { min: 0, step: 0.05, aria: 'Gap per side' })}${inlineField('margin', 'Wall', c.margin, { min: 0.4, step: 0.2, aria: 'Wall around keys' })}</div>
+      ${shownShape !== 'round' ? `<div class="grid2 direction"><label class="check"><input type="checkbox" data-cfg="align" ${c.align !== false ? 'checked' : ''}> Line up with area</label>
+        ${inlineField('turn', 'Turn', c.turn || 0, { min: -180, max: 180, step: 15, unit: '°', aria: 'Turn by' })}</div>` : ''}
+      ${c.type === 'peg' ? `<div class="inline"><span class="lbl">Pegs on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}</div>
+        ${taperField(c)}` : ''}
       <div class="row keyrow">
-        <label class="num"><span>Keys per area</span><select data-cfg="perArea">${[1, 2, 3, 4].map(n => `<option ${n === c.perArea ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-        <button class="btn" data-act="auto-keys">${state.cut.auto ? 'Re-place keys' : 'Auto-place keys'}</button>
+        <label class="numi"><span>Keys per area</span><select data-cfg="perArea" aria-label="Keys per area">${[1, 2, 3, 4].map(n => `<option ${n === c.perArea ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <button class="btn small" data-act="auto-keys">${state.cut.auto ? 'Re-place keys' : 'Auto-place keys'}</button>
       </div>
-      ${keyStatus}
       ${state.cut.active >= 0 && state.cut.keys[state.cut.active] ? `<button class="btn small" data-act="remove-key">Remove selected key</button>` : ''}`}
     </div>
     <div class="ins-section cut-action">
+      <div class="key-status" id="keyStatus">${keyStatus}</div>
       <button class="btn cut" data-act="cut">${ICONS.cut}<span>Cut part</span><kbd>Enter</kbd></button>
       <button class="btn ghost small" data-act="export-one">Export this part</button>
     </div>`;
@@ -1628,13 +1626,13 @@
     const num = $('#cutPosNum');
     if (num && document.activeElement !== num) num.value = s.toFixed(1);
     const ang = planeAngles();
-    for (const el of ins.querySelectorAll('[data-angle]')) if (document.activeElement !== el) el.value = fmtAngle(ang[el.dataset.angle]);
+    for (const el of document.querySelectorAll('[data-angle]')) if (document.activeElement !== el) el.value = fmtAngle(ang[el.dataset.angle]);
     const to = $('#tiltOut');
     if (to) { const t = tiltInfo(); to.textContent = t.deg < 0.05 ? `Square to ${t.axis}` : `${t.deg.toFixed(1)}° off ${t.axis}`; }
   }
 
   const ins = $('#inspector');
-  ins.addEventListener('click', (e) => {
+  function onPanelClick(e) {
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const act = b.dataset.act, val = b.dataset.value;
@@ -1646,7 +1644,6 @@
       case 'straighten': straighten(); break;
       case 'find-cuts': findSuggestions(); break;
       case 'suggest': applySuggestion(+val); break;
-      case 'gizmo': setGizmoMode(val); renderInspector(); updateHint(); break;
       case 'keytype': {
         if (c.type === val) break;
         c.type = val;
@@ -1668,8 +1665,8 @@
       case 'scale-custom': scaleAll((+$('#scalePct').value || 100) / 100); break;
       default: break;
     }
-  });
-  ins.addEventListener('change', (e) => {
+  }
+  function onPanelChange(e) {
     const t = e.target;
     if (t.dataset.cfg) {
       const k = t.dataset.cfg;
@@ -1703,13 +1700,15 @@
       }
       renderInspector();
     }
-  });
-  ins.addEventListener('mouseover', (e) => { const r = e.target.closest('[data-area-row]'); if (r) setHoverArea(+r.dataset.areaRow); });
-  ins.addEventListener('mouseout', (e) => {
-    const r = e.target.closest('[data-area-row]');
-    if (r && !(e.relatedTarget && r.contains(e.relatedTarget))) setHoverArea(-1);
-  });
-  ins.addEventListener('input', (e) => {
+  }
+  for (const el of [ins, $('#planeBar')]) {
+    el.addEventListener('mouseover', (e) => { const r = e.target.closest('[data-area-row]'); if (r) setHoverArea(+r.dataset.areaRow); });
+    el.addEventListener('mouseout', (e) => {
+      const r = e.target.closest('[data-area-row]');
+      if (r && !(e.relatedTarget && r.contains(e.relatedTarget))) setHoverArea(-1);
+    });
+  }
+  function onPanelInput(e) {
     const t = e.target;
     if (t.id === 'cutPos') {
       setPlaneOffset(parseFloat(t.value));
@@ -1723,7 +1722,15 @@
       const out = $('#taperOut'); if (out) out.textContent = `${Math.round(state.cfg.taper)}%`;
       renderKeyMarkers();
     }
-  });
+  }
+
+  // The right panel, the cut toolbar along the bottom of the view and the suggestions in the left panel share these.
+  const planeBar = $('#planeBar'), suggestPanel = $('#suggestPanel');
+  for (const el of [ins, planeBar, suggestPanel]) {
+    el.addEventListener('click', onPanelClick);
+    el.addEventListener('change', onPanelChange);
+    el.addEventListener('input', onPanelInput);
+  }
 
   /* ---------------- top bar, empty state, view tools ---------------- */
   $('#openBtn').addEventListener('click', () => fileInput.click());

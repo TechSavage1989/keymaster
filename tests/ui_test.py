@@ -62,7 +62,7 @@ with sync_playwright() as p:
     pg.wait_for_selector('[data-act=cut]')
     pg.wait_for_timeout(600)
     ins = pg.inner_text('#inspector')
-    check('cut panel shown', 'Cut plane' in ins and 'Keys' in ins)
+    check('cut panel shown: key settings on the right, plane controls under the view', pg.is_visible('#planeBar') and 'Pegs' in ins and 'Cut part' in ins and pg.locator('#planeBar #cutPos').count() == 1)
     check('keys auto-placed and ready', 'ready' in ins, ins)
     areas = pg.locator('[data-area]').count()
     print('    areas on cut face:', areas)
@@ -82,7 +82,7 @@ with sync_playwright() as p:
     pg.locator('#areaTags [data-area-tag="1"]').hover()
     pg.wait_for_timeout(100)
     check('hovering a label highlights its row', pg.locator('[data-area-row="1"].is-hover').count() == 1)
-    pg.locator('[data-area-row="2"] label').hover()
+    pg.locator('#planeBar [data-area-row="2"]').hover()
     pg.wait_for_timeout(100)
     check('hovering a row highlights its label', 'is-hover' in (pg.get_attribute('#areaTags [data-area-tag="2"]', 'class') or ''))
     pg.click('#areaTags [data-area-tag="1"]')
@@ -154,7 +154,7 @@ with sync_playwright() as p:
     ins = pg.inner_text('#inspector')
     nokey = pg.locator('#areaTags [data-area-tag] i').count()
     print('    with 6 mm walls:', [l for l in ins.split('\n') if 'No room' in l][:1], 'labels saying no key:', nokey)
-    check('areas without a key are named, with a reason and a fix', 'No room for a key in areas' in ins and 'too narrow for keys this size' in ins and 'Use smaller keys or a thinner wall' in ins and 'keys ready' in ins, ins[-500:])
+    check('areas without a key are named, with a reason and a fix', 'No room for a key in areas' in ins and 'too narrow for keys this size' in ins and 'Try smaller keys or a thinner wall' in ins and 'keys ready' in ins, ins[-500:])
     line = [l for l in ins.split('\n') if 'No room for a key in' in l][0]
     named = len(line.split(':')[0].replace(' and ', ', ').split(', '))
     check('labels mark just the areas with no key', nokey == named and 0 < nokey < pg.locator('#areaTags [data-area-tag]').count(), (nokey, named))
@@ -171,8 +171,9 @@ with sync_playwright() as p:
     # tilt rings and typed angles
     check('angle starts square', 'Square to' in pg.inner_text('#tiltOut'), pg.inner_text('#tiltOut'))
     ins = pg.inner_text('#inspector')
-    check('help explains the arrow and the rings', 'Drag the arrow to slide' in ins and 'Drag a blue ring to tilt' in ins, ins[:400])
-    check('slide and tilt modes offered, slide first', pg.locator('[data-act=gizmo]').count() == 2 and pg.get_attribute('[data-act=gizmo][data-value=translate]', 'aria-pressed') == 'true')
+    hint = pg.inner_text('#hint')
+    check('the hint explains sliding, tilting by plane or ring, and orbiting', 'Drag the arrow to slide' in hint and 'the plane or a ring to tilt' in hint and 'orbit' in hint, hint)
+    check('no separate slide and tilt modes', pg.locator('[data-act=gizmo]').count() == 0)
     check('three angle boxes and a position box', pg.locator('input[data-angle]').count() == 3 and pg.locator('#cutPosNum').count() == 1)
     def angles():
         return {a: float(pg.input_value(f'input[data-angle={a}]')) for a in 'xyz'}
@@ -224,17 +225,20 @@ with sync_playwright() as p:
     pg.click('[data-act=straighten]'); pg.wait_for_timeout(300)
     check('straighten after typing', 'Square to' in pg.inner_text('#tiltOut'))
     pg.click('[data-act=align][data-value=z]'); pg.wait_for_timeout(300)
-    # Tilt mode: drag anywhere on the plane to tip it, like the edge of a tray; the rings still work there
-    pg.click('[data-act=gizmo][data-value=rotate]')
-    pg.wait_for_timeout(300)
-    check('tilt mode explains dragging the plane', 'Drag anywhere on the yellow plane' in pg.inner_text('#inspector') and 'tip it' in pg.inner_text('#hint'), pg.inner_text('#hint'))
-    check('tilt mode stays on', pg.get_attribute('[data-act=gizmo][data-value=rotate]', 'aria-pressed') == 'true')
-    box = pg.locator('#stage canvas').bounding_box()
-    cx, cy = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
-    pg.mouse.move(cx + 120, cy + 10)
+    # drag anywhere on the plane to tip it, like the edge of a tray, with no mode to switch to; clicks still add keys
+    def sheet_point():  # a spot on the plane near its edge that no toolbar, label or message covers
+        for fx, fy in ((1.0, 0.95), (0.95, -0.95), (-0.95, 0.95), (-0.95, -0.95), (1.05, 0), (0, 1.05), (-1.05, 0), (0, -1.05)):
+            x, y = pg.evaluate(f"KeymasterDebug.sheetScreenPoint({fx}, {fy})")
+            if pg.evaluate(f"(() => {{ const e = document.elementFromPoint({x}, {y}); return !!e && e.tagName === 'CANVAS'; }})()") and pg.evaluate(f"(() => {{ const e = document.elementFromPoint({x}, {y - 90}); return !!e && e.tagName === 'CANVAS'; }})()"):
+                return x, y
+        return pg.evaluate("KeymasterDebug.sheetScreenPoint(1.0, 0.95)")
+    x0, y0 = sheet_point()
+    pg.mouse.move(x0, y0)
+    pg.wait_for_timeout(100)
+    check('the plane shows a grab cursor', pg.evaluate("document.querySelector('#stage canvas').style.cursor") == 'grab')
     pg.mouse.down()
     for i in range(1, 11):
-        pg.mouse.move(cx + 120, cy + 10 - 8 * i)
+        pg.mouse.move(x0, y0 - 8 * i)
     tray_chip = pg.is_visible('#dragChip') and 'off' in pg.inner_text('#dragChip')
     pg.mouse.up()
     pg.wait_for_timeout(400)
@@ -243,24 +247,25 @@ with sync_playwright() as p:
     check('dragging the plane tilts it', '° off' in tilt, tilt)
     check('the angle shows by the pointer while tipping', tray_chip)
     check('angle boxes follow the plane drag', any(abs(v) > 0.5 for v in angles().values()), angles())
-    pg.mouse.move(cx + 120, cy - 70)
+    x1, y1 = sheet_point()
+    pg.mouse.move(x1, y1)
     pg.keyboard.down('Shift'); pg.mouse.down()
     for i in range(1, 11):
-        pg.mouse.move(cx + 120, cy - 70 - 8 * i)
+        pg.mouse.move(x1, y1 - 8 * i)
     pg.mouse.up(); pg.keyboard.up('Shift')
     pg.wait_for_timeout(300)
     t2 = pg.inner_text('#tiltOut')
     d1 = float(tilt.split('°')[0]); d2 = float(t2.split('°')[0]) if '°' in t2 else 0
     check('Shift tips the plane more finely', 0 < abs(d2 - d1) < d1, (d1, d2))
-    r0 = pg.inner_text('#tiltOut')
-    ring_drag('x', -70, -85)
-    check('rings work in tilt mode too', pg.inner_text('#tiltOut') != r0, (r0, pg.inner_text('#tiltOut')))
-    n_keys = pg.locator('#partList li[data-id]').count()
-    pg.keyboard.press('w'); pg.wait_for_timeout(200)
-    check('W returns to slide mode', pg.get_attribute('[data-act=gizmo][data-value=translate]', 'aria-pressed') == 'true')
-    pg.keyboard.press('e'); pg.wait_for_timeout(200)
-    check('E switches to tilt mode', pg.get_attribute('[data-act=gizmo][data-value=rotate]', 'aria-pressed') == 'true')
-    pg.click('[data-act=gizmo][data-value=translate]')
+    keys_before = pg.evaluate("document.querySelectorAll('[data-act=remove-key]').length")
+    pg.click('[data-act=align][data-value=z]'); pg.wait_for_timeout(500)
+    # Alt-drag over the plane orbits instead of tipping it
+    t3 = pg.inner_text('#tiltOut')
+    x2, y2 = sheet_point()
+    pg.keyboard.down('Alt'); pg.mouse.move(x2, y2); pg.mouse.down()
+    for i in range(1, 8): pg.mouse.move(x2, y2 - 8 * i)
+    pg.mouse.up(); pg.keyboard.up('Alt'); pg.wait_for_timeout(300)
+    check('Alt-drag over the plane leaves it untouched', pg.inner_text('#tiltOut') == t3, (t3, pg.inner_text('#tiltOut')))
     pg.click('[data-act=align][data-value=z]'); pg.wait_for_timeout(300)
     # typed position
     lo, hi = float(pg.get_attribute('#cutPos', 'min')), float(pg.get_attribute('#cutPos', 'max'))
@@ -386,6 +391,18 @@ with sync_playwright() as p:
     pg.locator('#partList li[data-id] [data-act=select]').nth(1).click()
     pg.wait_for_timeout(500)
     pg.screenshot(path=str(OUT / 'shot_dark.png'))
+    # every setting fits without scrolling on common desktop screens, even in the most crowded case
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
+    pg.click('[data-act=keytype][data-value=peg]'); pg.click('[data-act=shape][data-value=slot]')
+    pg.evaluate("() => { const r = document.querySelector('#taperPct'); r.value = 40; r.dispatchEvent(new Event('change', {bubbles:true})); }")
+    pg.wait_for_timeout(500)
+    for w, h in ((1280, 800), (1366, 768), (1440, 900), (1920, 1080)):
+        pg.set_viewport_size({'width': w, 'height': h}); pg.wait_for_timeout(250)
+        m = pg.evaluate("(() => { const i = document.querySelector('#inspector'), b = document.querySelector('#planeBar'); return [i.scrollHeight - i.clientHeight, b.scrollWidth - b.clientWidth]; })()")
+        check(f'no scrolling needed at {w}×{h}', m[0] <= 1 and m[1] <= 1, m)
+    pg.evaluate("() => { const r = document.querySelector('#taperPct'); r.value = 0; r.dispatchEvent(new Event('change', {bubbles:true})); }")
+    pg.click('[data-act=shape][data-value=round]')
+    pg.keyboard.press('Escape')
     # cut suggestions on a dumbbell: the bar is found as a narrow point, and clicking it puts the cut there
     pg.set_viewport_size({'width': 1440, 'height': 900})
     dumbbell_stl(str(OUT / 'dumbbell.stl'))
@@ -393,7 +410,7 @@ with sync_playwright() as p:
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1 && document.querySelector('#partList .part-name').innerText.includes('dumbbell')", timeout=20000)
     pg.click('#partList li[data-id] [data-act=select]')
     pg.wait_for_selector('[data-act=find-cuts]')
-    check('suggestions start with a find button and an explanation', 'narrow points like wrists' in pg.inner_text('#inspector'))
+    check('suggestions start with a find button and an explanation, in the left panel', 'narrow points like wrists' in pg.inner_text('#suggestPanel') and pg.locator('#suggestPanel [data-act=find-cuts]').count() == 1)
     pg.click('[data-act=find-cuts]')
     pg.wait_for_timeout(50)
     pg.wait_for_selector('.suggest-list, .suggest p:has-text("No clear")', timeout=30000)
