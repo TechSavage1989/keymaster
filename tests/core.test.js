@@ -769,6 +769,103 @@ console.log('file round trips');
   check('zip is valid with 2 entries', zipOk);
 }
 
+console.log('cuts that can be printed and put together');
+{
+  // a closed mesh from filled cubes of size h: a face wherever a filled cube meets an empty one
+  const voxels = (fill, nx, ny, nz, h = 0.5) => {
+    const pos = [], idx = [], vid = new Map();
+    const v = (i, j, k) => { const key = (i * (ny + 1) + j) * (nz + 1) + k; let id = vid.get(key); if (id === undefined) { id = pos.length / 3; vid.set(key, id); pos.push(i * h, j * h, k * h); } return id; };
+    const f = (i, j, k) => i >= 0 && j >= 0 && k >= 0 && i < nx && j < ny && k < nz && fill((i + 0.5) * h, (j + 0.5) * h, (k + 0.5) * h);
+    const quad = (a, b, c, d) => idx.push(a, b, c, a, c, d);
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) {
+      if (!f(i, j, k)) continue;
+      if (!f(i - 1, j, k)) quad(v(i, j, k), v(i, j, k + 1), v(i, j + 1, k + 1), v(i, j + 1, k));
+      if (!f(i + 1, j, k)) quad(v(i + 1, j, k), v(i + 1, j + 1, k), v(i + 1, j + 1, k + 1), v(i + 1, j, k + 1));
+      if (!f(i, j - 1, k)) quad(v(i, j, k), v(i + 1, j, k), v(i + 1, j, k + 1), v(i, j, k + 1));
+      if (!f(i, j + 1, k)) quad(v(i, j + 1, k), v(i, j + 1, k + 1), v(i + 1, j + 1, k + 1), v(i + 1, j + 1, k));
+      if (!f(i, j, k - 1)) quad(v(i, j, k), v(i, j + 1, k), v(i + 1, j + 1, k), v(i + 1, j, k));
+      if (!f(i, j, k + 1)) quad(v(i, j, k + 1), v(i + 1, j, k + 1), v(i + 1, j + 1, k + 1), v(i, j + 1, k + 1));
+    }
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  };
+  const errOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  // 1. too thin to print: two towers on a base, cut just under the top of the short one
+  const towers = voxels((x, y, z) => z < 2 || (x < 10 && z < 20) || (x >= 20 && x < 28 && z < 10.5), 60, 20, 40);
+  check('towers model is closed', towers.report.closed, towers.report);
+  const Ft = K.frameFromNormal([0, 0, 1], [15, 5, 9.75]);
+  const anT = K.analyzePlane(towers.positions, towers.indices, Ft, cfgOf({}), 40);
+  const thin = K.thinAreas(anT, 1.2);
+  check('the short tower’s area would leave a sliver on the clear side', anT.base.regions.length === 2 && thin.length === 1 && thin[0].region === 1 && thin[0].side === 1 && thin[0].thinnest < 0.8, [anT.base.regions.map(r => r.area), thin]);
+  check('a thinner wall setting lets the same cut through', K.thinAreas(anT, 0.6).length === 0);
+  const eT = errOf(() => K.cutMesh(towers.positions, towers.indices, Ft, { scale: 40, cfg: cfgOf({}), minThickness: 1.2 }));
+  check('cutting it is refused, naming the area', eT && eT.code === 'thin' && /area 2/.test(eT.message) && /thinner than 1.2 mm on the clear side/.test(eT.message) && /leave that area joined/.test(eT.message), eT && eT.message);
+  const rT = K.cutMesh(towers.positions, towers.indices, Ft, { scale: 40, cfg: cfgOf({}), minThickness: 1.2, skip: new Set([1]) });
+  check('leaving that area joined, the cut goes through: sealed, volume kept', rT.parts.length === 2 && allClosed(rT.parts) && Math.abs(sumVol(rT.parts) - towers.report.volume) / towers.report.volume < 1e-6, [rT.parts.length, sumVol(rT.parts), towers.report.volume]);
+  // a sphere: grazing the top is refused, a dome a few millimetres tall is fine, and slanted cuts aren't flagged for their sharp edge
+  const ball = K.prepareMesh(uvSphere(20, 96, 64));
+  const thinAt = (n, o, t = 1.2) => K.thinAreas(K.analyzePlane(ball.positions, ball.indices, K.frameFromNormal(n, o), cfgOf({}), 40), t);
+  check('a cut 0.8 mm under the top of a ball leaves a sliver', thinAt([0, 0, 1], [0, 0, 19.2]).length === 1);
+  check('a cut 3 mm under the top leaves a printable dome', thinAt([0, 0, 1], [0, 0, 17]).length === 0);
+  check('a cut through the middle, at a slant, is fine', thinAt([0.5, 0.2, 0.84], [1, 2, 3]).length === 0);
+  const eB = errOf(() => K.cutMesh(ball.positions, ball.indices, K.frameFromNormal([0, 0, 1], [0, 0, 19.2]), { scale: 40, cfg: cfgOf({}), minThickness: 1.2 }));
+  check('one area: the message just says move the cut', eB && eB.code === 'thin' && /^This cut would leave a sliver thinner than 1.2 mm on the clear side/.test(eB.message) && !/joined/.test(eB.message), eB && eB.message);
+  const box = voxels((x, y, z) => x >= 15 && x < 25 && y >= 0 && y < 10, 80, 20, 80);
+  const slant = K.frameFromNormal([Math.sin(1.05), 0, Math.cos(1.05)], [20, 5, 20]);
+  check('a bar cut at a steep slant is fine (its sharp edge prints)', K.thinAreas(K.analyzePlane(box.positions, box.indices, slant, cfgOf({}), 50), 1.2).length === 0);
+  // 2. a crack, not a cut: a square frame cut through one side while the other side stays joined
+  const frame = voxels((x, y, z) => !(x >= 4 && x < 17 && z >= 4 && z < 16), 40, 12, 40);
+  const Ff = K.frameFromNormal([0, 0, 1], [10, 3, 10.25]);
+  const anF = K.analyzePlane(frame.positions, frame.indices, Ff, cfgOf({}), 30);
+  check('the frame’s cut face has two areas', anF.base.regions.length === 2, anF.base.regions.map(r => r.area));
+  const eF = errOf(() => K.cutMesh(frame.positions, frame.indices, Ff, { scale: 30, cfg: cfgOf({}), skip: new Set([0]) }));
+  check('cutting one side with the other joined is refused as a crack', eF && eF.code === 'crack' && /area 2/.test(eF.message) && /only make a crack/.test(eF.message), eF && eF.message);
+  const rF = K.cutMesh(frame.positions, frame.indices, Ff, { scale: 30, cfg: cfgOf({}) });
+  check('cutting both sides gives two sealed pieces', rF.parts.length === 2 && allClosed(rF.parts));
+  // 3. pieces that couldn't be put together: a knob caught inside a C-shaped clamp, joined to the outside by a neck
+  const clamp = voxels((x, y, z) => (x < 2 && z < 13) || (x < 12 && z < 2) || (z >= 10 && z < 13) || (x >= 10 && x < 12 && (z < 4.5 || z >= 7.5) && z < 13)
+    || (x >= 4 && x < 8 && z >= 3 && z < 9) || (x >= 8 && z >= 5 && z < 7) || (x >= 18 && z >= 5 && z < 13), 40, 12, 26);
+  check('clamp model is closed', clamp.report.closed, clamp.report);
+  const Fc = K.frameFromNormal([1, 0, 0], [14.25, 3, 6]);
+  const anC = K.analyzePlane(clamp.positions, clamp.indices, Fc, cfgOf({}), 30);
+  check('the clamp’s cut face crosses the neck and the top bar', anC.base.regions.length === 2, anC.base.regions.map(r => r.area));
+  const eC = errOf(() => K.cutMesh(clamp.positions, clamp.indices, Fc, { scale: 30, cfg: cfgOf({}), skip: new Set([0]) }));
+  check('cutting the neck with the top bar joined is refused: the knob would be caught', eC && eC.code === 'locked' && /area 1 left joined/.test(eC.message) && /couldn’t be put together/.test(eC.message), eC && eC.message);
+  const eC2 = errOf(() => K.cutMesh(clamp.positions, clamp.indices, Fc, { scale: 30, cfg: cfgOf({}) }));
+  check('cutting both leaves the knob caged inside the clamp: refused too', eC2 && eC2.code === 'locked' && /caught inside another/.test(eC2.message), eC2 && eC2.message);
+  const Fc2 = K.frameFromNormal([1, 0, 0], [16.25, 3, 6]); // further out, past the clamp's mouth: the knob and its neck pull straight out
+  check('…but the same model cut elsewhere is fine', allClosed(K.cutMesh(clamp.positions, clamp.indices, K.frameFromNormal([0, 0, 1], [10, 3, 11.25]), { scale: 30, cfg: cfgOf({}) }).parts));
+  // the check itself: a block held in a clamp can't come out along z; a block resting on another can
+  const plate = (x0, x1, z0, z1) => voxels((x, y, z) => x >= x0 && x < x1 && z >= z0 && z < z1, 30, 10, 30);
+  const held = plate(5, 15, 6, 10), cl = voxels((x, y, z) => (z >= 2 && z < 6 && x < 20) || (z >= 10 && z < 14 && x < 20) || (x < 4 && z >= 2 && z < 14), 30, 10, 30);
+  check('a block held in a clamp is locked along z', K.lockedPairs([held, cl], [0, 0, 1], 1e-4).length === 1);
+  check('…even allowing a slant', K.lockedPairs([held, cl], [0, 0, 1], 1e-4, { anyDirection: true }).length === 1);
+  check('…but it slides out sideways, along x', K.lockedPairs([held, cl], [1, 0, 0], 1e-4).length === 0);
+  check('a block resting on another lifts straight off', K.lockedPairs([plate(5, 15, 6, 10), plate(0, 20, 2, 6)], [0, 0, 1], 1e-4).length === 0);
+  // 4. curved cuts: a line round a shallow patch would leave a sliver; the saddle-shaped wavy cut still comes apart
+  const sp2 = K.prepareMesh(uvSphere(20, 96, 64));
+  const ntP = sp2.indices.length / 3, gP = new Int32Array(ntP);
+  for (let q = 0; q < ntP; q++) { let z = 0; for (let k = 0; k < 3; k++) z += sp2.positions[3 * sp2.indices[3 * q + k] + 2]; gP[q] = z / 3 > 19.6 ? 1 : 0; }
+  const lP = K.borderLoops(sp2.positions, K.bordersFromGroups(sp2.positions, sp2.indices, gP)).find(l => l.closed);
+  const eP = errOf(() => K.cutAlongLoop(sp2.positions, sp2.indices, lP, { minThickness: 1.2 }));
+  check('a curved cut round a patch 0.4 mm deep is refused as too thin', eP && eP.code === 'thin' && /thinner than 1.2 mm/.test(eP.message), eP && eP.message);
+  check('…and is fine for a much thinner limit', allClosed(K.cutAlongLoop(sp2.positions, sp2.indices, lP, { minThickness: 0.15 }).parts));
+  // zig-zag lines are straightened so the cap doesn't fold into teeth
+  const gZ = new Int32Array(ntP);
+  for (let q = 0; q < ntP; q++) { let x = 0, y = 0, z = 0; for (let k = 0; k < 3; k++) { const v = 3 * sp2.indices[3 * q + k]; x += sp2.positions[v]; y += sp2.positions[v + 1]; z += sp2.positions[v + 2]; } gZ[q] = z / 3 > 14 * Math.sin(2 * Math.atan2(y, x)) ? 1 : 0; }
+  const lZ = K.borderLoops(sp2.positions, K.bordersFromGroups(sp2.positions, sp2.indices, gZ)).find(l => l.closed);
+  const rZ = K.cutAlongLoop(sp2.positions, sp2.indices, lZ, { minThickness: 1.2 });
+  check('a steep zig-zag line still cuts into pieces that come apart', allClosed(rZ.parts) && Math.abs(sumVol(rZ.parts) - sp2.report.volume) / sp2.report.volume < 1e-6, sumVol(rZ.parts));
+  check('…along a line with fewer zig-zags', rZ.length < lZ.length, [rZ.length, lZ.length]);
+  // a cap that has to be fanned (the line crosses itself when flattened) fans from a point it can see all round,
+  // here a star whose points are crowded along one arm, which pulls the plain average of its points out of the middle
+  const star = [];
+  for (let i = 0; i < 10; i++) { const a = (i / 10) * 2 * Math.PI, r = i % 2 ? 4 : 10; star.push(Math.cos(a) * r, Math.sin(a) * r); if (i === 0) for (let k = 1; k < 40; k++) { const s = k / 40, b = (0.5 / 10) * 2 * Math.PI; star.push((1 - s) * 10 + s * Math.cos(b) * 4, s * Math.sin(b) * 4); } }
+  let avgX = 0, avgY = 0; for (let i = 0; i < star.length; i += 2) { avgX += star[i]; avgY += star[i + 1]; } avgX /= star.length / 2; avgY /= star.length / 2;
+  const shifted = new Float64Array(star.map((v, i) => v - (i % 2 ? avgY : avgX))); // as loopFrame gives it: the average point at (0, 0)
+  const fc = K.fanCentre(shifted);
+  check('a fanned cap is fanned from a point the whole line can be seen from', fc.folded < 1e-9 && Math.hypot(fc[0] + avgX, fc[1] + avgY) < 2, [fc, fc.folded, avgX, avgY]);
+}
+
 console.log('performance on a dense mesh');
 {
   const big = K.prepareMesh(uvSphere(50, 1000, 500));

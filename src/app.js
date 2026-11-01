@@ -27,7 +27,7 @@
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0 },
-    cut: { keys: [], auto: true, skip: new Set(), hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
+    cut: { keys: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, angle: 35 };
   const history = { past: [], future: [] };
@@ -436,6 +436,22 @@
 
   /* ---------------- analysis, keys ---------------- */
   function coreCfg() { return { ...state.cfg, sizeMax: state.cfg.diameter }; }
+  // The thinnest a piece may be: the Wall setting, and never more than the printer handles reliably.
+  function minWall() {
+    const pr = K.PRINTERS[state.cfg.printer === 'resin' ? 'resin' : 'fdm'].wall;
+    return state.cfg.margin > 0 ? Math.min(state.cfg.margin, pr) : pr;
+  }
+  // Areas that would leave a sliver too thin to print, among those listed and set to be cut.
+  function thinShown() {
+    const shown = new Set(shownAreas());
+    return state.cut.stale ? [] : state.cut.thin.filter(q => shown.has(q.region) && !state.cut.skip.has(q.region));
+  }
+  function joinThin() {
+    for (const q of thinShown()) state.cut.skip.add(q.region);
+    if (state.cut.auto) { state.cut.keys = placeKeys(state.cut.analysis); state.cut.why = whyMap(state.cut.keys); }
+    state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
+    evaluateKeys(); renderRegions(); renderKeyMarkers(); renderInspector(); renderAreaTags();
+  }
   // Keys for the current cut: sized to fit each area (the default), or all at the size set in the panel.
   function placeKeys(an) {
     if (!an || an.base.error) return [];
@@ -457,6 +473,7 @@
     state.cut.stale = false;
     state.cut.hoverArea = -1;
     state.cut.labels = an.base.error ? [] : an.base.regions.map((r, ri) => ({ samples: K.regionSamples(an.base, ri), x: 0, y: 0 }));
+    state.cut.thin = an.base.error ? [] : K.thinAreas(an, minWall());
     if (state.cut.focus && !an.base.error) { // a narrow-point suggestion: cut just the limb it found, leave the rest joined
       planeGroup.updateMatrixWorld(true);
       const l = planeGroup.worldToLocal(state.cut.focus.clone());
@@ -534,9 +551,7 @@
   function shownAreas() {
     const an = state.cut.analysis;
     if (!an || an.base.error) return [];
-    const out = [];
-    an.base.regions.forEach((r, i) => { if (!r.inverted && r.area >= 0.05) out.push(i); });
-    return out;
+    return K.shownRegions(an.base.regions);
   }
   function areaCount() { return shownAreas().length; }
   function whyMap(keys) { const m = new Map(); for (const e of keys.empty || []) m.set(e.region, e.reason); return m; }
@@ -568,10 +583,10 @@
     for (const l of state.cut.labels) Object.assign(l, K.pickLabelPoint(l.samples, keys, avoid));
   }
   function renderAreaTags() {
-    const shown = shownAreas(), noKey = new Set(areasWithoutKeys());
+    const shown = shownAreas(), noKey = new Set(areasWithoutKeys()), thin = new Set(thinShown().map(q => q.region));
     tagLayer.innerHTML = shown.length > 1 ? shown.map((i, k) => {
       const cut = !state.cut.skip.has(i);
-      return `<button class="area-tag${i === state.cut.hoverArea ? ' is-hover' : ''}" data-area-tag="${i}" aria-pressed="${cut}" title="${cut ? `Area ${k + 1} will be cut. Click to leave it joined.` : `Area ${k + 1} stays joined. Click to cut it.`}"><b>${k + 1}</b>${cut ? 'Cut' : 'Joined'}${cut && noKey.has(i) ? '<i>no key</i>' : ''}</button>`;
+      return `<button class="area-tag${i === state.cut.hoverArea ? ' is-hover' : ''}" data-area-tag="${i}" aria-pressed="${cut}" title="${cut ? `Area ${k + 1} will be cut. Click to leave it joined.` : `Area ${k + 1} stays joined. Click to cut it.`}"><b>${k + 1}</b>${cut ? 'Cut' : 'Joined'}${cut && thin.has(i) ? '<i>too thin</i>' : cut && noKey.has(i) ? '<i>no key</i>' : ''}</button>`;
     }).join('') : '';
     updateLabelPoints();
     placeAreaTags();
@@ -925,6 +940,11 @@
       toast('Every area is set to stay joined, so nothing would be cut. Click an area’s label to cut it.', 'error');
       return;
     }
+    const thin = thinShown();
+    if (thin.length) {
+      toast(K.thinMessage(an.base.regions, thin, minWall()), 'error', shownNow.length > 1 ? { label: 'Leave joined', fn: joinThin } : undefined);
+      return;
+    }
     const bad = state.cut.evals.filter(e => !e.ok).length;
     if (state.cfg.type !== 'none' && bad) {
       toast(`${bad === 1 ? 'One key needs' : bad + ' keys need'} attention before cutting. Drag ${bad === 1 ? 'it' : 'them'} to a better spot or remove ${bad === 1 ? 'it' : 'them'}.`, 'error', { label: 'Remove', fn: removeBadKeys });
@@ -934,7 +954,7 @@
     await nextFrame();
     let res;
     try {
-      res = K.cutMesh(p.positions, p.indices, currentFrame(), { scale: K.diag(p.bbox), cfg: coreCfg(), keys: state.cut.keys, skip: state.cut.skip });
+      res = K.cutMesh(p.positions, p.indices, currentFrame(), { scale: K.diag(p.bbox), cfg: coreCfg(), keys: state.cut.keys, skip: state.cut.skip, minThickness: minWall() });
     } catch (err) {
       busy(null);
       toast(err.message, 'error');
@@ -1642,6 +1662,11 @@
       const missing = state.cut.keys.length ? areasWithoutKeys() : [];
       if (missing.length && shown.length > 1) keyStatus += `<p class="status warn no-key">${ICONS.alert}<span>${esc(noKeyMessage(missing))}</span></p>`;
     }
+    const thin = thinShown();
+    if (thin.length) { // ahead of everything else: this cut can't be made as it stands
+      const many = shown.length > 1;
+      keyStatus = `<p class="status warn thin">${ICONS.alert}<span>${esc(K.thinMessage(regions, thin, minWall()))}</span></p>${many ? `<button class="btn small" data-act="join-thin">Leave ${new Set(thin.map(q => q.region)).size === 1 ? 'it' : 'them'} joined</button>` : ''}`;
+    }
     const lenLabel = c.type === 'magnet' ? 'Thickness' : 'Length';
     const shownShape = K.keyGeometrySpec(c).shape;
     const typeLine = { peg: 'A peg on one piece fits a socket in the other.', dowel: 'Holes in both pieces, with printable pins. Metal rods work too.', magnet: 'Pockets in both pieces, sized for disc magnets.' }[c.type];
@@ -1728,6 +1753,7 @@
       case 'pegside': c.pegSide = val; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
       case 'auto-keys': state.cut.auto = true; state.cut.active = -1; scheduleAnalysis(0); renderInspector(); break;
       case 'remove-bad': removeBadKeys(); break;
+      case 'join-thin': joinThin(); break;
       case 'remove-key': if (state.cut.active >= 0) removeKey(state.cut.active); break;
       case 'cut': doCut(); break;
       case 'export-one': exportParts(state.selectedId); break;
@@ -1871,10 +1897,14 @@
         }
       } catch (err) { pick.noKeys = 'Keys couldn’t be placed on this line, so it will be cut without them.'; }
     }
-    try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { cfg, keys: pick.keys }); }
+    const minThickness = minWall();
+    try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { cfg, keys: pick.keys, minThickness }); }
     catch (err) {
-      if (pick.keys.length) { // still offer the cut, without keys
-        try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop); pick.keys = []; pick.noKeys = 'Keys didn’t fit cleanly here, so it will be cut without them.'; } catch (e2) { pick.error = e2.message; }
+      if (pick.keys.length && err.code !== 'thin') { // still offer the cut, without keys
+        try {
+          pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { minThickness }); pick.keys = [];
+          pick.noKeys = err.code === 'locked' ? 'Keys would make the pieces slide straight apart, and here they’d catch on each other, so it will be cut without them.' : 'Keys didn’t fit cleanly here, so it will be cut without them.';
+        } catch (e2) { pick.error = e2.message; }
       } else pick.error = err.message;
     }
     state.regions.pick = pick;

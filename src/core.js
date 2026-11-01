@@ -1882,11 +1882,40 @@ const KMCore = (() => {
     }
     return { F, xy, dev, centre: [cx / n, cy / n, cz / n] };
   }
+  // Where to fan a curved cut's cap from: a point the flattened line can be seen from all the way round, if there
+  // is one. Fanned from anywhere else, the cap folds over itself where the line doubles back, and the fold is a
+  // lip that would hook the two pieces together.
+  function fanCentre(xy) {
+    const n = xy.length / 2;
+    let A = 0, ax = 0, ay = 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, c = xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1];
+      A += c; ax += (xy[2 * i] + xy[2 * j]) * c; ay += (xy[2 * i + 1] + xy[2 * j + 1]) * c;
+    }
+    const cands = [[0, 0]];
+    if (Math.abs(A) > 1e-12) cands.push([ax / (3 * A), ay / (3 * A)]);
+    const sec = { loops: [makeLoop([...Array(n).keys()], [], xy)] };
+    sec.regions = buildRegions(sec.loops);
+    let best = null;
+    for (const s of regionSamples(sec, 0, 200)) if (!best || s.clear > best.clear) best = s;
+    if (best) cands.push([best.x, best.y]);
+    const sg = Math.sign(A) || 1;
+    const folded = ([cx, cy]) => {
+      let f = 0;
+      for (let i = 0; i < n; i++) { const j = (i + 1) % n, a = ((xy[2 * i] - cx) * (xy[2 * j + 1] - cy) - (xy[2 * j] - cx) * (xy[2 * i + 1] - cy)) * sg; if (a < 0) f -= a; }
+      return f;
+    };
+    let pick = cands[0], pf = folded(pick);
+    for (const c of cands.slice(1)) { const f = folded(c); if (f < pf - 1e-12) { pf = f; pick = c; } }
+    pick.folded = pf;
+    return pick;
+  }
   /* Keys on a curved cut sit on a flat face on the line's best-fit plane, joined to the line by a thin band, so
      they're placed and checked like keys on a flat cut. The analysis looks like analyzePlane's, with the area
      inside the line as the cut face. A line that strays from its plane by more than about a third of the area's
      width would need too tall a band, so it is marked not flat enough for keys. */
   function analyzeLoop(P, I, loop, cfg, scale) {
+    loop = straightLoop(P, I, loop);
     const { F, xy, dev } = loopFrame(P, loop.verts);
     const L = makeLoop(loop.verts, [], xy);
     const base = { error: null, loops: [L], regions: buildRegions([L]) };
@@ -1898,7 +1927,57 @@ const KMCore = (() => {
     Object.defineProperty(an, '_src', { value: { P, I, F, scale, cfg, cache: new Map() } });
     return an;
   }
+  // A cut line with its zig-zags straightened. Where the line runs along two sides of one triangle and the third
+  // side would do, it takes the third side (the triangle moves to the other piece, and the line moves by less than
+  // a triangle). Lines along mesh edges zig-zag a lot; flattened, a zig-zag doubles back on itself, and the cap
+  // across it would fold into little teeth that hook the pieces together. Cached, so a line's keys and its cut agree.
+  const straightCache = new WeakMap();
+  function straightLoop(P, I, loop) {
+    if (!loop.closed || loop.verts.length < 6) return loop;
+    let byI = straightCache.get(loop);
+    if (byI && byI.I === I) return byI.out;
+    const nv = P.length / 3, ek = (a, b) => (a < b ? a * nv + b : b * nv + a);
+    const ring = loop.verts.slice(), edges = new Map(); // ring edge -> how many times it's used
+    for (let i = 0; i < ring.length; i++) { const k = ek(ring[i], ring[(i + 1) % ring.length]); edges.set(k, (edges.get(k) || 0) + 1); }
+    const count = new Map(); for (const v of ring) count.set(v, (count.get(v) || 0) + 1);
+    const want = new Set(); // edges a-c that would shortcut a corner of the line
+    for (let i = 0; i < ring.length; i++) want.add(ek(ring[(i + ring.length - 1) % ring.length], ring[(i + 1) % ring.length]));
+    const opp = new Map(); // for those edges: the corners of the triangles beside them
+    for (let q = 0; q < I.length; q += 3) for (let k = 0; k < 3; k++) {
+      const key = ek(I[q + k], I[q + (k + 1) % 3]);
+      if (want.has(key)) { const c = I[q + (k + 2) % 3]; const l = opp.get(key); if (l) l.push(c); else opp.set(key, [c]); }
+    }
+    let changed = true;
+    while (changed && ring.length > 5) {
+      changed = false;
+      for (let i = 0; i < ring.length && ring.length > 5; i++) {
+        const n = ring.length, a = ring[(i + n - 1) % n], b = ring[i], c = ring[(i + 1) % n], k = ek(a, c);
+        const o = opp.get(k);
+        if (!o || !o.includes(b) || edges.get(k) || count.get(b) > 1) continue;
+        ring.splice(i, 1); i--;
+        edges.set(ek(a, b), edges.get(ek(a, b)) - 1); edges.set(ek(b, c), edges.get(ek(b, c)) - 1); edges.set(k, 1); count.set(b, 0);
+        changed = true;
+      }
+      if (changed) { // corners made by the shortcuts can be straightened too
+        const more = [];
+        for (let i = 0; i < ring.length; i++) { const k = ek(ring[(i + ring.length - 1) % ring.length], ring[(i + 1) % ring.length]); if (!opp.has(k)) { more.push(k); opp.set(k, null); } }
+        if (more.length) {
+          const add = new Set(more);
+          for (let q = 0; q < I.length; q += 3) for (let k = 0; k < 3; k++) {
+            const key = ek(I[q + k], I[q + (k + 1) % 3]);
+            if (add.has(key)) { const c = I[q + (k + 2) % 3]; const l = opp.get(key); if (l) l.push(c); else opp.set(key, [c]); }
+          }
+        }
+      }
+    }
+    let length = 0;
+    for (let i = 0; i < ring.length; i++) { const a = 3 * ring[i], b = 3 * ring[(i + 1) % ring.length]; length += Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]); }
+    const out = ring.length === loop.verts.length ? loop : { ...loop, verts: ring, length };
+    straightCache.set(loop, { I, out });
+    return out;
+  }
   function cutAlongLoop(P, I, loop, opts = {}) {
+    loop = straightLoop(P, I, loop);
     if (!loop.closed) throw new Error('This border doesn’t go all the way round, so it can’t split the part. Pick one that circles a limb or the edge of a sleeve.');
     const nv = P.length / 3, nt = I.length / 3, ring = loop.verts, n = ring.length;
     const cutEdge = new Set();
@@ -1955,55 +2034,83 @@ const KMCore = (() => {
     const xyOf = (id) => ringXY.get(id);
     splitThroughPoints(cap, [ring], xyOf);
     patchCap(cap, [ring], xyOf, wantCCW);
-    // A border that zig-zags along triangle edges can have triangles with all three corners on it. A cap edge
-    // between two border points could then double up an existing edge of the surface. If it would, or the
-    // border folds over itself when flattened, fan the cap from a centre point instead: a fan only joins border
-    // points to the centre, so it can never repeat a surface edge.
-    const surf = new Set();
-    for (let i = 0; i < tris[1].length; i += 3) for (let k = 0; k < 3; k++) { const a = tris[1][i + k], b = tris[1][i + (k + 1) % 3]; surf.add(a < b ? a * (nv + n + 2) + b : b * (nv + n + 2) + a); }
+    // Where the line passes close to itself, a cap edge between two of its points can double up an existing edge
+    // of the surface (straightening the line removes most of these). If one would, or the line crosses itself when
+    // flattened, the cap is fanned from a centre point instead: a fan only joins line points to the centre, so it
+    // can never repeat a surface edge.
+    const M = nv + n + 2, ek = (a, b) => (a < b ? a * M + b : b * M + a);
+    const surf = new Set(), along = new Set(); // the surface's edges, apart from the line's own (the cap meets those)
+    for (let i = 0; i < n; i++) along.add(ek(ring[i], ring[(i + 1) % n]));
+    for (let i = 0; i < tris[1].length; i += 3) for (let k = 0; k < 3; k++) { const e = ek(tris[1][i + k], tris[1][i + (k + 1) % 3]); if (!along.has(e)) surf.add(e); }
     let clash = keep.length < n;
-    for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) { const a = cap[i + k], b = cap[i + (k + 1) % 3]; if (surf.has(a < b ? a * (nv + n + 2) + b : b * (nv + n + 2) + a)) { clash = true; break; } }
+    for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) if (surf.has(ek(cap[i + k], cap[i + (k + 1) % 3]))) { clash = true; break; }
     const cfg = opts.cfg || { type: 'none' };
     const keys = cfg.type === 'none' ? [] : (opts.keys || []).filter(k => regionAt({ loops: [makeLoop(ring, [], xy)], regions: buildRegions([makeLoop(ring, [], xy)]) }, k.x, k.y) === 0);
     let V = null, pins = [];
     if (keys.length) {
       const a = analyzeLoop(P, I, loop, { type: 'none' }, 1);
       if (!a.curved.flatEnough) throw new Error('This line bends too far out of flat for keys. Cut it without keys (set Keys to None), or use a flat cut here.');
-      ({ V, pins } = keyedLoopCap(pos, tris, ring, copy, xy, F, wantCCW, keys, cfg));
-    } else if (clash) {
-      const c1 = nv + n, c2 = nv + n + 1;
-      for (const c of [c1, c2]) { pos[3 * c] = cx / n; pos[3 * c + 1] = cy / n; pos[3 * c + 2] = cz / n; }
-      cap.length = 0;
-      for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; cap.push(c1, b, a); } // runs against side 1's border, like the earcut cap
-      tris[1].push(...cap);
-      for (let i = 0; i < cap.length; i += 3) tris[2].push(c2, copy.get(cap[i + 2]), copy.get(cap[i + 1]));
-    } else {
-      tris[1].push(...cap);
-      for (let i = 0; i < cap.length; i += 3) tris[2].push(copy.get(cap[i]), copy.get(cap[i + 2]), copy.get(cap[i + 1])); // the same cap, facing the other piece
     }
-    const src = V || pos;
-    const build = (list) => {
-      const map = new Map(), out = [], idx = new Uint32Array(list.length);
-      for (let i = 0; i < list.length; i++) { const v = list[i]; let w = map.get(v); if (w === undefined) { w = out.length / 3; map.set(v, w); out.push(src[3 * v], src[3 * v + 1], src[3 * v + 2]); } idx[i] = w; }
-      const positions = new Float32Array(out);
-      return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions) };
-    };
-    const parts = [build(tris[1]), build(tris[2])];
-    // other shells the border never touched (eyes, separate pieces) stay with the piece around them, or the bigger one
-    if (tris[0].length) {
-      const loose = separateShells(...(() => { const m = build(tris[0]); return [m.positions, m.indices]; })());
-      const shells = loose.length ? loose : [build(tris[0])];
-      for (const sh of shells) {
-        const c = sh.bbox.center;
-        const inside = parts.filter(q => c.every((v, i) => v >= q.bbox.min[i] && v <= q.bbox.max[i]));
-        const host = (inside.length ? inside : parts).reduce((x, y) => (inside.length ? (x.volume < y.volume ? x : y) : (x.volume > y.volume ? x : y)));
-        const m = mergeMeshes([host, sh]);
-        host.positions = m.positions; host.indices = m.indices; host.volume = volume(m.positions, m.indices); host.bbox = bounds(m.positions);
+    const flatCap = cap.slice(), base1 = tris[1].length, base2 = tris[2].length;
+    const makeParts = (fan) => {
+      tris[1].length = base1; tris[2].length = base2;
+      if (keys.length) ({ V, pins } = keyedLoopCap(pos, tris, ring, copy, xy, F, wantCCW, keys, cfg));
+      else if (fan) {
+        const c1 = nv + n, c2 = nv + n + 1, [fx, fy] = fanCentre(xy);
+        const fc = [0, 1, 2].map(k => F.o[k] + F.u[k] * fx + F.v[k] * fy);
+        for (const c of [c1, c2]) { pos[3 * c] = fc[0]; pos[3 * c + 1] = fc[1]; pos[3 * c + 2] = fc[2]; }
+        const fanTris = [];
+        for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; fanTris.push(c1, b, a); } // runs against side 1's border, like the flat cap
+        tris[1].push(...fanTris);
+        for (let i = 0; i < fanTris.length; i += 3) tris[2].push(c2, copy.get(fanTris[i + 2]), copy.get(fanTris[i + 1]));
+      } else {
+        tris[1].push(...flatCap);
+        for (let i = 0; i < flatCap.length; i += 3) tris[2].push(copy.get(flatCap[i]), copy.get(flatCap[i + 2]), copy.get(flatCap[i + 1])); // the same cap, facing the other piece
       }
-    }
+      const src = V || pos;
+      const build = (list) => {
+        const map = new Map(), out = [], idx = new Uint32Array(list.length);
+        for (let i = 0; i < list.length; i++) { const v = list[i]; let w = map.get(v); if (w === undefined) { w = out.length / 3; map.set(v, w); out.push(src[3 * v], src[3 * v + 1], src[3 * v + 2]); } idx[i] = w; }
+        const positions = new Float32Array(out);
+        return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions) };
+      };
+      const parts = [build(tris[1]), build(tris[2])];
+      // other shells the border never touched (eyes, separate pieces) stay with the piece around them, or the bigger one
+      if (tris[0].length) {
+        const loose = separateShells(...(() => { const m = build(tris[0]); return [m.positions, m.indices]; })());
+        const shells = loose.length ? loose : [build(tris[0])];
+        for (const sh of shells) {
+          const c = sh.bbox.center;
+          const inside = parts.filter(q => c.every((v, i) => v >= q.bbox.min[i] && v <= q.bbox.max[i]));
+          const host = (inside.length ? inside : parts).reduce((x, y) => (inside.length ? (x.volume < y.volume ? x : y) : (x.volume > y.volume ? x : y)));
+          const m = mergeMeshes([host, sh]);
+          host.positions = m.positions; host.indices = m.indices; host.volume = volume(m.positions, m.indices); host.bbox = bounds(m.positions);
+        }
+      }
+      return parts;
+    };
+    let parts = makeParts(clash);
+    if (!keys.length && !clash && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(true); // the flat cap didn't seal: fan it instead
     if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // the line rings a dip, so the "piece" would be empty air
       throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
     for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
+    const tol = Math.max(1e-4, diag(bounds(P)) * 2e-6);
+    if (opts.minThickness > 0) { // neither piece may be too thin to print where they meet
+      const t = opts.minThickness, sec = { loops: [makeLoop(ring, [], xy)] };
+      sec.regions = buildRegions(sec.loops);
+      const pts = regionSamples(sec, 0, 300), th = jointThickness(parts[0], parts[1], F, pts, tol), area = sec.regions[0].area, cellArea = area / pts.length;
+      for (const s of ['a', 'b']) {
+        let n = 0, thin = 0, inner = 0;
+        th.forEach((q, i) => { if (!q) return; n++; if (q[s] < t) { thin++; if (pts[i].clear >= t) inner++; } });
+        if (n && (thin === n || inner * cellArea >= Math.max(Math.PI * t * t, 0.4 * area)))
+          throw guardError(`Cutting along this line would leave a piece thinner than ${+t.toFixed(2)} mm, too thin to print. Pick a line round something thicker, or a flat cut here.`, 'thin');
+      }
+    }
+    const mid = parts.map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
+    if (lockedPairs(parts, F.n, tol, { anyDirection: !keys.length, distance: pullDistance(cfg, keys), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
+      throw guardError(keys.length ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
+        : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked');
+    }
     parts.sort((x, y) => y.volume - x.volume);
     return { parts, pins, length: loop.length, frame: F };
   }
@@ -2100,21 +2207,249 @@ const KMCore = (() => {
     return out;
   }
 
+  /* ---------- cuts that can be printed and put together ----------
+     Two rules: no cut may leave a piece too thin to print, and no cut may make pieces that couldn't be put
+     together in the real world. */
+  // Lines along a direction through a mesh. The triangles are projected across the direction (onto the plane's
+  // u and v) and bucketed in a grid, so the heights where any such line meets the surface are quick to find.
+  // Coordinates are measured from the world origin, so one grid serves every slide of the plane.
+  function rayGrid(P, I, F) {
+    const nv = P.length / 3, nt = I.length / 3, { u, v, n } = F;
+    const Q = new Float64Array(nv * 3);
+    let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+    for (let i = 0; i < nv; i++) {
+      const x = P[3 * i], y = P[3 * i + 1], z = P[3 * i + 2];
+      const qx = x * u[0] + y * u[1] + z * u[2], qy = x * v[0] + y * v[1] + z * v[2];
+      Q[3 * i] = qx; Q[3 * i + 1] = qy; Q[3 * i + 2] = x * n[0] + y * n[1] + z * n[2];
+      if (qx < gx0) gx0 = qx; if (qx > gx1) gx1 = qx; if (qy < gy0) gy0 = qy; if (qy > gy1) gy1 = qy;
+    }
+    let len = 0;
+    for (let t = 0; t < nt; t++) { const a = I[3 * t], b = I[3 * t + 1]; len += Math.hypot(Q[3 * a] - Q[3 * b], Q[3 * a + 1] - Q[3 * b + 1]); }
+    let cell = Math.max(1e-6, (len / Math.max(1, nt)) * 2);
+    while (((gx1 - gx0) / cell + 1) * ((gy1 - gy0) / cell + 1) > 4e6) cell *= 1.5;
+    const nx = Math.floor((gx1 - gx0) / cell) + 1, ny = Math.floor((gy1 - gy0) / cell) + 1;
+    // triangles bucketed by grid cell, packed into flat arrays: start[c] .. start[c + 1] in items
+    const span = new Int32Array(nt * 4), start = new Uint32Array(nx * ny + 1);
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const x0 = Math.floor((Math.min(Q[a], Q[b], Q[c]) - gx0) / cell), x1 = Math.floor((Math.max(Q[a], Q[b], Q[c]) - gx0) / cell);
+      const y0 = Math.floor((Math.min(Q[a + 1], Q[b + 1], Q[c + 1]) - gy0) / cell), y1 = Math.floor((Math.max(Q[a + 1], Q[b + 1], Q[c + 1]) - gy0) / cell);
+      span[4 * t] = x0; span[4 * t + 1] = x1; span[4 * t + 2] = y0; span[4 * t + 3] = y1;
+      if ((x1 - x0 + 1) * (y1 - y0 + 1) > 250000) { span[4 * t + 1] = x0 - 1; continue; } // a degenerate sliver seen edge-on: it covers no area
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) start[x * ny + y + 1]++;
+    }
+    for (let c = 0; c < nx * ny; c++) start[c + 1] += start[c];
+    const items = new Uint32Array(start[nx * ny]), fill = start.slice(0, nx * ny);
+    for (let t = 0; t < nt; t++) for (let x = span[4 * t]; x <= span[4 * t + 1]; x++) for (let y = span[4 * t + 2]; y <= span[4 * t + 3]; y++) items[fill[x * ny + y]++] = t;
+    return { Q, I, cell, gx0, gy0, nx, ny, start, items, F };
+  }
+  // Where the line through (X, Y) runs through solid material: [from, to, from, to, ...] as heights along n from
+  // the world origin, lowest first. Each crossing counts in or out by which way the surface faces, so a shell
+  // overlapping another (an eye set into a head) doesn't read as a gap.
+  function solidRuns(g, X, Y) {
+    const out = [], cx = Math.floor((X - g.gx0) / g.cell), cy = Math.floor((Y - g.gy0) / g.cell);
+    if (cx < 0 || cy < 0 || cx >= g.nx || cy >= g.ny) return out;
+    const Q = g.Q, I = g.I, c = cx * g.ny + cy, hits = [];
+    for (let k = g.start[c], e = g.start[c + 1]; k < e; k++) {
+      const t = g.items[k];
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c3 = 3 * I[3 * t + 2];
+      const x1 = Q[b] - Q[a], y1 = Q[b + 1] - Q[a + 1], x2 = Q[c3] - Q[a], y2 = Q[c3 + 1] - Q[a + 1], den = x1 * y2 - x2 * y1;
+      if (Math.abs(den) < 1e-14) continue;
+      const s = ((X - Q[a]) * y2 - x2 * (Y - Q[a + 1])) / den, w = (x1 * (Y - Q[a + 1]) - (X - Q[a]) * y1) / den;
+      if (s < 0 || w < 0 || s + w > 1) continue;
+      hits.push([Q[a + 2] + s * (Q[b + 2] - Q[a + 2]) + w * (Q[c3 + 2] - Q[a + 2]), den > 0 ? -1 : 1]); // facing along n: going up, you leave
+    }
+    hits.sort((p, q) => p[0] - q[0]);
+    let w = 0, from = 0;
+    for (let i = 0; i < hits.length; i++) {
+      if (i && hits[i][1] === hits[i - 1][1] && hits[i][0] - hits[i - 1][0] < 1e-9) continue; // a line through a shared edge crosses once
+      const before = w; w += hits[i][1];
+      if (before <= 0 && w > 0) from = hits[i][0]; else if (before > 0 && w <= 0) out.push(from, hits[i][0]);
+    }
+    return out;
+  }
+  let lastRays = null; // the grid for the latest part and direction, kept while the plane only slides
+  function raysFor(P, I, F) {
+    const key = [...F.u, ...F.v].map(x => x.toFixed(9)).join(',');
+    if (!lastRays || lastRays.P !== P || lastRays.I !== I || lastRays.key !== key) lastRays = { P, I, key, g: rayGrid(P, I, F) };
+    return lastRays.g;
+  }
+  // The areas whose piece on one side would be too thin to print: thinner than t over most of the area (a cut
+  // that skims a bump or runs along a thin plate leaves a flake). The thin band along the edge of any slanted cut is
+  // left out: every cut that meets the surface at an angle has one, and it prints as an ordinary sharp edge.
+  // Returns [{region, side, thinnest}], side -1 for below the plane and +1 for above.
+  function thinAreas(an, t, skip) {
+    const src = an._src;
+    if (!src || an.base.error || !(t > 0)) return [];
+    const F = an.frame, g = raysFor(src.P, src.I, F);
+    const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2], oz = F.o[0] * F.n[0] + F.o[1] * F.n[1] + F.o[2] * F.n[2];
+    const out = [];
+    an.base.regions.forEach((reg, ri) => {
+      if ((skip && skip.has(ri)) || reg.nested || reg.inverted) return;
+      const pts = regionSamples(an.base, ri, 300);
+      const cellArea = reg.area / pts.length;
+      for (const side of [-1, 1]) {
+        let n = 0, thin = 0, inner = 0, thinnest = Infinity;
+        for (const q of pts) {
+          const r = solidRuns(g, q.x + ox + 1.3e-7, q.y + oy + 0.7e-7);
+          let k = 0; while (k < r.length && r[k + 1] < oz) k += 2;
+          if (k >= r.length || r[k] > oz) continue; // a flaw in the surface here; nothing to measure
+          const d = side > 0 ? r[k + 1] - oz : oz - r[k];
+          n++;
+          if (d < t) { thin++; if (q.clear >= t) inner++; }
+          if (d < thinnest) thinnest = d;
+        }
+        if (!n) continue;
+        if (thin === n || inner * cellArea >= Math.max(Math.PI * t * t, 0.4 * reg.area)) out.push({ region: ri, side, thinnest: Math.max(0, thinnest) });
+      }
+    });
+    return out;
+  }
+  // How thick two pieces are where they meet, measured along F.n at points across the joint (x, y in F's frame).
+  // The joint is where a hit on one piece meets a hit on the other. Returns [{a, b}] or null where they don't meet.
+  function jointThickness(A, B, F, pts, tol) {
+    const ga = rayGrid(A.positions, A.indices, F), gb = rayGrid(B.positions, B.indices, F);
+    const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2];
+    const span = (r, i) => (i & 1 ? r[i] - r[i - 1] : r[i + 1] - r[i]); // the solid run that ends (or starts) there
+    return pts.map(q => {
+      const X = q.x + ox + 1.3e-7, Y = q.y + oy + 0.7e-7, ra = solidRuns(ga, X, Y), rb = solidRuns(gb, X, Y);
+      for (let i = 0; i < ra.length; i++) for (let j = 0; j < rb.length; j++) {
+        if ((i & 1) === (j & 1) || Math.abs(ra[i] - rb[j]) > tol) continue; // one piece's run ends where the other's starts
+        return { a: span(ra, i), b: span(rb, j) };
+      }
+      return null;
+    });
+  }
+  // Can A and B be pulled a distance D apart along d, one way or the other, without either passing through the
+  // other? Checked in columns along d, on a grid across it (set slightly off the grid so no column runs exactly down
+  // an edge): in each column the solid stretches of A and of B are compared. A clash only counts where it's deeper
+  // than 0.05 mm and at least three columns wide: smaller ones are slivers where a cut face meets the surface at a
+  // glancing angle, far finer than anything a printer makes. Pieces that already overlap over a wide patch are one
+  // solid modelled inside another (a pin inside a leg): they print as one, so there's nothing to pull apart.
+  function slidesApart(A, B, d, tol, D, step) {
+    const F = frameFromNormal(norm3(d), [0, 0, 0]);
+    const ga = rayGrid(A.positions, A.indices, F), gb = rayGrid(B.positions, B.indices, F);
+    const box = (g) => [g.gx0, g.gy0, g.gx0 + g.nx * g.cell, g.gy0 + g.ny * g.cell];
+    const ba = box(ga), bb = box(gb), x0 = Math.max(ba[0], bb[0]), y0 = Math.max(ba[1], bb[1]), x1 = Math.min(ba[2], bb[2]), y1 = Math.min(ba[3], bb[3]);
+    if (x1 <= x0 || y1 <= y0) return true;
+    const s = Math.max(step, Math.sqrt(((x1 - x0) * (y1 - y0)) / 60000)), nx = Math.ceil((x1 - x0) / s) + 1, ny = Math.ceil((y1 - y0) / s) + 1;
+    const fwd = new Uint8Array(nx * ny), back = new Uint8Array(nx * ny), rest = new Uint8Array(nx * ny), grip = Math.max(tol, 0.05);
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+      const X = x0 + (i + 0.0137) * s, Y = y0 + (j + 0.0291) * s;
+      const ra = solidRuns(ga, X, Y), rb = solidRuns(gb, X, Y);
+      if (!ra.length || !rb.length) continue;
+      for (let p = 0; p < ra.length; p += 2) for (let q = 0; q < rb.length; q += 2) {
+        const a0 = ra[p], a1 = ra[p + 1], b0 = rb[q], b1 = rb[q + 1];
+        if (Math.min(a1 + D, b1) - Math.max(a0, b0) > grip) fwd[i * ny + j] = 1; // A moving ahead would run into this stretch of B
+        if (Math.min(a1, b1) - Math.max(a0 - D, b0) > grip) back[i * ny + j] = 1; // and moving back
+        if (Math.min(a1, b1) - Math.max(a0, b0) > grip) rest[i * ny + j] = 1; // they overlap where they are
+      }
+    }
+    const wide = (m) => {
+      for (let i = 1; i + 1 < nx; i++) for (let j = 1; j + 1 < ny; j++) {
+        const k = i * ny + j;
+        if (m[k] && m[k - 1] && m[k + 1] && m[k - ny] && m[k + ny]) return true;
+      }
+      return false;
+    };
+    return !wide(fwd) || !wide(back) || wide(rest);
+  }
+  // Pairs of pieces that touch but can't be pulled apart: they'd hook round each other. Keys set the direction
+  // (straight along d); with no keys a slant up to 40° from it is allowed too, and any other directions given
+  // (such as from one piece's middle to the other's, along a limb). anyDirection may be a test of the pair. The
+  // pieces must come apart by D (the longest key, or a few millimetres) before anything is in the way.
+  function lockedPairs(parts, d, tol, opts = {}) {
+    const out = [], straight = [norm3(d)], D = opts.distance || 3, step = opts.step || 0.2;
+    const slanted = [...straight, ...(opts.also || []).map(norm3)], F = frameFromNormal(norm3(d), [0, 0, 0]);
+    for (const deg of [20, 40]) for (let k = 0; k < 4; k++) {
+      const a = (k * Math.PI) / 2 + (deg === 40 ? Math.PI / 4 : 0), s = Math.sin((deg * Math.PI) / 180), c = Math.cos((deg * Math.PI) / 180);
+      slanted.push([0, 1, 2].map(i => F.n[i] * c + (F.u[i] * Math.cos(a) + F.v[i] * Math.sin(a)) * s));
+    }
+    const box = (q) => q.bbox || bounds(q.positions);
+    for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
+      const A = parts[i], B = parts[j];
+      if (opts.only && !opts.only(A, B)) continue;
+      const ba = box(A), bb = box(B);
+      if (!ba.min.every((v, k) => v <= bb.max[k] + tol) || !bb.min.every((v, k) => v <= ba.max[k] + tol)) continue;
+      const any = typeof opts.anyDirection === 'function' ? opts.anyDirection(A, B) : opts.anyDirection;
+      if (!(any ? slanted : straight).some(e => slidesApart(A, B, e, tol, D, step))) out.push([i, j]);
+    }
+    return out;
+  }
+  // The areas listed in the interface (and numbered there, in this order): specks and void specks are left out.
+  function shownRegions(regions) { const out = []; regions.forEach((r, i) => { if (!r.inverted && r.area >= 0.05) out.push(i); }); return out; }
+  function areaNames(regions, list) {
+    const shown = shownRegions(regions), nums = list.map(i => shown.indexOf(i) + 1).filter(k => k > 0).sort((a, b) => a - b);
+    if (!nums.length) return 'a small area';
+    return nums.length === 1 ? `area ${nums[0]}` : `areas ${nums.slice(0, -1).join(', ')} and ${nums[nums.length - 1]}`;
+  }
+  // In the interface's terms: the solid half is below the plane (side -1), the clear half above it.
+  function thinMessage(regions, thin, t) {
+    const mm = +t.toFixed(2), areas = [...new Set(thin.map(q => q.region))], sides = new Set(thin.map(q => q.side));
+    const where = sides.size > 1 ? 'on both sides' : sides.has(1) ? 'on the clear side' : 'on the solid side';
+    if (shownRegions(regions).length <= 1) return `This cut would leave a sliver thinner than ${mm} mm ${where}, too thin to print. Move the cut deeper into the model.`;
+    return `Cutting ${areaNames(regions, areas)} would leave a sliver thinner than ${mm} mm ${where}, too thin to print. Move the cut deeper into the model, or leave ${areas.length > 1 ? 'those areas' : 'that area'} joined.`;
+  }
+
+
   /* ---------- the cut ---------- */
   // Every exported part must be a closed solid. Real sculpts carry microscopic defects (self-crossing folds,
   // near-duplicate points) that can still defeat the cap at one exact plane position, so check the result and,
   // if any part is open, redo the cut a hundredth of a millimetre or so either side. The keys keep their place.
   function cutMesh(P, I, F, opts) {
     const scale = opts.scale || 1, step = scale * 5e-5;
-    for (const k of [0, 1, -1, 2, -2, 4, -4]) {
-      const Fk = k ? shiftFrame(F, k * step) : F;
-      const res = cutOnce(P, I, Fk, opts);
-      if (res.parts.every(q => edgeReport(q.indices).closed) && res.pins.every(q => edgeReport(q.indices).closed)) {
-        res.retries = Math.abs(k) && [0, 1, -1, 2, -2, 4, -4].indexOf(k);
-        return res;
+    const skip = opts.skip || new Set();
+    // No piece may be too thin to print. Listed areas stop the cut; a thin speck too small to list (the tip of a
+    // strand of hair) is quietly left joined, so it stays on its strand instead of becoming a crumb.
+    let joinSpecks = null;
+    if (opts.minThickness > 0) {
+      const base = section(P, I, F, scale);
+      if (!base.error) {
+        const an = { frame: F, base, depth: [] };
+        Object.defineProperty(an, '_src', { value: { P, I, F, scale, cache: new Map() } });
+        const thin = thinAreas(an, opts.minThickness, skip), shown = new Set(shownRegions(base.regions));
+        const bad = thin.filter(q => shown.has(q.region));
+        if (bad.length) throw guardError(thinMessage(base.regions, bad, opts.minThickness), 'thin', { thin: bad });
+        if (thin.length) {
+          joinSpecks = new Set([...skip, ...thin.map(q => q.region)]);
+          if (base.regions.every((r, i) => joinSpecks.has(i))) throw guardError(`This cut only grazes the surface, so the piece it cut off would be thinner than ${+opts.minThickness.toFixed(2)} mm, too thin to print. Move the cut deeper into the model.`, 'thin', { thin });
+        }
       }
     }
-    throw new Error('Keymaster couldn’t make sealed pieces at this exact spot because the model has a tiny flaw here. Move the cut slightly and try again.');
+    const attempt = (sk) => {
+      for (const k of [0, 1, -1, 2, -2, 4, -4]) {
+        const Fk = k ? shiftFrame(F, k * step) : F;
+        const res = cutOnce(P, I, Fk, { ...opts, skip: sk });
+        if (res.parts.every(q => edgeReport(q.indices).closed) && res.pins.every(q => edgeReport(q.indices).closed)) {
+          res.retries = Math.abs(k) && [0, 1, -1, 2, -2, 4, -4].indexOf(k);
+          checkLocks(res, Fk, sk, opts, scale);
+          return res;
+        }
+      }
+      throw new Error('Keymaster couldn’t make sealed pieces at this exact spot because the model has a tiny flaw here. Move the cut slightly and try again.');
+    };
+    if (joinSpecks) { try { return attempt(joinSpecks); } catch (e) { if (e.code !== 'crack' && e.code !== 'locked') throw e; } }
+    return attempt(skip);
+  }
+  // How far apart pieces must slide before they're free: past the longest key, and at least 3 mm.
+  function pullDistance(cfg, keys) {
+    let L = 0;
+    if (cfg && cfg.type !== 'none') for (const k of keys || [{}]) L = Math.max(L, keyCfg(cfg, k).length || 0);
+    return Math.max(3, L + 1);
+  }
+  function guardError(message, code, extra) { const e = new Error(message); e.code = code; Object.assign(e, extra || {}); return e; }
+  // Pieces on opposite sides of a flat cut always come apart. But a piece that reaches across the cut (through an
+  // area left joined) can hook round the piece it meets, and a piece can be caged inside another on its own side
+  // (a part of the model that was only held by what was cut away). Every such pair has to come apart, straight
+  // along the keys, or at a slant when there are none. Two pieces on the same side don't meet each other, so one
+  // can always go in last, at a slant.
+  function checkLocks(res, F, skip, opts, scale) {
+    const cfg = opts.cfg || { type: 'none' }, unkeyed = cfg.type === 'none' || !res.keysUsed;
+    const locked = lockedPairs(res.parts, F.n, Math.max(1e-4, scale * 2e-6), { anyDirection: (A, B) => unkeyed || A.side === B.side, distance: pullDistance(cfg, opts.keys), only: (A, B) => A.side === 'both' || B.side === 'both' || A.side === B.side });
+    if (!locked.length) return;
+    const across = locked.some(([i, j]) => res.parts[i].side === 'both' || res.parts[j].side === 'both');
+    throw guardError(across && skip.size ? `With ${areaNames(res.regions, [...skip])} left joined, the pieces would hook round each other, so they couldn’t be put together after printing. Cut more areas, or move the cut.`
+      : 'This cut would leave a piece caught inside another, so they couldn’t be put together after printing. Move or turn the cut.', 'locked', { locked });
   }
   function cutOnce(P, I, F, opts) {
     const scale = opts.scale || 1;
@@ -2251,8 +2586,15 @@ const KMCore = (() => {
       if (cfg.type === 'dowel') for (const k of myKeys) pins.push(makePin(at, k, k.spec, k.cfg.length));
     });
 
-    const comps = splitComponents(V.a.subarray(0, V.n), T.view(), nv, spans, Fs);
-    return { parts: comps, pins, shift: sec.shift, keysUsed: keys.filter(k => k.region >= 0 && !skip.has(k.region)).length };
+    // An area whose two faces end up in the same piece (the joined areas hold them together) would only be a crack.
+    const shown = shownRegions(regions), pairs = [];
+    for (const ri of shown) if (!skip.has(ri)) { const q = loops[regions[ri].outer].ids[0]; pairs.push([nv + q, nv + np + q, ri]); }
+    const comps = splitComponents(V.a.subarray(0, V.n), T.view(), nv, spans, Fs, pairs);
+    if (comps.cracked.length) {
+      const names = areaNames(regions, comps.cracked), one = comps.cracked.length === 1;
+      throw guardError(`The joined areas hold both sides of ${names} together, so cutting ${one ? 'it' : 'them'} would only make a crack, not separate pieces. Cut another area too, or leave ${one ? 'it' : 'them'} joined.`, 'crack', { regions: comps.cracked });
+    }
+    return { parts: comps, pins, shift: sec.shift, regions, keysUsed: keys.filter(k => k.region >= 0 && !skip.has(k.region)).length };
   }
 
   function makePin(at, k, spec, L) {
@@ -2280,13 +2622,14 @@ const KMCore = (() => {
     return { positions: new Float32Array(pv), indices: new Uint32Array(pi) };
   }
 
-  function splitComponents(V, T, nvOrig, spans, F) {
+  function splitComponents(V, T, nvOrig, spans, F, pairs = []) {
     const nv = V.length / 3, nt = T.length / 3;
     const parent = new Int32Array(nv);
     for (let i = 0; i < nv; i++) parent[i] = i;
     const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
     const unite = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[a] = b; };
     for (let t = 0; t < nt; t++) { unite(T[3 * t], T[3 * t + 1]); unite(T[3 * t], T[3 * t + 2]); }
+    const cracked = pairs.filter(([a, b]) => find(a) === find(b)).map(q => q[2]);
     const compOf = new Map();
     const comps = [];
     for (let t = 0; t < nt; t++) {
@@ -2335,7 +2678,9 @@ const KMCore = (() => {
       host.positions = merged.positions; host.indices = merged.indices;
       host.volume = volume(merged.positions, merged.indices); host.bbox = bounds(merged.positions);
     }
-    return keep.map(c => ({ positions: c.positions, indices: c.indices, volume: c.volume, side: c.spans ? 'both' : c.side }));
+    const out = keep.map(c => ({ positions: c.positions, indices: c.indices, volume: c.volume, side: c.spans ? 'both' : c.side }));
+    out.cracked = cracked;
+    return out;
   }
   function mergeMeshes(list) {
     let nP = 0, nI = 0;
@@ -2495,6 +2840,7 @@ const KMCore = (() => {
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
     segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop,
+    thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
 })();
