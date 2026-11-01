@@ -1,0 +1,2865 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Keymaster</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #E4E5E2;
+  --panel: #F5F5F3;
+  --panel-2: #ECEDEA;
+  --ink: #1E2124;
+  --muted: #646A70;
+  --line: #D3D5D1;
+  --field: #FFFFFF;
+  --cut: #F2B705;
+  --cut-hover: #FFC61A;
+  --cut-ink: #1B1A15;
+  --warn: #B04A12;
+  --warn-bg: #FBEBDD;
+  --ok: #2C7A4E;
+  --danger: #C8343A;
+  --focus: #2E6BD8;
+  --stage-a: #C4C7CB;
+  --stage-b: #8D9298;
+  --stage-ink: #1E2124;
+  --chip: rgba(255,255,255,.78);
+  color-scheme: light;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #141618; --panel: #1C1F22; --panel-2: #23272A; --ink: #E6E7E8; --muted: #9AA0A6; --line: #30353A; --field: #25292D;
+    --warn: #F0A06A; --warn-bg: #3A2618; --ok: #6CC596; --danger: #F07177; --focus: #7FA8F0;
+    --stage-a: #50555B; --stage-b: #26292D; --stage-ink: #E6E7E8; --chip: rgba(28,31,34,.82);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #141618; --panel: #1C1F22; --panel-2: #23272A; --ink: #E6E7E8; --muted: #9AA0A6; --line: #30353A; --field: #25292D;
+  --warn: #F0A06A; --warn-bg: #3A2618; --ok: #6CC596; --danger: #F07177; --focus: #7FA8F0;
+  --stage-a: #50555B; --stage-b: #26292D; --stage-ink: #E6E7E8; --chip: rgba(28,31,34,.82);
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+body {
+  height: 100%; margin: 0; background: var(--page); color: var(--ink);
+  font-family: 'Barlow', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+  font-size: 14px; line-height: 1.45; font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased; overflow: hidden;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--panel); }
+h1, h2, h3, p { margin: 0; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.app { display: grid; grid-template-rows: 52px minmax(0, 1fr); height: 100%; }
+.bar {
+  display: flex; align-items: center; gap: 16px; padding: 0 14px 0 16px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 18px; letter-spacing: .01em; }
+.brand svg { width: 26px; height: 26px; }
+.bar-mid { display: flex; align-items: center; gap: 10px; margin-left: 18px; flex: 1; }
+.hist { display: flex; gap: 2px; }
+
+.layout { display: grid; grid-template-columns: 252px minmax(0, 1fr) 320px; min-height: 0; }
+.parts-panel, .inspector { background: var(--panel); min-height: 0; overflow: auto; }
+.parts-panel { border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+.inspector { border-left: 1px solid var(--line); }
+
+/* buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 32px; padding: 5px 12px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--field); cursor: pointer;
+  font-weight: 500; white-space: nowrap; transition: background-color .12s, border-color .12s;
+}
+.btn:hover { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.small { min-height: 28px; padding: 3px 9px; font-size: 13px; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--ink); border-color: var(--line); }
+.btn.primary { background: var(--ink); color: var(--panel); border-color: var(--ink); font-weight: 600; }
+.btn.primary:hover { background: color-mix(in srgb, var(--ink) 85%, var(--panel)); }
+.btn.cut { background: var(--cut); border-color: color-mix(in srgb, var(--cut) 70%, #000); color: var(--cut-ink); font-weight: 600; }
+.btn.cut:hover { background: var(--cut-hover); }
+.btn svg { width: 18px; height: 18px; }
+.btn kbd { font: inherit; font-size: 12px; font-weight: 500; opacity: .62; margin-left: 4px; }
+.icon-btn {
+  display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 7px;
+  border: 1px solid transparent; background: transparent; cursor: pointer; color: var(--ink);
+}
+.icon-btn:hover { background: var(--panel-2); }
+.icon-btn:disabled { opacity: .35; cursor: default; background: transparent; }
+.icon-btn svg { width: 18px; height: 18px; }
+
+/* parts list */
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 16px 16px 8px; }
+h2 { font-size: 16px; font-weight: 600; line-height: 1.25; }
+h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.part-list { list-style: none; margin: 0; padding: 0 8px; flex: 1; }
+.parts-empty { color: var(--muted); padding: 6px 8px; font-size: 13px; }
+.part { display: flex; align-items: center; border-radius: 8px; margin-bottom: 2px; }
+.part:hover { background: var(--panel-2); }
+.part.is-selected { background: color-mix(in srgb, var(--cut) 22%, var(--panel)); box-shadow: inset 3px 0 0 var(--cut); }
+.part.is-hidden .part-text, .part.is-hidden .swatch { opacity: .45; }
+.part-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 7px 4px 7px 8px; background: none; border: 0; cursor: pointer; text-align: left; border-radius: 8px; }
+.swatch { width: 14px; height: 14px; border-radius: 4px; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.18); }
+.part-text { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.part-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.part-dims { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fit { font-size: 11.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; flex: none; }
+.fit.ok { color: var(--ok); }
+.fit.no { color: var(--warn); background: var(--warn-bg); }
+.eye { color: var(--muted); flex: none; }
+.rename { width: 100%; padding: 2px 6px; border: 1px solid var(--focus); border-radius: 5px; background: var(--field); }
+.tip { padding: 10px 16px 16px; }
+
+/* stage */
+.stage {
+  position: relative; overflow: hidden; min-height: 0;
+  background: radial-gradient(120% 90% at 50% 18%, var(--stage-a), var(--stage-b));
+  touch-action: none;
+}
+.stage canvas { position: absolute; inset: 0; display: block; }
+.stage.dropping::after {
+  content: "Drop to open"; position: absolute; inset: 14px; display: grid; place-items: center;
+  border: 2px dashed var(--cut); border-radius: 16px; background: rgba(242,183,5,.12);
+  font-size: 20px; font-weight: 600; color: var(--stage-ink); pointer-events: none;
+}
+.empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; }
+.empty-card { max-width: 380px; text-align: center; color: var(--stage-ink); }
+.empty-card svg { width: 168px; height: auto; margin-bottom: 18px; }
+.empty-card h1 { font-size: 26px; font-weight: 600; line-height: 1.15; margin-bottom: 8px; letter-spacing: -.005em; }
+.empty-card p { font-size: 15px; margin-bottom: 20px; opacity: .8; }
+.empty-card .row { justify-content: center; }
+.view-tools { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--chip); backdrop-filter: blur(8px); }
+.view-tools .icon-btn[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+.hint {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: min(92%, 640px);
+  padding: 7px 14px; border-radius: 999px; background: var(--chip); backdrop-filter: blur(8px);
+  font-size: 13px; text-align: center; color: var(--ink); pointer-events: none;
+}
+.toast {
+  position: absolute; left: 50%; top: 14px; transform: translateX(-50%); max-width: min(92%, 560px);
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 10px;
+  background: var(--ink); color: var(--panel); box-shadow: 0 8px 28px rgba(0,0,0,.22); font-size: 14px;
+}
+.toast.error { background: var(--danger); color: #fff; }
+.toast.warn { background: var(--warn); color: #fff; }
+.toast .btn { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.4); color: inherit; }
+.busy {
+  position: absolute; inset: 0; display: grid; place-items: center; background: rgba(20,22,24,.18); color: var(--ink);
+}
+.busy > span { display: inline-flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; background: var(--panel); font-weight: 500; box-shadow: 0 8px 28px rgba(0,0,0,.18); }
+.busy > span::before { content: ""; width: 15px; height: 15px; border: 2.5px solid var(--cut); border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .busy > span::before { animation: none; } }
+.fatal { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--stage-ink); font-size: 16px; }
+[hidden] { display: none !important; }
+
+/* inspector */
+.ins-section { padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.ins-section:last-child { border-bottom: 0; }
+.ins-section.cut-action { border-bottom: 0; }
+.ins-section.intro p { margin-top: 10px; max-width: 60ch; }
+.ins-section.head { padding-bottom: 12px; }
+.head-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.facts { display: grid; gap: 4px; margin: 10px 0 12px; }
+.facts div { display: flex; justify-content: space-between; gap: 10px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-weight: 500; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.row.tight { flex-wrap: nowrap; align-items: flex-end; }
+.row.two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.row.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.row.align { gap: 4px; }
+.row.keyrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+.grow { flex: 1; }
+.lbl { color: var(--muted); font-size: 13px; margin-right: 4px; }
+.field { margin-top: 12px; }
+.field > .lbl { display: block; margin-bottom: 5px; }
+.seg { display: flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--line); margin-top: 2px; }
+.seg button { flex: 1; min-height: 28px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; font-weight: 500; font-size: 13px; color: var(--muted); }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--field); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 0 0 1px var(--line); }
+.ins-section .seg + .seg, .ins-section .muted + .seg { margin-top: 10px; }
+.ins-section .seg + p { margin-top: 8px; }
+.status ~ .btn.small { margin-top: 8px; margin-right: 6px; }
+.num { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); margin-top: 10px; min-width: 0; }
+.num-wrap { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--field); padding-right: 8px; }
+.num-wrap:focus-within { border-color: var(--focus); }
+.num input { width: 100%; min-width: 0; border: 0; background: transparent; padding: 6px 8px; color: var(--ink); font-size: 14px; outline: none; }
+.num em { font-style: normal; color: var(--muted); font-size: 12.5px; }
+.num select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--field); color: var(--ink); font-size: 14px; }
+.check { display: flex; gap: 8px; align-items: center; margin-top: 10px; cursor: pointer; }
+.check input, .areas input { accent-color: var(--ink); width: 16px; height: 16px; }
+.slider { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-top: 12px; }
+.slider output { min-width: 72px; text-align: right; font-weight: 500; }
+.angle-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.angle-row output { flex: 1; font-weight: 500; }
+.mode-help { margin-top: 8px; }
+input[type=range] { width: 100%; accent-color: var(--ink); }
+.areas { margin-top: 14px; }
+.areas ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.areas label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.status { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: 13px; line-height: 1.4; }
+.status svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.status.ok { color: var(--ok); }
+.status.warn { color: var(--warn); }
+.status + .btn { margin-top: 8px; }
+.cut-action { display: grid; gap: 8px; position: sticky; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -6px 14px -10px rgba(0,0,0,.25); }
+.btn.cut { min-height: 42px; font-size: 15px; }
+
+@media (max-width: 1080px) { .layout { grid-template-columns: 220px minmax(0, 1fr) 296px; } }
+@media (max-width: 860px) {
+  body { overflow: auto; }
+  .app { height: auto; min-height: 100%; }
+  .bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; gap: 8px; padding: 0 10px; }
+  .bar-mid { margin-left: 4px; gap: 4px; }
+  .brand span { display: none; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .stage { height: 58vh; min-height: 320px; order: 0; }
+  .inspector { order: 1; border-left: 0; overflow: visible; }
+  .parts-panel { order: 2; border-right: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .cut-action { position: static; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand">
+      <svg viewBox="0 0 28 28" aria-hidden="true">
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h15A2.5 2.5 0 0 1 24 5.5V12H4z" fill="currentColor"/>
+        <rect x="11" y="12" width="6" height="4" fill="currentColor"/>
+        <path d="M4 16.5h7v-0.5M17 16h7v6.5a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 4 22.5V16" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
+      </svg>
+      <span>Keymaster</span>
+    </div>
+    <div class="bar-mid">
+      <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
+      <div class="hist">
+        <button class="icon-btn" id="undoBtn" aria-label="Undo" title="Undo (Ctrl+Z)" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5L3.5 9l4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 9h8a4.5 4.5 0 0 1 0 9h-2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+        <button class="icon-btn" id="redoBtn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 9H8a4.5 4.5 0 0 0 0 9h2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+      </div>
+    </div>
+    <button class="btn primary" id="exportBtn" disabled title="Save every part as an STL, bundled in a ZIP">Export parts</button>
+  </header>
+  <main class="layout">
+    <aside class="parts-panel" aria-label="Parts">
+      <div class="panel-head"><h2>Parts</h2><span id="partsMeta" class="muted small"></span></div>
+      <ul id="partList" class="part-list"></ul>
+      <p class="tip muted small">Double-click a name to rename it. Parts are checked against your printer bed size.</p>
+    </aside>
+    <section class="stage" id="stage">
+      <div class="empty" id="empty">
+        <div class="empty-card">
+          <svg viewBox="0 0 168 120" aria-hidden="true">
+            <path d="M34 18c0-6 5-10 11-10h78c6 0 11 4 11 10v36H34z" fill="#CFC8BD" stroke="#1E2124" stroke-width="2"/>
+            <rect x="62" y="54" width="14" height="12" fill="#FAFBFC" stroke="#1E2124" stroke-width="2"/>
+            <rect x="96" y="54" width="14" height="12" fill="#FAFBFC" stroke="#1E2124" stroke-width="2"/>
+            <path d="M34 72h26v-2h18v2h16v-2h18v2h22v28c0 6-5 10-11 10H45c-6 0-11-4-11-10z" fill="#8FB096" stroke="#1E2124" stroke-width="2"/>
+            <path d="M18 62h132" stroke="#F2B705" stroke-width="3" stroke-dasharray="7 4"/>
+          </svg>
+          <h1>Open a model to start</h1>
+          <p>Drop an STL or OBJ here, or choose a file. Keymaster splits it into printable pieces with keys that line them up.</p>
+          <div class="row">
+            <button class="btn cut" id="emptyOpen">Open STL or OBJ</button>
+            <button class="btn" id="emptySample">Try the sample</button>
+          </div>
+        </div>
+      </div>
+      <div class="view-tools" id="viewTools" hidden>
+        <button class="icon-btn" id="frameBtn" aria-label="Frame the model" title="Frame the model (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="10" cy="10" r="2.5" fill="currentColor"/></svg></button>
+        <button class="icon-btn" id="wireBtn" aria-label="Show wireframe" aria-pressed="false" title="Show wireframe"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7zM10 2.5v15M3 6.5l14 7M17 6.5l-14 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
+      </div>
+      <p class="hint" id="hint" hidden></p>
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+      <div class="busy" id="busy" hidden><span>Working</span></div>
+      <div class="fatal" id="fatal" hidden><p>The 3D viewer couldn’t load. Check your connection and reload the page.</p></div>
+    </section>
+    <aside class="inspector" id="inspector" aria-label="Settings"></aside>
+  </main>
+</div>
+<input type="file" id="fileInput" accept=".stl,.obj" hidden>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/TransformControls.js"></script>
+<script>
+/* Keymaster geometry core. Pure JavaScript, no dependencies, so it can be tested in Node
+   and later moved into a Web Worker unchanged. Units are millimeters throughout. */
+const KMCore = (() => {
+  'use strict';
+
+  /* ---------- growable typed lists ---------- */
+  class F64List {
+    constructor(cap) { this.a = new Float64Array(Math.max(16, cap | 0)); this.n = 0; }
+    reserve(extra) {
+      if (this.n + extra <= this.a.length) return;
+      let c = this.a.length * 2; while (c < this.n + extra) c *= 2;
+      const b = new Float64Array(c); b.set(this.a.subarray(0, this.n)); this.a = b;
+    }
+    push3(x, y, z) { this.reserve(3); const a = this.a, n = this.n; a[n] = x; a[n + 1] = y; a[n + 2] = z; this.n = n + 3; return n / 3; }
+  }
+  class U32List {
+    constructor(cap) { this.a = new Uint32Array(Math.max(16, cap | 0)); this.n = 0; }
+    reserve(extra) {
+      if (this.n + extra <= this.a.length) return;
+      let c = this.a.length * 2; while (c < this.n + extra) c *= 2;
+      const b = new Uint32Array(c); b.set(this.a.subarray(0, this.n)); this.a = b;
+    }
+    push3(x, y, z) { this.reserve(3); const a = this.a, n = this.n; a[n] = x; a[n + 1] = y; a[n + 2] = z; this.n = n + 3; }
+    view() { return this.a.subarray(0, this.n); }
+  }
+
+  /* ---------- open-addressing map keyed by an ordered int pair ---------- */
+  function nextPow2(n) { let p = 16; while (p < n) p *= 2; return p; }
+  class PairMap {
+    constructor(expected) { this._alloc(nextPow2(Math.ceil(Math.max(8, expected) * 2))); }
+    _alloc(size) {
+      this.mask = size - 1; this.ka = new Int32Array(size).fill(-1);
+      this.kb = new Int32Array(size); this.val = new Int32Array(size);
+      this.count = 0; this.limit = Math.floor(size * 0.7);
+    }
+    _slot(a, b) {
+      let h = Math.imul(a ^ 0x5bd1e995, 0x9E3779B1) ^ Math.imul(b + 0x27d4eb2d, 0x85EBCA77);
+      h ^= h >>> 15;
+      const ka = this.ka, kb = this.kb, m = this.mask;
+      let i = h & m;
+      for (;;) {
+        const k = ka[i];
+        if (k === -1 || (k === a && kb[i] === b)) return i;
+        i = (i + 1) & m;
+      }
+    }
+    get(a, b) { const i = this._slot(a, b); return this.ka[i] === -1 ? -1 : this.val[i]; }
+    set(a, b, v) {
+      let i = this._slot(a, b);
+      if (this.ka[i] === -1) {
+        if (this.count + 1 > this.limit) { this._grow(); i = this._slot(a, b); }
+        this.ka[i] = a; this.kb[i] = b; this.count++;
+      }
+      this.val[i] = v;
+    }
+    inc(a, b) {
+      let i = this._slot(a, b);
+      if (this.ka[i] === -1) {
+        if (this.count + 1 > this.limit) { this._grow(); i = this._slot(a, b); }
+        this.ka[i] = a; this.kb[i] = b; this.val[i] = 0; this.count++;
+      }
+      return ++this.val[i];
+    }
+    _grow() {
+      const oka = this.ka, okb = this.kb, ov = this.val;
+      this._alloc((this.mask + 1) * 2);
+      for (let i = 0; i < oka.length; i++) {
+        if (oka[i] === -1) continue;
+        const j = this._slot(oka[i], okb[i]);
+        this.ka[j] = oka[i]; this.kb[j] = okb[i]; this.val[j] = ov[i]; this.count++;
+      }
+    }
+  }
+
+  /* ---------- earcut-style polygon triangulation (with holes) ---------- */
+  function earcut(data, holeIndices) {
+    const dim = 2;
+    const hasHoles = holeIndices && holeIndices.length;
+    const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
+    let outerNode = linkedList(data, 0, outerLen, dim, true);
+    const triangles = [];
+    if (!outerNode || outerNode.next === outerNode.prev) return triangles;
+    let minX = 0, minY = 0, invSize = 0;
+    if (hasHoles) outerNode = eliminateHoles(data, holeIndices, outerNode, dim);
+    if (data.length > 80 * dim) {
+      minX = Infinity; minY = Infinity; let maxX = -Infinity, maxY = -Infinity;
+      for (let i = 0; i < outerLen; i += dim) {
+        const x = data[i], y = data[i + 1];
+        if (x < minX) minX = x; if (y < minY) minY = y; if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+      }
+      invSize = Math.max(maxX - minX, maxY - minY);
+      invSize = invSize !== 0 ? 32767 / invSize : 0;
+    }
+    earcutLinked(outerNode, triangles, dim, minX, minY, invSize, 0);
+    return triangles;
+  }
+  function linkedList(data, start, end, dim, clockwise) {
+    let last;
+    if (clockwise === (ringArea(data, start, end, dim) > 0)) {
+      for (let i = start; i < end; i += dim) last = insertNode(i, data[i], data[i + 1], last);
+    } else {
+      for (let i = end - dim; i >= start; i -= dim) last = insertNode(i, data[i], data[i + 1], last);
+    }
+    if (last && equals(last, last.next)) { removeNode(last); last = last.next; }
+    return last;
+  }
+  function filterPoints(start, end) {
+    if (!start) return start;
+    if (!end) end = start;
+    let p = start, again;
+    do {
+      again = false;
+      if (!p.steiner && (equals(p, p.next) || area(p.prev, p, p.next) === 0)) {
+        removeNode(p);
+        p = end = p.prev;
+        if (p === p.next) break;
+        again = true;
+      } else p = p.next;
+    } while (again || p !== end);
+    return end;
+  }
+  function earcutLinked(ear, triangles, dim, minX, minY, invSize, pass) {
+    if (!ear) return;
+    if (!pass && invSize) indexCurve(ear, minX, minY, invSize);
+    let stop = ear;
+    while (ear.prev !== ear.next) {
+      const prev = ear.prev, next = ear.next;
+      if (invSize ? isEarHashed(ear, minX, minY, invSize) : isEar(ear)) {
+        triangles.push(prev.i / dim | 0, ear.i / dim | 0, next.i / dim | 0);
+        removeNode(ear);
+        ear = next.next; stop = next.next;
+        continue;
+      }
+      ear = next;
+      if (ear === stop) {
+        if (!pass) earcutLinked(filterPoints(ear), triangles, dim, minX, minY, invSize, 1);
+        else if (pass === 1) {
+          ear = cureLocalIntersections(filterPoints(ear), triangles, dim);
+          earcutLinked(ear, triangles, dim, minX, minY, invSize, 2);
+        } else if (pass === 2) splitEarcut(ear, triangles, dim, minX, minY, invSize);
+        break;
+      }
+    }
+  }
+  function isEar(ear) {
+    const a = ear.prev, b = ear, c = ear.next;
+    if (area(a, b, c) >= 0) return false;
+    const ax = a.x, bx = b.x, cx = c.x, ay = a.y, by = b.y, cy = c.y;
+    const x0 = Math.min(ax, bx, cx), y0 = Math.min(ay, by, cy), x1 = Math.max(ax, bx, cx), y1 = Math.max(ay, by, cy);
+    let p = c.next;
+    while (p !== a) {
+      if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 &&
+        pointInTriangle(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0) return false;
+      p = p.next;
+    }
+    return true;
+  }
+  function isEarHashed(ear, minX, minY, invSize) {
+    const a = ear.prev, b = ear, c = ear.next;
+    if (area(a, b, c) >= 0) return false;
+    const ax = a.x, bx = b.x, cx = c.x, ay = a.y, by = b.y, cy = c.y;
+    const x0 = Math.min(ax, bx, cx), y0 = Math.min(ay, by, cy), x1 = Math.max(ax, bx, cx), y1 = Math.max(ay, by, cy);
+    const minZ = zOrder(x0, y0, minX, minY, invSize), maxZ = zOrder(x1, y1, minX, minY, invSize);
+    let p = ear.prevZ, n = ear.nextZ;
+    const hit = (q) => q !== a && q !== c && q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1 &&
+      pointInTriangle(ax, ay, bx, by, cx, cy, q.x, q.y) && area(q.prev, q, q.next) >= 0;
+    while (p && p.z >= minZ && n && n.z <= maxZ) {
+      if (hit(p)) return false; p = p.prevZ;
+      if (hit(n)) return false; n = n.nextZ;
+    }
+    while (p && p.z >= minZ) { if (hit(p)) return false; p = p.prevZ; }
+    while (n && n.z <= maxZ) { if (hit(n)) return false; n = n.nextZ; }
+    return true;
+  }
+  function cureLocalIntersections(start, triangles, dim) {
+    let p = start;
+    do {
+      const a = p.prev, b = p.next.next;
+      if (!equals(a, b) && intersects(a, p, p.next, b) && locallyInside(a, b) && locallyInside(b, a)) {
+        triangles.push(a.i / dim | 0, p.i / dim | 0, b.i / dim | 0);
+        removeNode(p); removeNode(p.next);
+        p = start = b;
+      }
+      p = p.next;
+    } while (p !== start);
+    return filterPoints(p);
+  }
+  function splitEarcut(start, triangles, dim, minX, minY, invSize) {
+    let a = start;
+    do {
+      let b = a.next.next;
+      while (b !== a.prev) {
+        if (a.i !== b.i && isValidDiagonal(a, b)) {
+          let c = splitPolygon(a, b);
+          a = filterPoints(a, a.next);
+          c = filterPoints(c, c.next);
+          earcutLinked(a, triangles, dim, minX, minY, invSize, 0);
+          earcutLinked(c, triangles, dim, minX, minY, invSize, 0);
+          return;
+        }
+        b = b.next;
+      }
+      a = a.next;
+    } while (a !== start);
+  }
+  function eliminateHoles(data, holeIndices, outerNode, dim) {
+    const queue = [];
+    for (let i = 0, len = holeIndices.length; i < len; i++) {
+      const start = holeIndices[i] * dim;
+      const end = i < len - 1 ? holeIndices[i + 1] * dim : data.length;
+      const list = linkedList(data, start, end, dim, false);
+      if (!list) continue;
+      if (list === list.next) list.steiner = true;
+      queue.push(getLeftmost(list));
+    }
+    queue.sort((a, b) => a.x - b.x);
+    for (let i = 0; i < queue.length; i++) outerNode = eliminateHole(queue[i], outerNode);
+    return outerNode;
+  }
+  function eliminateHole(hole, outerNode) {
+    const bridge = findHoleBridge(hole, outerNode);
+    if (!bridge) return outerNode;
+    const bridgeReverse = splitPolygon(bridge, hole);
+    filterPoints(bridgeReverse, bridgeReverse.next);
+    return filterPoints(bridge, bridge.next);
+  }
+  function findHoleBridge(hole, outerNode) {
+    let p = outerNode;
+    const hx = hole.x, hy = hole.y;
+    let qx = -Infinity, m;
+    do {
+      if (hy <= p.y && hy >= p.next.y && p.next.y !== p.y) {
+        const x = p.x + (hy - p.y) * (p.next.x - p.x) / (p.next.y - p.y);
+        if (x <= hx && x > qx) {
+          qx = x;
+          m = p.x < p.next.x ? p : p.next;
+          if (x === hx) return m;
+        }
+      }
+      p = p.next;
+    } while (p !== outerNode);
+    if (!m) return null;
+    const stop = m, mx = m.x, my = m.y;
+    let tanMin = Infinity;
+    p = m;
+    do {
+      if (hx >= p.x && p.x >= mx && hx !== p.x &&
+        pointInTriangle(hy < my ? hx : qx, hy, mx, my, hy < my ? qx : hx, hy, p.x, p.y)) {
+        const tan = Math.abs(hy - p.y) / (hx - p.x);
+        if (locallyInside(p, hole) &&
+          (tan < tanMin || (tan === tanMin && (p.x > m.x || (p.x === m.x && sectorContainsSector(m, p)))))) {
+          m = p; tanMin = tan;
+        }
+      }
+      p = p.next;
+    } while (p !== stop);
+    return m;
+  }
+  function sectorContainsSector(m, p) { return area(m.prev, m, p.prev) < 0 && area(p.next, m, m.next) < 0; }
+  function indexCurve(start, minX, minY, invSize) {
+    let p = start;
+    do {
+      if (p.z === 0) p.z = zOrder(p.x, p.y, minX, minY, invSize);
+      p.prevZ = p.prev; p.nextZ = p.next; p = p.next;
+    } while (p !== start);
+    p.prevZ.nextZ = null; p.prevZ = null;
+    sortLinked(p);
+  }
+  function sortLinked(list) {
+    let numMerges, inSize = 1;
+    do {
+      let p = list, e, tail = null;
+      list = null; numMerges = 0;
+      while (p) {
+        numMerges++;
+        let q = p, pSize = 0;
+        for (let i = 0; i < inSize; i++) { pSize++; q = q.nextZ; if (!q) break; }
+        let qSize = inSize;
+        while (pSize > 0 || (qSize > 0 && q)) {
+          if (pSize !== 0 && (qSize === 0 || !q || p.z <= q.z)) { e = p; p = p.nextZ; pSize--; }
+          else { e = q; q = q.nextZ; qSize--; }
+          if (tail) tail.nextZ = e; else list = e;
+          e.prevZ = tail; tail = e;
+        }
+        p = q;
+      }
+      tail.nextZ = null;
+      inSize *= 2;
+    } while (numMerges > 1);
+    return list;
+  }
+  function zOrder(x, y, minX, minY, invSize) {
+    x = (x - minX) * invSize | 0; y = (y - minY) * invSize | 0;
+    x = (x | (x << 8)) & 0x00FF00FF; x = (x | (x << 4)) & 0x0F0F0F0F; x = (x | (x << 2)) & 0x33333333; x = (x | (x << 1)) & 0x55555555;
+    y = (y | (y << 8)) & 0x00FF00FF; y = (y | (y << 4)) & 0x0F0F0F0F; y = (y | (y << 2)) & 0x33333333; y = (y | (y << 1)) & 0x55555555;
+    return x | (y << 1);
+  }
+  function getLeftmost(start) {
+    let p = start, leftmost = start;
+    do { if (p.x < leftmost.x || (p.x === leftmost.x && p.y < leftmost.y)) leftmost = p; p = p.next; } while (p !== start);
+    return leftmost;
+  }
+  function pointInTriangle(ax, ay, bx, by, cx, cy, px, py) {
+    return (cx - px) * (ay - py) >= (ax - px) * (cy - py) &&
+      (ax - px) * (by - py) >= (bx - px) * (ay - py) &&
+      (bx - px) * (cy - py) >= (cx - px) * (by - py);
+  }
+  function isValidDiagonal(a, b) {
+    return a.next.i !== b.i && a.prev.i !== b.i && !intersectsPolygon(a, b) &&
+      ((locallyInside(a, b) && locallyInside(b, a) && middleInside(a, b) &&
+        (area(a.prev, a, b.prev) || area(a, b.prev, b))) ||
+        (equals(a, b) && area(a.prev, a, a.next) > 0 && area(b.prev, b, b.next) > 0));
+  }
+  function area(p, q, r) { return (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y); }
+  function equals(p1, p2) { return p1.x === p2.x && p1.y === p2.y; }
+  function intersects(p1, q1, p2, q2) {
+    const o1 = sgn(area(p1, q1, p2)), o2 = sgn(area(p1, q1, q2)), o3 = sgn(area(p2, q2, p1)), o4 = sgn(area(p2, q2, q1));
+    if (o1 !== o2 && o3 !== o4) return true;
+    if (o1 === 0 && onSegment(p1, p2, q1)) return true;
+    if (o2 === 0 && onSegment(p1, q2, q1)) return true;
+    if (o3 === 0 && onSegment(p2, p1, q2)) return true;
+    if (o4 === 0 && onSegment(p2, q1, q2)) return true;
+    return false;
+  }
+  function onSegment(p, q, r) {
+    return q.x <= Math.max(p.x, r.x) && q.x >= Math.min(p.x, r.x) && q.y <= Math.max(p.y, r.y) && q.y >= Math.min(p.y, r.y);
+  }
+  function sgn(v) { return v > 0 ? 1 : v < 0 ? -1 : 0; }
+  function intersectsPolygon(a, b) {
+    let p = a;
+    do {
+      if (p.i !== a.i && p.next.i !== a.i && p.i !== b.i && p.next.i !== b.i && intersects(p, p.next, a, b)) return true;
+      p = p.next;
+    } while (p !== a);
+    return false;
+  }
+  function locallyInside(a, b) {
+    return area(a.prev, a, a.next) < 0 ?
+      area(a, b, a.next) >= 0 && area(a, a.prev, b) >= 0 :
+      area(a, b, a.prev) < 0 || area(a, a.next, b) < 0;
+  }
+  function middleInside(a, b) {
+    let p = a, inside = false;
+    const px = (a.x + b.x) / 2, py = (a.y + b.y) / 2;
+    do {
+      if (((p.y > py) !== (p.next.y > py)) && p.next.y !== p.y &&
+        (px < (p.next.x - p.x) * (py - p.y) / (p.next.y - p.y) + p.x)) inside = !inside;
+      p = p.next;
+    } while (p !== a);
+    return inside;
+  }
+  function splitPolygon(a, b) {
+    const a2 = createNode(a.i, a.x, a.y), b2 = createNode(b.i, b.x, b.y), an = a.next, bp = b.prev;
+    a.next = b; b.prev = a;
+    a2.next = an; an.prev = a2;
+    b2.next = a2; a2.prev = b2;
+    bp.next = b2; b2.prev = bp;
+    return b2;
+  }
+  function insertNode(i, x, y, last) {
+    const p = createNode(i, x, y);
+    if (!last) { p.prev = p; p.next = p; }
+    else { p.next = last.next; p.prev = last; last.next.prev = p; last.next = p; }
+    return p;
+  }
+  function removeNode(p) {
+    p.next.prev = p.prev; p.prev.next = p.next;
+    if (p.prevZ) p.prevZ.nextZ = p.nextZ;
+    if (p.nextZ) p.nextZ.prevZ = p.prevZ;
+  }
+  function createNode(i, x, y) { return { i, x, y, prev: null, next: null, z: 0, prevZ: null, nextZ: null, steiner: false }; }
+  function ringArea(data, start, end, dim) {
+    let sum = 0;
+    for (let i = start, j = end - dim; i < end; i += dim) { sum += (data[j] - data[i]) * (data[i + 1] + data[j + 1]); j = i; }
+    return sum;
+  }
+
+  /* ---------- file parsing ---------- */
+  function parseSTL(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const dv = new DataView(buffer);
+    if (buffer.byteLength >= 84) {
+      const n = dv.getUint32(80, true);
+      if (84 + n * 50 === buffer.byteLength) return readBinarySTL(dv, n);
+    }
+    const head = new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, 4096)));
+    if (/^\s*solid/i.test(head) && /facet|vertex/i.test(new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, 65536))))) {
+      const text = new TextDecoder().decode(bytes);
+      const re = /vertex\s+([-+]?[\d.]+(?:[eE][-+]?\d+)?)\s+([-+]?[\d.]+(?:[eE][-+]?\d+)?)\s+([-+]?[\d.]+(?:[eE][-+]?\d+)?)/g;
+      const out = [];
+      let m;
+      while ((m = re.exec(text))) out.push(+m[1], +m[2], +m[3]);
+      const usable = out.length - (out.length % 9);
+      if (usable === 0) throw new Error('This STL file has no triangles in it.');
+      return { positions: new Float32Array(out.slice(0, usable)), indices: null };
+    }
+    if (buffer.byteLength > 84) return readBinarySTL(dv, Math.floor((buffer.byteLength - 84) / 50));
+    throw new Error('This file is not a readable STL.');
+  }
+  function readBinarySTL(dv, n) {
+    const pos = new Float32Array(n * 9);
+    let o = 84;
+    for (let t = 0; t < n; t++) {
+      o += 12;
+      for (let k = 0; k < 9; k++) { pos[t * 9 + k] = dv.getFloat32(o, true); o += 4; }
+      o += 2;
+    }
+    return { positions: pos, indices: null };
+  }
+  function parseOBJ(text) {
+    const verts = [], idx = [];
+    const lines = text.split(/\r?\n/);
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+      if (line.length < 2) continue;
+      const c0 = line.charCodeAt(0), c1 = line.charCodeAt(1);
+      if (c0 === 118 && (c1 === 32 || c1 === 9)) { // "v "
+        const p = line.trim().split(/\s+/);
+        verts.push(+p[1], +p[2], +p[3]);
+      } else if (c0 === 102 && (c1 === 32 || c1 === 9)) { // "f "
+        const p = line.trim().split(/\s+/);
+        const nv = verts.length / 3;
+        const f = [];
+        for (let k = 1; k < p.length; k++) {
+          let v = parseInt(p[k], 10);
+          if (Number.isNaN(v)) continue;
+          v = v < 0 ? nv + v : v - 1;
+          f.push(v);
+        }
+        for (let k = 1; k + 1 < f.length; k++) idx.push(f[0], f[k], f[k + 1]);
+      }
+    }
+    if (!idx.length) throw new Error('This OBJ file has no faces in it.');
+    return { positions: new Float32Array(verts), indices: new Uint32Array(idx) };
+  }
+
+  /* ---------- mesh preparation ---------- */
+  function bounds(P) {
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < P.length; i += 3) {
+      const x = P[i], y = P[i + 1], z = P[i + 2];
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (z < z0) z0 = z; if (z > z1) z1 = z;
+    }
+    return { min: [x0, y0, z0], max: [x1, y1, z1], size: [x1 - x0, y1 - y0, z1 - z0], center: [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2] };
+  }
+  function diag(b) { return Math.hypot(b.size[0], b.size[1], b.size[2]) || 1; }
+
+  function weld(P, I, tol) {
+    const n = P.length / 3;
+    const inv = 1 / tol;
+    const size = nextPow2(n * 2);
+    const mask = size - 1;
+    const table = new Int32Array(size).fill(-1);
+    const remap = new Uint32Array(n);
+    const qx = new Float64Array(n), qy = new Float64Array(n), qz = new Float64Array(n);
+    const out = new Float32Array(P.length);
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      const x = Math.round(P[3 * i] * inv), y = Math.round(P[3 * i + 1] * inv), z = Math.round(P[3 * i + 2] * inv);
+      let h = Math.imul(x | 0, 73856093) ^ Math.imul(y | 0, 19349663) ^ Math.imul(z | 0, 83492791);
+      h ^= h >>> 13;
+      let s = h & mask;
+      for (;;) {
+        const k = table[s];
+        if (k === -1) {
+          table[s] = m; qx[m] = x; qy[m] = y; qz[m] = z;
+          out[3 * m] = P[3 * i]; out[3 * m + 1] = P[3 * i + 1]; out[3 * m + 2] = P[3 * i + 2];
+          remap[i] = m++; break;
+        }
+        if (qx[k] === x && qy[k] === y && qz[k] === z) { remap[i] = k; break; }
+        s = (s + 1) & mask;
+      }
+    }
+    const src = I || null;
+    const nIdx = src ? src.length : n;
+    const idx = new Uint32Array(nIdx);
+    let w = 0;
+    for (let t = 0; t < nIdx; t += 3) {
+      const a = remap[src ? src[t] : t], b = remap[src ? src[t + 1] : t + 1], c = remap[src ? src[t + 2] : t + 2];
+      if (a === b || b === c || a === c) continue;
+      idx[w] = a; idx[w + 1] = b; idx[w + 2] = c; w += 3;
+    }
+    return { positions: out.slice(0, m * 3), indices: idx.slice(0, w) };
+  }
+
+  function volume(P, I) {
+    let v = 0;
+    for (let t = 0; t < I.length; t += 3) {
+      const a = 3 * I[t], b = 3 * I[t + 1], c = 3 * I[t + 2];
+      const ax = P[a], ay = P[a + 1], az = P[a + 2], bx = P[b], by = P[b + 1], bz = P[b + 2], cx = P[c], cy = P[c + 1], cz = P[c + 2];
+      v += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+    }
+    return v / 6;
+  }
+  function volumeCentroid(P, I) {
+    let v = 0, cx = 0, cy = 0, cz = 0;
+    for (let t = 0; t < I.length; t += 3) {
+      const a = 3 * I[t], b = 3 * I[t + 1], c = 3 * I[t + 2];
+      const ax = P[a], ay = P[a + 1], az = P[a + 2], bx = P[b], by = P[b + 1], bz = P[b + 2], qx = P[c], qy = P[c + 1], qz = P[c + 2];
+      const d = ax * (by * qz - bz * qy) - ay * (bx * qz - bz * qx) + az * (bx * qy - by * qx);
+      v += d; cx += d * (ax + bx + qx); cy += d * (ay + by + qy); cz += d * (az + bz + qz);
+    }
+    if (Math.abs(v) < 1e-12) { const b = bounds(P); return { volume: 0, centroid: b.center }; }
+    return { volume: v / 6, centroid: [cx / (4 * v), cy / (4 * v), cz / (4 * v)] };
+  }
+
+  function edgeReport(I) {
+    const em = new PairMap(I.length);
+    for (let t = 0; t < I.length; t += 3) {
+      em.inc(I[t], I[t + 1]); em.inc(I[t + 1], I[t + 2]); em.inc(I[t + 2], I[t]);
+    }
+    let open = 0, bad = 0;
+    for (let t = 0; t < I.length; t += 3) {
+      for (let k = 0; k < 3; k++) {
+        const a = I[t + k], b = I[t + (k + 1) % 3];
+        if (em.get(a, b) > 1) bad++;
+        if (em.get(b, a) === -1) open++;
+      }
+    }
+    return { openEdges: open, badEdges: bad, closed: open === 0 && bad === 0 };
+  }
+
+  function flipAll(I) { for (let t = 0; t < I.length; t += 3) { const x = I[t + 1]; I[t + 1] = I[t + 2]; I[t + 2] = x; } }
+
+  function prepareMesh(raw) {
+    if (!raw.positions.length) throw new Error('The file has no geometry in it.');
+    const b0 = bounds(raw.positions);
+    const tol = Math.max(diag(b0) * 1e-7, 1e-9);
+    const m = weld(raw.positions, raw.indices, tol);
+    if (!m.indices.length) throw new Error('The model has no usable triangles.');
+    const rep = edgeReport(m.indices);
+    let vol = volume(m.positions, m.indices);
+    let flipped = false;
+    if (vol < 0) { flipAll(m.indices); vol = -vol; flipped = true; }
+    return { positions: m.positions, indices: m.indices, report: { ...rep, flipped, volume: vol } };
+  }
+
+  /* ---------- hole filling ---------- */
+  function fillHoles(P, I) {
+    const em = new PairMap(I.length);
+    for (let t = 0; t < I.length; t += 3) { em.inc(I[t], I[t + 1]); em.inc(I[t + 1], I[t + 2]); em.inc(I[t + 2], I[t]); }
+    const nxt = new Map();
+    for (let t = 0; t < I.length; t += 3) {
+      for (let k = 0; k < 3; k++) {
+        const a = I[t + k], b = I[t + (k + 1) % 3];
+        if (em.get(b, a) === -1) { // boundary edge a->b, hole polygon runs b->a
+          if (nxt.has(b)) nxt.set(b, -1); else nxt.set(b, a);
+        }
+      }
+    }
+    const used = new Set();
+    const tris = [];
+    let filled = 0, skipped = 0;
+    for (const start of nxt.keys()) {
+      if (used.has(start) || nxt.get(start) === -1) continue;
+      const ring = [];
+      let q = start, ok = true;
+      while (true) {
+        if (used.has(q)) { ok = q === start; break; }
+        used.add(q); ring.push(q);
+        const nq = nxt.get(q);
+        if (nq === undefined || nq === -1) { ok = false; break; }
+        q = nq;
+      }
+      if (!ok || ring.length < 3) { skipped++; continue; }
+      // Newell normal
+      let nx = 0, ny = 0, nz = 0, cx = 0, cy = 0, cz = 0;
+      for (let i = 0; i < ring.length; i++) {
+        const a = 3 * ring[i], b = 3 * ring[(i + 1) % ring.length];
+        nx += (P[a + 1] - P[b + 1]) * (P[a + 2] + P[b + 2]);
+        ny += (P[a + 2] - P[b + 2]) * (P[a] + P[b]);
+        nz += (P[a] - P[b]) * (P[a + 1] + P[b + 1]);
+        cx += P[a]; cy += P[a + 1]; cz += P[a + 2];
+      }
+      const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      const fr = frameFromNormal([nx, ny, nz], [cx / ring.length, cy / ring.length, cz / ring.length]);
+      const flat = [];
+      for (const v of ring) {
+        const dx = P[3 * v] - fr.o[0], dy = P[3 * v + 1] - fr.o[1], dz = P[3 * v + 2] - fr.o[2];
+        flat.push(dx * fr.u[0] + dy * fr.u[1] + dz * fr.u[2], dx * fr.v[0] + dy * fr.v[1] + dz * fr.v[2]);
+      }
+      const loc = earcut(flat);
+      const out = [];
+      let s = 0;
+      for (let i = 0; i < loc.length; i += 3) s += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
+      for (let i = 0; i < loc.length; i += 3) {
+        if (s >= 0) out.push(ring[loc[i]], ring[loc[i + 1]], ring[loc[i + 2]]);
+        else out.push(ring[loc[i]], ring[loc[i + 2]], ring[loc[i + 1]]);
+      }
+      fixTJunctions(out, ring);
+      for (const v of out) tris.push(v);
+      filled++;
+    }
+    const ni = new Uint32Array(I.length + tris.length);
+    ni.set(I); ni.set(tris, I.length);
+    return { positions: P, indices: ni, filled, skipped };
+  }
+  function tri2(f, a, b, c) { return (f[2 * b] - f[2 * a]) * (f[2 * c + 1] - f[2 * a + 1]) - (f[2 * c] - f[2 * a]) * (f[2 * b + 1] - f[2 * a + 1]); }
+
+  // Earcut drops collinear or duplicate ring points. Re-insert them so the cap shares every edge with the side wall.
+  function fixTJunctions(tris, ring) {
+    const used = new Set(tris);
+    let anyMissing = false;
+    for (const v of ring) if (!used.has(v)) { anyMissing = true; break; }
+    if (!anyMissing) return;
+    const n = ring.length;
+    let first = -1;
+    for (let i = 0; i < n; i++) if (used.has(ring[i])) { first = i; break; }
+    if (first < 0) return;
+    const runs = [];
+    let i = first;
+    for (let step = 0; step < n;) {
+      let j = (i + 1) % n, missing = [];
+      step++;
+      while (!used.has(ring[j]) && step < n + 1) { missing.push(ring[j]); j = (j + 1) % n; step++; }
+      if (missing.length) runs.push([ring[i], missing, ring[j]]);
+      i = j;
+      if (i === first) break;
+    }
+    for (const [A, mids, B] of runs) {
+      let found = false;
+      for (let t = 0; t < tris.length && !found; t += 3) {
+        for (let k = 0; k < 3; k++) {
+          const p = tris[t + k], q = tris[t + (k + 1) % 3], x = tris[t + (k + 2) % 3];
+          let chain = null;
+          if (p === A && q === B) chain = [A, ...mids, B];
+          else if (p === B && q === A) chain = [B, ...mids.slice().reverse(), A];
+          if (!chain) continue;
+          const repl = [];
+          for (let c = 0; c + 1 < chain.length; c++) repl.push(chain[c], chain[c + 1], x);
+          tris.splice(t, 3, ...repl);
+          found = true; break;
+        }
+      }
+    }
+  }
+
+  /* ---------- frames and planes ---------- */
+  function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+  function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function frameFromNormal(n, o) {
+    n = norm3(n);
+    const ref = Math.abs(n[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+    const u = norm3(cross3(ref, n));
+    const v = cross3(n, u); // u x v = n
+    return { o: o.slice(), n, u, v };
+  }
+  function shiftFrame(F, d) { return { o: [F.o[0] + F.n[0] * d, F.o[1] + F.n[1] * d, F.o[2] + F.n[2] * d], n: F.n, u: F.u, v: F.v }; }
+
+  /* ---------- plane sections ---------- */
+  // Returns closed loops of the mesh cross-section. Each loop lists section-point ids and the triangle each segment came from.
+  function computeSection(P, I, F, scale) {
+    const nv = P.length / 3, nt = I.length / 3;
+    const nx = F.n[0], ny = F.n[1], nz = F.n[2];
+    const tol = (scale || 1) * 1e-7;
+    const dist = new Float64Array(nv);
+    let shift = 0;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const ox = F.o[0] + nx * shift, oy = F.o[1] + ny * shift, oz = F.o[2] + nz * shift;
+      let bad = false;
+      for (let i = 0, j = 0; i < nv; i++, j += 3) {
+        const d = (P[j] - ox) * nx + (P[j + 1] - oy) * ny + (P[j + 2] - oz) * nz;
+        dist[i] = d;
+        if (d > -tol && d < tol) bad = true;
+      }
+      if (!bad) break;
+      shift = (scale || 1) * 3.1e-6 * (attempt + 1) * (attempt % 2 ? -1 : 1);
+    }
+    // count crossing triangles
+    let crossing = 0;
+    for (let t = 0; t < nt; t++) {
+      const sa = dist[I[3 * t]] < 0, sb = dist[I[3 * t + 1]] < 0, sc = dist[I[3 * t + 2]] < 0;
+      if (sa !== sb || sa !== sc) crossing++;
+    }
+    const emap = new PairMap(crossing * 2 + 8);
+    const pts = new F64List(crossing * 3 + 9);
+    const segA = new Int32Array(crossing), segB = new Int32Array(crossing), segTri = new Int32Array(crossing);
+    let ns = 0;
+    const edgePoint = (i, j) => {
+      const lo = i < j ? i : j, hi = i < j ? j : i;
+      let id = emap.get(lo, hi);
+      if (id !== -1) return id;
+      const dl = dist[lo], dh = dist[hi];
+      const t = dl / (dl - dh);
+      id = pts.push3(P[3 * lo] + t * (P[3 * hi] - P[3 * lo]), P[3 * lo + 1] + t * (P[3 * hi + 1] - P[3 * lo + 1]), P[3 * lo + 2] + t * (P[3 * hi + 2] - P[3 * lo + 2]));
+      emap.set(lo, hi, id);
+      return id;
+    };
+    for (let t = 0; t < nt; t++) {
+      const a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
+      const da = dist[a] < 0, db = dist[b] < 0, dc = dist[c] < 0;
+      if (da === db && da === dc) continue;
+      let i0, i1, i2;
+      if (da === db) { i0 = c; i1 = a; i2 = b; } else if (da === dc) { i0 = b; i1 = c; i2 = a; } else { i0 = a; i1 = b; i2 = c; }
+      const p01 = edgePoint(i0, i1), p02 = edgePoint(i0, i2);
+      if (dist[i0] < 0) { segA[ns] = p02; segB[ns] = p01; } else { segA[ns] = p01; segB[ns] = p02; }
+      segTri[ns] = t; ns++;
+    }
+    const np = pts.n / 3;
+    const res = { dist, shift, pts: pts.a, np, emap, segTri, loops: [], error: null };
+    const next = new Int32Array(np).fill(-1), segOf = new Int32Array(np);
+    for (let s = 0; s < ns; s++) {
+      if (next[segA[s]] !== -1) { res.error = 'nonmanifold'; return res; }
+      next[segA[s]] = segB[s]; segOf[segA[s]] = s;
+    }
+    const visited = new Uint8Array(np);
+    const ox = F.o[0], oy = F.o[1], oz = F.o[2];
+    const ux = F.u[0], uy = F.u[1], uz = F.u[2], vx = F.v[0], vy = F.v[1], vz = F.v[2];
+    const PA = pts.a;
+    for (let p = 0; p < np; p++) {
+      if (visited[p]) continue;
+      const ids = [], segs = [];
+      let q = p;
+      while (!visited[q]) {
+        visited[q] = 1; ids.push(q); segs.push(segOf[q]);
+        q = next[q];
+        if (q === -1) { res.error = 'open'; return res; }
+      }
+      if (q !== p) { res.error = 'nonmanifold'; return res; }
+      if (ids.length < 3) continue;
+      const xy = new Float64Array(ids.length * 2);
+      for (let k = 0; k < ids.length; k++) {
+        const j = 3 * ids[k];
+        const dx = PA[j] - ox, dy = PA[j + 1] - oy, dz = PA[j + 2] - oz;
+        xy[2 * k] = dx * ux + dy * uy + dz * uz;
+        xy[2 * k + 1] = dx * vx + dy * vy + dz * vz;
+      }
+      res.loops.push(makeLoop(ids, segs, xy));
+    }
+    return res;
+  }
+  function makeLoop(ids, segs, xy) {
+    let a = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const n = xy.length / 2;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      a += xy[2 * j] * xy[2 * i + 1] - xy[2 * i] * xy[2 * j + 1];
+      const x = xy[2 * i], y = xy[2 * i + 1];
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    return { ids, segs, xy, area: a / 2, bbox: [x0, y0, x1, y1] };
+  }
+
+  function pointInRing(xy, px, py) {
+    let inside = false;
+    const n = xy.length / 2;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const xi = xy[2 * i], yi = xy[2 * i + 1], xj = xy[2 * j], yj = xy[2 * j + 1];
+      if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  function inBox(b, x, y) { return x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]; }
+  function distToRing(xy, px, py) {
+    let best = Infinity;
+    const n = xy.length / 2;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const ax = xy[2 * j], ay = xy[2 * j + 1], bx = xy[2 * i], by = xy[2 * i + 1];
+      const dx = bx - ax, dy = by - ay;
+      const L = dx * dx + dy * dy;
+      let t = L > 0 ? ((px - ax) * dx + (py - ay) * dy) / L : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const ex = ax + t * dx - px, ey = ay + t * dy - py;
+      const d = ex * ex + ey * ey;
+      if (d < best) best = d;
+    }
+    return Math.sqrt(best);
+  }
+
+  function buildRegions(loops) {
+    const L = loops.length;
+    const depth = new Int32Array(L), parent = new Int32Array(L).fill(-1);
+    for (let i = 0; i < L; i++) {
+      const li = loops[i], px = li.xy[0], py = li.xy[1], ai = Math.abs(li.area);
+      let best = -1, bestArea = Infinity, count = 0;
+      for (let j = 0; j < L; j++) {
+        if (j === i) continue;
+        const lj = loops[j], aj = Math.abs(lj.area);
+        if (aj <= ai || !inBox(lj.bbox, px, py)) continue;
+        if (pointInRing(lj.xy, px, py)) { count++; if (aj < bestArea) { bestArea = aj; best = j; } }
+      }
+      depth[i] = count; parent[i] = best;
+    }
+    const regions = [];
+    const regionOfOuter = new Map();
+    for (let i = 0; i < L; i++) if (depth[i] % 2 === 0) { regionOfOuter.set(i, regions.length); regions.push({ outer: i, holes: [], area: Math.abs(loops[i].area), bbox: loops[i].bbox }); }
+    for (let i = 0; i < L; i++) {
+      if (depth[i] % 2 === 1 && parent[i] >= 0 && regionOfOuter.has(parent[i])) {
+        const r = regions[regionOfOuter.get(parent[i])];
+        r.holes.push(i); r.area -= Math.abs(loops[i].area);
+      }
+    }
+    regions.sort((a, b) => b.area - a.area);
+    return regions;
+  }
+  function regionContains(loops, r, x, y) {
+    if (!inBox(r.bbox, x, y) || !pointInRing(loops[r.outer].xy, x, y)) return false;
+    for (const h of r.holes) if (inBox(loops[h].bbox, x, y) && pointInRing(loops[h].xy, x, y)) return false;
+    return true;
+  }
+  function regionAt(sec, x, y) {
+    for (let i = 0; i < sec.regions.length; i++) if (regionContains(sec.loops, sec.regions[i], x, y)) return i;
+    return -1;
+  }
+  function regionClearance(loops, r, x, y) {
+    let d = distToRing(loops[r.outer].xy, x, y);
+    for (const h of r.holes) d = Math.min(d, distToRing(loops[h].xy, x, y));
+    return d;
+  }
+  function section(P, I, F, scale) {
+    const s = computeSection(P, I, F, scale);
+    if (s.error) return { error: s.error, loops: [], regions: [] };
+    return { error: null, loops: s.loops, regions: buildRegions(s.loops) };
+  }
+
+  /* ---------- keys ---------- */
+  const KEY_DEFAULTS = {
+    peg: { diameter: 5, length: 6 },
+    dowel: { diameter: 4, length: 12 },
+    magnet: { diameter: 6, length: 3 },
+  };
+  function keyGeometrySpec(cfg) {
+    const r = cfg.diameter / 2, c = cfg.clearance, ca = cfg.clearance + 0.1;
+    const taper = cfg.type === 'peg' && cfg.taper ? 0.8 : 1;
+    const footprint = (rad) => cfg.shape === 'square' ? rad * Math.SQRT2 : rad;
+    let sockets; // [{side:-1|+1, depth}]
+    if (cfg.type === 'peg') {
+      const s = cfg.pegSide === 'above' ? -1 : +1; // socket goes into the side opposite the peg
+      sockets = [{ side: s, depth: cfg.length + ca }];
+    } else if (cfg.type === 'dowel') sockets = [{ side: -1, depth: cfg.length / 2 + ca }, { side: +1, depth: cfg.length / 2 + ca }];
+    else sockets = [{ side: -1, depth: cfg.length + ca }, { side: +1, depth: cfg.length + ca }];
+    return { r, c, ca, taper, sockets, outer: footprint(r + c) };
+  }
+  function depthPlan(cfg) {
+    const spec = keyGeometrySpec(cfg);
+    const floor = Math.max(0.8, cfg.margin * 0.75);
+    const plan = [];
+    for (const s of spec.sockets) {
+      plan.push({ side: s.side, depth: s.depth * 0.5, need: 'wall' });
+      plan.push({ side: s.side, depth: s.depth, need: 'wall' });
+      plan.push({ side: s.side, depth: s.depth + floor, need: 'floor' });
+    }
+    return plan;
+  }
+  function analyzePlane(P, I, F, cfg, scale) {
+    const base = section(P, I, F, scale);
+    const depth = [];
+    if (!base.error && cfg.type !== 'none') {
+      for (const d of depthPlan(cfg)) {
+        const s = section(P, I, shiftFrame(F, d.side * d.depth), scale);
+        depth.push({ ...d, sec: s });
+      }
+    }
+    return { frame: F, base, depth };
+  }
+  function keyScore(an, cfg, x, y, skip) {
+    const spec = keyGeometrySpec(cfg);
+    const R = spec.outer, m = cfg.margin;
+    const ri = regionAt(an.base, x, y);
+    if (ri < 0) return { ok: false, reason: 'Not on the cut face', region: -1, score: -Infinity };
+    if (skip && skip.has(ri)) return { ok: false, reason: 'In an area you chose not to cut', region: ri, score: -Infinity };
+    let score = regionClearance(an.base.loops, an.base.regions[ri], x, y) - R;
+    if (score < m) return { ok: false, reason: 'Too close to the edge', region: ri, score };
+    for (const d of an.depth) {
+      if (d.sec.error) continue;
+      const rj = regionAt(d.sec, x, y);
+      if (rj < 0) return { ok: false, reason: d.need === 'floor' ? 'Socket would break through the surface' : 'Socket would break through the side', region: ri, score: -Infinity };
+      const cl = regionClearance(d.sec.loops, d.sec.regions[rj], x, y);
+      if (d.need === 'wall' && cl - R < m * 0.75) return { ok: false, reason: 'Wall around the socket is too thin', region: ri, score: cl - R };
+      if (d.need === 'floor' && cl < R) return { ok: false, reason: 'Socket would break through the surface', region: ri, score: -Infinity };
+      if (d.need === 'wall') score = Math.min(score, cl - R);
+    }
+    return { ok: true, reason: '', region: ri, score };
+  }
+  function evaluateKeys(an, keys, cfg, skip) {
+    const res = keys.map(k => keyScore(an, cfg, k.x, k.y, skip));
+    const R = keyGeometrySpec(cfg).outer;
+    for (let i = 0; i < keys.length; i++) for (let j = i + 1; j < keys.length; j++) {
+      if (Math.hypot(keys[i].x - keys[j].x, keys[i].y - keys[j].y) < 2 * R + cfg.margin) {
+        for (const k of [i, j]) if (res[k].ok) res[k] = { ...res[k], ok: false, reason: 'Overlaps another key' };
+      }
+    }
+    return res;
+  }
+  function autoPlaceKeys(an, cfg, perRegion, skip) {
+    const keys = [];
+    if (cfg.type === 'none' || an.base.error) return keys;
+    const R = keyGeometrySpec(cfg).outer, m = cfg.margin;
+    an.base.regions.forEach((reg, ri) => {
+      if (skip && skip.has(ri)) return;
+      if (reg.area < Math.PI * (R + m) * (R + m)) return;
+      const [x0, y0, x1, y1] = reg.bbox;
+      let h = Math.max(R * 0.3, Math.sqrt(reg.area / 1400));
+      while (((x1 - x0) / h) * ((y1 - y0) / h) > 5000) h *= 1.25;
+      const cands = [];
+      for (let x = x0 + h / 2; x < x1; x += h) for (let y = y0 + h / 2; y < y1; y += h) {
+        if (!regionContains(an.base.loops, reg, x, y)) continue;
+        const s = keyScore(an, cfg, x, y, skip);
+        if (s.ok && s.region === ri) cands.push({ x, y, score: s.score });
+      }
+      if (!cands.length) return;
+      const chosen = [];
+      let best = cands[0];
+      for (const c of cands) if (c.score > best.score) best = c;
+      chosen.push(best);
+      while (chosen.length < perRegion) {
+        let pick = null, pickD = -1;
+        for (const c of cands) {
+          let d = Infinity;
+          for (const k of chosen) d = Math.min(d, Math.hypot(c.x - k.x, c.y - k.y));
+          if (d < 2 * R + m + h * 0.5) continue;
+          const w = d + Math.min(c.score, R) * 0.5;
+          if (w > pickD) { pickD = w; pick = c; }
+        }
+        if (!pick) break;
+        chosen.push(pick);
+      }
+      for (const c of chosen) keys.push({ x: c.x, y: c.y });
+    });
+    return keys;
+  }
+  function profile(shape, rad) {
+    if (shape === 'square') return [[rad, -rad], [rad, rad], [-rad, rad], [-rad, -rad]];
+    const segs = Math.max(20, Math.min(56, Math.round((2 * Math.PI * rad) / 0.5)));
+    const out = [];
+    for (let i = 0; i < segs; i++) { const a = (i / segs) * Math.PI * 2; out.push([Math.cos(a) * rad, Math.sin(a) * rad]); }
+    return out;
+  }
+
+  /* ---------- the cut ---------- */
+  function cutMesh(P, I, F, opts) {
+    const scale = opts.scale || 1;
+    const cfg = opts.cfg || { type: 'none' };
+    const skip = opts.skip || new Set();
+    const sec = computeSection(P, I, F, scale);
+    if (sec.error === 'open') throw new Error('The cut crosses a hole in the mesh, so the cut face can’t be closed. Fill holes in the model panel, or move the cut.');
+    if (sec.error) throw new Error('The mesh is tangled where it crosses the cut (non-manifold edges). Move the cut slightly, or repair the model first.');
+    const loops = sec.loops;
+    if (!loops.length) throw new Error('The cut plane doesn’t pass through this part. Slide it into the model first.');
+    const regions = buildRegions(loops);
+    const selLoop = new Uint8Array(loops.length);
+    let anySel = false;
+    regions.forEach((r, ri) => { if (!skip.has(ri)) { anySel = true; selLoop[r.outer] = 1; for (const h of r.holes) selLoop[h] = 1; } });
+    if (!anySel) throw new Error('Every area of the cut face is switched off. Turn at least one area back on.');
+
+    const nv = P.length / 3, nt = I.length / 3, np = sec.np;
+    const split = new Uint8Array(nt);
+    for (let l = 0; l < loops.length; l++) if (selLoop[l]) for (const s of loops[l].segs) split[sec.segTri[s]] = 1;
+    const spans = new Uint8Array(nt); // crossing triangles left whole in skipped areas
+    for (let l = 0; l < loops.length; l++) if (!selLoop[l]) for (const s of loops[l].segs) spans[sec.segTri[s]] = 1;
+
+    const V = new F64List(P.length + np * 3 + 3000);
+    for (let i = 0; i < P.length; i++) V.a[i] = P[i];
+    V.n = P.length;
+    // two copies of the section points: [nv, nv+np) for the side below the plane, [nv+np, nv+2np) for above
+    V.reserve(np * 6);
+    for (let i = 0; i < np * 3; i++) { V.a[V.n + i] = sec.pts[i]; V.a[V.n + np * 3 + i] = sec.pts[i]; }
+    V.n += np * 6;
+    const T = new U32List(I.length + 600 + (np * 12));
+    const dist = sec.dist;
+    for (let t = 0; t < nt; t++) {
+      const a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
+      if (!split[t]) { T.push3(a, b, c); continue; }
+      const da = dist[a] < 0, db = dist[b] < 0, dc = dist[c] < 0;
+      let i0, i1, i2;
+      if (da === db) { i0 = c; i1 = a; i2 = b; } else if (da === dc) { i0 = b; i1 = c; i2 = a; } else { i0 = a; i1 = b; i2 = c; }
+      const e01 = sec.emap.get(Math.min(i0, i1), Math.max(i0, i1));
+      const e02 = sec.emap.get(Math.min(i0, i2), Math.max(i0, i2));
+      const offIso = nv + (dist[i0] < 0 ? 0 : np), offOther = nv + (dist[i0] < 0 ? np : 0);
+      T.push3(i0, offIso + e01, offIso + e02);
+      T.push3(offOther + e01, i1, i2); T.push3(offOther + e01, i2, offOther + e02);
+    }
+
+    const Fs = shiftFrame(F, sec.shift); // the plane actually used
+    const n = Fs.n, u = Fs.u, v = Fs.v, o = Fs.o;
+    const at = (x, y, z) => [o[0] + u[0] * x + v[0] * y + n[0] * z, o[1] + u[1] * x + v[1] * y + n[1] * z, o[2] + u[2] * x + v[2] * y + n[2] * z];
+    const addV = (p) => V.push3(p[0], p[1], p[2]);
+    const pos = (i) => [V.a[3 * i], V.a[3 * i + 1], V.a[3 * i + 2]];
+    const pushOriented = (a, b, c, e) => {
+      const A = pos(a), B = pos(b), C = pos(c);
+      const nn = cross3([B[0] - A[0], B[1] - A[1], B[2] - A[2]], [C[0] - A[0], C[1] - A[1], C[2] - A[2]]);
+      if (nn[0] * e[0] + nn[1] * e[1] + nn[2] * e[2] < 0) T.push3(a, c, b); else T.push3(a, b, c);
+    };
+
+    const spec = keyGeometrySpec(cfg);
+    const keys = (cfg.type === 'none' ? [] : (opts.keys || [])).map(k => ({ ...k, region: -1 }));
+    const tmpSec = { loops, regions };
+    for (const k of keys) k.region = regionAt(tmpSec, k.x, k.y);
+    const pins = [];
+
+    regions.forEach((reg, ri) => {
+      if (skip.has(ri)) return;
+      const myKeys = keys.filter(k => k.region === ri);
+      for (const side of [-1, +1]) { // -1 = below the plane (cap faces +n), +1 = above (cap faces -n)
+        const flat = [], ids = [], holes = [], rings = [];
+        const pushRing = (ringIds, xy) => {
+          if (rings.length) holes.push(ids.length);
+          rings.push(ringIds);
+          for (let k = 0; k < ringIds.length; k++) { ids.push(ringIds[k]); flat.push(xy[2 * k], xy[2 * k + 1]); }
+        };
+        const off = nv + (side === -1 ? 0 : np);
+        pushRing(loops[reg.outer].ids.map(q => off + q), loops[reg.outer].xy);
+        for (const h of reg.holes) pushRing(loops[h].ids.map(q => off + q), loops[h].xy);
+        const tubes = [];
+        for (const k of myKeys) {
+          let role, rad, depth, dir, tip = 1;
+          if (cfg.type === 'peg') {
+            const pegSide = cfg.pegSide === 'above' ? +1 : -1;
+            if (side === pegSide) { role = 'peg'; rad = spec.r; depth = cfg.length; dir = -side; tip = spec.taper; }
+            else { role = 'socket'; rad = spec.r + spec.c; depth = cfg.length + spec.ca; dir = side; tip = (spec.r * spec.taper + spec.c) / (spec.r + spec.c); }
+          } else {
+            role = 'socket'; rad = spec.r + spec.c; dir = side;
+            depth = cfg.type === 'dowel' ? cfg.length / 2 + spec.ca : cfg.length + spec.ca;
+          }
+          const prof = profile(cfg.shape, rad);
+          const ring = [], xy = [];
+          for (const [px, py] of prof) { ring.push(addV(at(k.x + px, k.y + py, 0))); xy.push(k.x + px, k.y + py); }
+          pushRing(ring, xy);
+          tubes.push({ k, role, prof, depth, dir, tip, ring });
+        }
+        const loc = earcut(flat, holes);
+        let sum = 0;
+        for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
+        const wantCCW = side === -1; // u x v = n, so CCW faces +n
+        const flip = wantCCW ? sum < 0 : sum > 0;
+        const capTris = [];
+        for (let i = 0; i < loc.length; i += 3) {
+          if (flip) capTris.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]);
+          else capTris.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]);
+        }
+        for (const r of rings) fixTJunctions(capTris, r);
+        for (let i = 0; i < capTris.length; i += 3) T.push3(capTris[i], capTris[i + 1], capTris[i + 2]);
+        for (const tb of tubes) {
+          const z = tb.dir * tb.depth;
+          const ring1 = tb.prof.map(([px, py]) => addV(at(tb.k.x + px * tb.tip, tb.k.y + py * tb.tip, z)));
+          const center = addV(at(tb.k.x, tb.k.y, z));
+          const axis0 = at(tb.k.x, tb.k.y, 0);
+          const m = tb.ring.length;
+          for (let i = 0; i < m; i++) {
+            const a = tb.ring[i], b = tb.ring[(i + 1) % m], c = ring1[(i + 1) % m], d = ring1[i];
+            const A = pos(a), C = pos(c);
+            const mid = [(A[0] + C[0]) / 2, (A[1] + C[1]) / 2, (A[2] + C[2]) / 2];
+            const along = (mid[0] - axis0[0]) * n[0] + (mid[1] - axis0[1]) * n[1] + (mid[2] - axis0[2]) * n[2];
+            let rx = mid[0] - axis0[0] - n[0] * along, ry = mid[1] - axis0[1] - n[1] * along, rz = mid[2] - axis0[2] - n[2] * along;
+            if (tb.role === 'socket') { rx = -rx; ry = -ry; rz = -rz; }
+            pushOriented(a, b, c, [rx, ry, rz]); pushOriented(a, c, d, [rx, ry, rz]);
+            const e = tb.role === 'peg' ? [n[0] * tb.dir, n[1] * tb.dir, n[2] * tb.dir] : [-n[0] * tb.dir, -n[1] * tb.dir, -n[2] * tb.dir];
+            pushOriented(center, ring1[i], ring1[(i + 1) % m], e);
+          }
+        }
+      }
+      if (cfg.type === 'dowel') for (const k of myKeys) pins.push(makePin(at, n, k, spec.r, cfg.length, cfg.shape));
+    });
+
+    const comps = splitComponents(V.a.subarray(0, V.n), T.view(), nv, spans, Fs);
+    return { parts: comps, pins, shift: sec.shift, keysUsed: keys.filter(k => k.region >= 0 && !skip.has(k.region)).length };
+  }
+
+  function makePin(at, n, k, r, L, shape) {
+    const ch = Math.min(0.4, r * 0.2, L * 0.1);
+    const pv = [], pi = [];
+    const prof = profile(shape, 1);
+    const levels = [[-L / 2, r - ch], [-L / 2 + ch, r], [L / 2 - ch, r], [L / 2, r - ch]];
+    const rings = levels.map(([z, rad]) => prof.map(([px, py]) => { const p = at(k.x + px * rad, k.y + py * rad, z); pv.push(...p); return pv.length / 3 - 1; }));
+    const c0 = at(k.x, k.y, -L / 2), c1 = at(k.x, k.y, L / 2);
+    pv.push(...c0); const i0 = pv.length / 3 - 1; pv.push(...c1); const i1 = pv.length / 3 - 1;
+    const ctr = at(k.x, k.y, 0);
+    const P = () => pv;
+    const orient = (a, b, c) => {
+      const A = [pv[3 * a], pv[3 * a + 1], pv[3 * a + 2]], B = [pv[3 * b], pv[3 * b + 1], pv[3 * b + 2]], C = [pv[3 * c], pv[3 * c + 1], pv[3 * c + 2]];
+      const nn = cross3([B[0] - A[0], B[1] - A[1], B[2] - A[2]], [C[0] - A[0], C[1] - A[1], C[2] - A[2]]);
+      const m = [(A[0] + B[0] + C[0]) / 3 - ctr[0], (A[1] + B[1] + C[1]) / 3 - ctr[1], (A[2] + B[2] + C[2]) / 3 - ctr[2]];
+      if (nn[0] * m[0] + nn[1] * m[1] + nn[2] * m[2] < 0) pi.push(a, c, b); else pi.push(a, b, c);
+    };
+    P();
+    const m = prof.length;
+    for (let l = 0; l + 1 < rings.length; l++) for (let i = 0; i < m; i++) {
+      const a = rings[l][i], b = rings[l][(i + 1) % m], c = rings[l + 1][(i + 1) % m], d = rings[l + 1][i];
+      orient(a, b, c); orient(a, c, d);
+    }
+    for (let i = 0; i < m; i++) { orient(i0, rings[0][i], rings[0][(i + 1) % m]); orient(i1, rings[3][i], rings[3][(i + 1) % m]); }
+    return { positions: new Float32Array(pv), indices: new Uint32Array(pi) };
+  }
+
+  function splitComponents(V, T, nvOrig, spans, F) {
+    const nv = V.length / 3, nt = T.length / 3;
+    const parent = new Int32Array(nv);
+    for (let i = 0; i < nv; i++) parent[i] = i;
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const unite = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[a] = b; };
+    for (let t = 0; t < nt; t++) { unite(T[3 * t], T[3 * t + 1]); unite(T[3 * t], T[3 * t + 2]); }
+    const compOf = new Map();
+    const comps = [];
+    for (let t = 0; t < nt; t++) {
+      const r = find(T[3 * t]);
+      let c = compOf.get(r);
+      if (c === undefined) { c = comps.length; compOf.set(r, c); comps.push({ tris: [], touched: false, spans: false }); }
+      comps[c].tris.push(t);
+    }
+    const spanSet = spans; // flags indexed by original triangle id; original tris come first in T
+    const built = comps.map((c) => {
+      const map = new Map();
+      const pos = [], idx = new Uint32Array(c.tris.length * 3);
+      let touched = false, sp = false;
+      for (let k = 0; k < c.tris.length; k++) {
+        const t = c.tris[k];
+        if (t < spanSet.length && spanSet[t]) sp = true;
+        for (let j = 0; j < 3; j++) {
+          const vi = T[3 * t + j];
+          if (vi >= nvOrig) touched = true;
+          let w = map.get(vi);
+          if (w === undefined) { w = pos.length / 3; map.set(vi, w); pos.push(V[3 * vi], V[3 * vi + 1], V[3 * vi + 2]); }
+          idx[3 * k + j] = w;
+        }
+      }
+      const positions = new Float32Array(pos);
+      const vc = volumeCentroid(positions, idx);
+      const b = bounds(positions);
+      const d = (vc.centroid[0] - F.o[0]) * F.n[0] + (vc.centroid[1] - F.o[1]) * F.n[1] + (vc.centroid[2] - F.o[2]) * F.n[2];
+      return { positions, indices: idx, volume: vc.volume, bbox: b, side: d < 0 ? 'below' : 'above', touched, spans: sp, centroid: vc.centroid };
+    });
+    // Keep shells the cut never touched (eyes, inner voids) with the piece that contains them.
+    const keep = built.filter(c => c.touched && c.volume > 0);
+    const loose = built.filter(c => !(c.touched && c.volume > 0));
+    for (const c of loose) {
+      let host = null, hostVol = Infinity;
+      for (const k of keep) {
+        if (k.side !== c.side && !k.spans) continue;
+        const bb = k.bbox;
+        const inside = c.centroid[0] >= bb.min[0] && c.centroid[0] <= bb.max[0] && c.centroid[1] >= bb.min[1] && c.centroid[1] <= bb.max[1] && c.centroid[2] >= bb.min[2] && c.centroid[2] <= bb.max[2];
+        if (inside && k.volume < hostVol) { host = k; hostVol = k.volume; }
+      }
+      if (!host && c.volume > 0) { keep.push(c); continue; }
+      if (!host) host = keep.length ? keep.reduce((a, b) => (a.volume > b.volume ? a : b)) : null;
+      if (!host) { keep.push(c); continue; }
+      const merged = mergeMeshes([host, c]);
+      host.positions = merged.positions; host.indices = merged.indices;
+      host.volume = volume(merged.positions, merged.indices); host.bbox = bounds(merged.positions);
+    }
+    return keep.map(c => ({ positions: c.positions, indices: c.indices, volume: c.volume, side: c.spans ? 'both' : c.side }));
+  }
+  function mergeMeshes(list) {
+    let nP = 0, nI = 0;
+    for (const m of list) { nP += m.positions.length; nI += m.indices.length; }
+    const positions = new Float32Array(nP), indices = new Uint32Array(nI);
+    let po = 0, io = 0;
+    for (const m of list) {
+      positions.set(m.positions, po);
+      const base = po / 3;
+      for (let i = 0; i < m.indices.length; i++) indices[io + i] = m.indices[i] + base;
+      po += m.positions.length; io += m.indices.length;
+    }
+    return { positions, indices };
+  }
+
+  /* ---------- transforms ---------- */
+  function transformPositions(P, fn) {
+    const out = new Float32Array(P.length);
+    for (let i = 0; i < P.length; i += 3) { const r = fn(P[i], P[i + 1], P[i + 2]); out[i] = r[0]; out[i + 1] = r[1]; out[i + 2] = r[2]; }
+    return out;
+  }
+
+  /* ---------- display normals with crease splitting ---------- */
+  function creasedArrays(P, I, creaseDeg) {
+    const nt = I.length / 3, nv = P.length / 3;
+    const cosT = Math.cos((creaseDeg * Math.PI) / 180);
+    const fn = new Float32Array(nt * 3), fu = new Float32Array(nt * 3);
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const ex = P[b] - P[a], ey = P[b + 1] - P[a + 1], ez = P[b + 2] - P[a + 2];
+      const fx = P[c] - P[a], fy = P[c + 1] - P[a + 1], fz = P[c + 2] - P[a + 2];
+      const x = ey * fz - ez * fy, y = ez * fx - ex * fz, z = ex * fy - ey * fx;
+      fn[3 * t] = x; fn[3 * t + 1] = y; fn[3 * t + 2] = z;
+      const l = Math.hypot(x, y, z) || 1;
+      fu[3 * t] = x / l; fu[3 * t + 1] = y / l; fu[3 * t + 2] = z / l;
+    }
+    const start = new Uint32Array(nv + 1);
+    for (let k = 0; k < I.length; k++) start[I[k] + 1]++;
+    for (let i = 0; i < nv; i++) start[i + 1] += start[i];
+    const fill = start.slice(0, nv), adj = new Uint32Array(I.length);
+    for (let k = 0; k < I.length; k++) adj[fill[I[k]]++] = (k / 3) | 0;
+    const pos = new Float32Array(nt * 9), nor = new Float32Array(nt * 9);
+    for (let t = 0; t < nt; t++) {
+      const ux = fu[3 * t], uy = fu[3 * t + 1], uz = fu[3 * t + 2];
+      for (let j = 0; j < 3; j++) {
+        const vi = I[3 * t + j], o = 9 * t + 3 * j;
+        pos[o] = P[3 * vi]; pos[o + 1] = P[3 * vi + 1]; pos[o + 2] = P[3 * vi + 2];
+        let sx = 0, sy = 0, sz = 0;
+        for (let q = start[vi]; q < start[vi + 1]; q++) {
+          const f = adj[q];
+          if (fu[3 * f] * ux + fu[3 * f + 1] * uy + fu[3 * f + 2] * uz >= cosT) { sx += fn[3 * f]; sy += fn[3 * f + 1]; sz += fn[3 * f + 2]; }
+        }
+        const l = Math.hypot(sx, sy, sz) || 1;
+        nor[o] = sx / l; nor[o + 1] = sy / l; nor[o + 2] = sz / l;
+      }
+    }
+    return { pos, nor };
+  }
+
+  /* ---------- export ---------- */
+  function writeSTL(P, I, label) {
+    const nt = I.length / 3;
+    const buf = new ArrayBuffer(84 + nt * 50);
+    const dv = new DataView(buf);
+    const head = ('Keymaster ' + (label || '')).slice(0, 79);
+    for (let i = 0; i < head.length; i++) dv.setUint8(i, head.charCodeAt(i) & 127);
+    dv.setUint32(80, nt, true);
+    let o = 84;
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const ex = P[b] - P[a], ey = P[b + 1] - P[a + 1], ez = P[b + 2] - P[a + 2];
+      const fx = P[c] - P[a], fy = P[c + 1] - P[a + 1], fz = P[c + 2] - P[a + 2];
+      let x = ey * fz - ez * fy, y = ez * fx - ex * fz, z = ex * fy - ey * fx;
+      const l = Math.hypot(x, y, z) || 1; x /= l; y /= l; z /= l;
+      dv.setFloat32(o, x, true); dv.setFloat32(o + 4, y, true); dv.setFloat32(o + 8, z, true); o += 12;
+      for (const q of [a, b, c]) { dv.setFloat32(o, P[q], true); dv.setFloat32(o + 4, P[q + 1], true); dv.setFloat32(o + 8, P[q + 2], true); o += 12; }
+      dv.setUint16(o, 0, true); o += 2;
+    }
+    return buf;
+  }
+  let CRC_TABLE = null;
+  function crc32(bytes) {
+    if (!CRC_TABLE) {
+      CRC_TABLE = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; CRC_TABLE[n] = c >>> 0; }
+    }
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  function makeZip(files) {
+    const enc = new TextEncoder();
+    const d = new Date();
+    const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    const entries = files.map(f => ({ name: enc.encode(f.name), data: f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data) }));
+    let size = 22;
+    for (const e of entries) { e.crc = crc32(e.data); size += 30 + e.name.length + e.data.length + 46 + e.name.length; }
+    const out = new Uint8Array(size);
+    const dv = new DataView(out.buffer);
+    let o = 0;
+    for (const e of entries) {
+      e.offset = o;
+      dv.setUint32(o, 0x04034b50, true); dv.setUint16(o + 4, 20, true); dv.setUint16(o + 6, 0x0800, true); dv.setUint16(o + 8, 0, true);
+      dv.setUint16(o + 10, time, true); dv.setUint16(o + 12, date, true); dv.setUint32(o + 14, e.crc, true);
+      dv.setUint32(o + 18, e.data.length, true); dv.setUint32(o + 22, e.data.length, true);
+      dv.setUint16(o + 26, e.name.length, true); dv.setUint16(o + 28, 0, true);
+      out.set(e.name, o + 30); out.set(e.data, o + 30 + e.name.length);
+      o += 30 + e.name.length + e.data.length;
+    }
+    const cd = o;
+    for (const e of entries) {
+      dv.setUint32(o, 0x02014b50, true); dv.setUint16(o + 4, 20, true); dv.setUint16(o + 6, 20, true); dv.setUint16(o + 8, 0x0800, true);
+      dv.setUint16(o + 10, 0, true); dv.setUint16(o + 12, time, true); dv.setUint16(o + 14, date, true); dv.setUint32(o + 16, e.crc, true);
+      dv.setUint32(o + 20, e.data.length, true); dv.setUint32(o + 24, e.data.length, true); dv.setUint16(o + 28, e.name.length, true);
+      dv.setUint16(o + 30, 0, true); dv.setUint16(o + 32, 0, true); dv.setUint16(o + 34, 0, true); dv.setUint16(o + 36, 0, true);
+      dv.setUint32(o + 38, 0, true); dv.setUint32(o + 42, e.offset, true);
+      out.set(e.name, o + 46);
+      o += 46 + e.name.length;
+    }
+    dv.setUint32(o, 0x06054b50, true); dv.setUint16(o + 4, 0, true); dv.setUint16(o + 6, 0, true);
+    dv.setUint16(o + 8, entries.length, true); dv.setUint16(o + 10, entries.length, true);
+    dv.setUint32(o + 12, o - cd, true); dv.setUint32(o + 16, cd, true); dv.setUint16(o + 20, 0, true);
+    return out;
+  }
+
+  /* ---------- sample model ---------- */
+  function torusKnot(R = 30, tube = 9, tubular = 420, radial = 40, p = 2, q = 3) {
+    const pos = [], idx = [];
+    const curve = (u) => {
+      const qu = (q / p) * u, cs = Math.cos(qu);
+      return [R * (2 + cs) * 0.5 * Math.cos(u), R * (2 + cs) * 0.5 * Math.sin(u), R * Math.sin(qu) * 0.5];
+    };
+    for (let i = 0; i < tubular; i++) {
+      const u = (i / tubular) * p * Math.PI * 2;
+      const P1 = curve(u), P2 = curve(u + 0.01);
+      const T = norm3([P2[0] - P1[0], P2[1] - P1[1], P2[2] - P1[2]]);
+      let N = [P2[0] + P1[0], P2[1] + P1[1], P2[2] + P1[2]];
+      const B = norm3(cross3(T, N));
+      N = norm3(cross3(B, T));
+      for (let j = 0; j < radial; j++) {
+        const vv = (j / radial) * Math.PI * 2;
+        const cx = -tube * Math.cos(vv), cy = tube * Math.sin(vv);
+        pos.push(P1[0] + cx * N[0] + cy * B[0], P1[1] + cx * N[1] + cy * B[1], P1[2] + cx * N[2] + cy * B[2] + R * 0.5 + tube);
+      }
+    }
+    for (let i = 0; i < tubular; i++) for (let j = 0; j < radial; j++) {
+      const a = i * radial + j, b = ((i + 1) % tubular) * radial + j, c = ((i + 1) % tubular) * radial + ((j + 1) % radial), d = i * radial + ((j + 1) % radial);
+      idx.push(a, b, d, b, c, d);
+    }
+    return { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
+  }
+
+  return {
+    parseSTL, parseOBJ, prepareMesh, fillHoles, edgeReport, volume, bounds, diag,
+    frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, keyGeometrySpec, KEY_DEFAULTS,
+    cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
+  };
+})();
+
+
+</script>
+<script>
+(() => {
+  'use strict';
+  const K = KMCore;
+  const $ = (s, el = document) => el.querySelector(s);
+  const PALETTE = ['#CFC8BD', '#8FB096', '#8DA2C0', '#C98F86', '#A99CC6', '#79AFB0', '#C6AE8F', '#B5BB7C', '#D2A1B8', '#9AA3AB'];
+  const PIN_COLOR = '#B8BCC2';
+  const PREFS_KEY = 'keymaster.prefs.v1';
+  const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const ICONS = {
+    eye: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M1.5 10S4.5 4 10 4s8.5 6 8.5 6-3 6-8.5 6S1.5 10 1.5 10z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2.6" fill="currentColor"/></svg>',
+    eyeOff: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M1.5 10S4.5 4 10 4s8.5 6 8.5 6-3 6-8.5 6S1.5 10 1.5 10z" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".45"/><path d="M3 17L17 3" stroke="currentColor" stroke-width="1.6"/></svg>',
+    check: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    alert: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l8.5 15h-17z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4.2M10 14.6v.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    cut: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 12h16" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2"/><path d="M5 9V4h10v5M5 15v1h10v-1" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
+  };
+
+  /* ---------------- state ---------------- */
+  const state = {
+    model: null,
+    parts: [],
+    selectedId: null,
+    hidden: new Set(),
+    explode: 0,
+    wire: false,
+    nextColor: 1,
+    bed: { w: 220, d: 220, h: 250 },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: false, pegSide: 'below', perArea: 2 },
+    cut: { mode: 'translate', keys: [], auto: true, skip: new Set(), analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
+  };
+  const history = { past: [], future: [] };
+  let uid = 1;
+  let downloads = null;
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null');
+    if (saved && saved.cfg) Object.assign(state.cfg, saved.cfg);
+    if (saved && saved.bed) Object.assign(state.bed, saved.bed);
+  } catch (e) { /* storage unavailable */ }
+  function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ cfg: state.cfg, bed: state.bed })); } catch (e) { /* ignore */ } }
+
+  if (window.claude && typeof window.claude.use === 'function') {
+    window.claude.use('downloads').then(d => { downloads = d; }).catch(() => { downloads = null; });
+  }
+
+  function makePart({ name, color, positions, indices, kind }) {
+    return { id: uid++, name, color, positions, indices, bbox: K.bounds(positions), tris: indices.length / 3, volume: K.volume(positions, indices), kind: kind || 'part' };
+  }
+  const selectedPart = () => state.parts.find(p => p.id === state.selectedId) || null;
+  const fmt = (n) => (Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(1));
+  const fmtInt = (n) => n.toLocaleString('en-US');
+  const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function nextColor() { const c = PALETTE[state.nextColor % PALETTE.length]; state.nextColor++; return c; }
+  function fitsBed(p) {
+    const d = p.bbox.size.slice().sort((a, b) => a - b);
+    const b = [state.bed.w, state.bed.d, state.bed.h].sort((a, b) => a - b);
+    return d[0] <= b[0] && d[1] <= b[1] && d[2] <= b[2];
+  }
+
+  /* ---------------- three.js setup ---------------- */
+  const stage = $('#stage');
+  if (typeof THREE === 'undefined' || !THREE.OrbitControls || !THREE.TransformControls) {
+    $('#fatal').hidden = false;
+    return;
+  }
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.localClippingEnabled = true;
+  renderer.setClearColor(0x000000, 0);
+  stage.prepend(renderer.domElement);
+  const canvas = renderer.domElement;
+  canvas.setAttribute('aria-label', '3D view of the model');
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 20000);
+  camera.up.set(0, 0, 1);
+  camera.position.set(160, -260, 150);
+  const orbit = new THREE.OrbitControls(camera, canvas);
+  orbit.enableDamping = true;
+  orbit.dampingFactor = 0.12;
+  orbit.screenSpacePanning = true;
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x5a5f66, 0.85));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 0.85);
+  const fillLight = new THREE.DirectionalLight(0xe4ecff, 0.32);
+  const rimLight = new THREE.DirectionalLight(0xfff4e0, 0.28);
+  scene.add(keyLight, fillLight, rimLight);
+  function placeLights(c, R) {
+    keyLight.position.set(c[0] + R * 1.2, c[1] - R * 1.6, c[2] + R * 2.2);
+    fillLight.position.set(c[0] - R * 2, c[1] + R * 0.6, c[2] + R * 0.4);
+    rimLight.position.set(c[0] + R * 0.4, c[1] + R * 2.2, c[2] + R * 1.2);
+  }
+  placeLights([0, 0, 0], 100);
+
+  let grid = null;
+  function updateGrid() {
+    if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); grid = null; }
+    if (!state.parts.length) return;
+    const b = modelBounds();
+    const span = Math.max(b.size[0], b.size[1]) * 1.8 + 40;
+    const step = span > 600 ? 50 : 10;
+    const size = Math.ceil(span / step) * step;
+    grid = new THREE.GridHelper(size, size / step, 0x6f757c, 0x8e949a);
+    grid.rotation.x = Math.PI / 2;
+    grid.position.set(b.center[0], b.center[1], b.min[2] - 0.01);
+    grid.material.transparent = true; grid.material.opacity = 0.38; grid.material.depthWrite = false;
+    scene.add(grid);
+  }
+  function modelBounds() {
+    let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (const p of state.parts) for (let i = 0; i < 3; i++) { mn[i] = Math.min(mn[i], p.bbox.min[i]); mx[i] = Math.max(mx[i], p.bbox.max[i]); }
+    return { min: mn, max: mx, size: [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]], center: [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2] };
+  }
+
+  const partsGroup = new THREE.Group();
+  scene.add(partsGroup);
+
+  // cut plane rig
+  const planeGroup = new THREE.Group();
+  planeGroup.visible = false;
+  scene.add(planeGroup);
+  const hatch = makeHatch();
+  const planeFrame = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xf2b705, transparent: true, opacity: 0.95 }));
+  const planeSheet = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0xf2b705, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false }));
+  const capMat = new THREE.MeshBasicMaterial({
+    map: hatch, side: THREE.DoubleSide,
+    stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc,
+    stencilFail: THREE.ReplaceStencilOp, stencilZFail: THREE.ReplaceStencilOp, stencilZPass: THREE.ReplaceStencilOp,
+  });
+  const capMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), capMat);
+  capMesh.renderOrder = 1.1;
+  capMesh.onAfterRender = (r) => r.clearStencil();
+  const regionGroup = new THREE.Group();
+  const keyGroup = new THREE.Group();
+  const gripGroup = new THREE.Group();
+  const gripMat = new THREE.MeshBasicMaterial({ color: 0x2a2100 });
+  const gripGeom = new THREE.SphereGeometry(1, 16, 12);
+  for (let i = 0; i < 4; i++) { const g = new THREE.Mesh(gripGeom, gripMat); g.renderOrder = 6; gripGroup.add(g); }
+  gripGroup.visible = false;
+  const hinge = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x2a2100 }));
+  hinge.visible = false; hinge.renderOrder = 6;
+  planeGroup.add(planeSheet, planeFrame, capMesh, regionGroup, keyGroup, gripGroup, hinge);
+
+  const clipBelow = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+  const clipAbove = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+  const ghostMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.24, depthWrite: false, roughness: 0.7, clippingPlanes: [clipAbove] });
+  const preview = { ghost: null, stencil: null, partId: null };
+
+  const tc = new THREE.TransformControls(camera, canvas);
+  tc.setSpace('local');
+  tc.setSize(0.95);
+  scene.add(tc);
+
+  function makeHatch() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    g.fillStyle = '#F2B705'; g.fillRect(0, 0, 64, 64);
+    g.strokeStyle = '#A87700'; g.lineWidth = 3.2;
+    for (let i = -64; i <= 128; i += 16) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i - 64, 64); g.stroke(); }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function makeStencilGroup(geometry, plane) {
+    const group = new THREE.Group();
+    const base = new THREE.MeshBasicMaterial();
+    base.depthWrite = false; base.depthTest = false; base.colorWrite = false;
+    base.stencilWrite = true; base.stencilFunc = THREE.AlwaysStencilFunc;
+    const back = base.clone(); back.side = THREE.BackSide; back.clippingPlanes = [plane];
+    back.stencilFail = back.stencilZFail = back.stencilZPass = THREE.IncrementWrapStencilOp;
+    const front = base.clone(); front.side = THREE.FrontSide; front.clippingPlanes = [plane];
+    front.stencilFail = front.stencilZFail = front.stencilZPass = THREE.DecrementWrapStencilOp;
+    const m0 = new THREE.Mesh(geometry, back); m0.renderOrder = 1;
+    const m1 = new THREE.Mesh(geometry, front); m1.renderOrder = 1;
+    group.add(m0, m1);
+    return group;
+  }
+
+  /* ---------------- render loop ---------------- */
+  let dirty = true;
+  const anims = [];
+  const markDirty = () => { dirty = true; };
+  orbit.addEventListener('change', markDirty);
+  tc.addEventListener('change', markDirty);
+  function loop(now) {
+    requestAnimationFrame(loop);
+    const moved = orbit.update();
+    if (anims.length) {
+      for (let i = anims.length - 1; i >= 0; i--) {
+        const a = anims[i];
+        const k = Math.min(1, (now - a.t0) / a.dur);
+        a.step(1 - Math.pow(1 - k, 3));
+        if (k >= 1) anims.splice(i, 1);
+      }
+      dirty = true;
+    }
+    if (moved || dirty) { renderer.render(scene, camera); dirty = false; }
+  }
+  function animate(dur, step) {
+    if (reduceMotion) { step(1); markDirty(); return; }
+    anims.push({ t0: performance.now(), dur, step });
+  }
+  new ResizeObserver(() => {
+    const r = stage.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    renderer.setSize(r.width, r.height, false);
+    canvas.style.width = r.width + 'px'; canvas.style.height = r.height + 'px';
+    camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
+    markDirty();
+  }).observe(stage);
+  requestAnimationFrame(loop);
+  setGizmoMode('translate');
+
+  /* ---------------- display meshes ---------------- */
+  const views = new Map();
+  function viewFor(p) {
+    let v = views.get(p.id);
+    if (v) return v;
+    const arr = K.creasedArrays(p.positions, p.indices, 38);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(arr.pos, 3));
+    geom.setAttribute('normal', new THREE.BufferAttribute(arr.nor, 3));
+    geom.computeBoundingSphere(); geom.computeBoundingBox();
+    const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.66, metalness: 0, wireframe: state.wire });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.userData.partId = p.id;
+    v = { geom, mesh, mat, offset: new THREE.Vector3() };
+    views.set(p.id, v);
+    return v;
+  }
+  function syncScene() {
+    const ids = new Set(state.parts.map(p => p.id));
+    for (const [id, v] of views) if (!ids.has(id)) { partsGroup.remove(v.mesh); v.geom.dispose(); v.mat.dispose(); views.delete(id); }
+    for (const id of [...state.hidden]) if (!ids.has(id)) state.hidden.delete(id);
+    if (state.selectedId && !ids.has(state.selectedId)) state.selectedId = null;
+    for (const p of state.parts) {
+      const v = viewFor(p);
+      if (!v.mesh.parent) partsGroup.add(v.mesh);
+      v.mesh.visible = !state.hidden.has(p.id);
+      v.mat.color.set(p.color);
+      v.mat.wireframe = state.wire;
+    }
+    applyExplode();
+    updatePreview();
+    updateGrid();
+    renderParts();
+    renderInspector();
+    updateChrome();
+    markDirty();
+  }
+  function applyExplode() {
+    const b = state.parts.length ? modelBounds() : null;
+    for (const p of state.parts) {
+      const v = views.get(p.id);
+      if (!v) continue;
+      const k = state.selectedId ? 0 : state.explode * 0.9;
+      v.mesh.position.set(
+        (p.bbox.center[0] - b.center[0]) * k + v.offset.x,
+        (p.bbox.center[1] - b.center[1]) * k + v.offset.y,
+        (p.bbox.center[2] - b.center[2]) * k + v.offset.z);
+    }
+    markDirty();
+  }
+
+  /* ---------------- cut preview ---------------- */
+  function updatePreview() {
+    if (preview.ghost) { scene.remove(preview.ghost); preview.ghost = null; }
+    if (preview.stencil) { scene.remove(preview.stencil); preview.stencil.children.forEach(m => m.material.dispose()); preview.stencil = null; }
+    for (const [id, v] of views) {
+      const want = id === state.selectedId ? 1 : 0;
+      const has = v.mat.clippingPlanes ? v.mat.clippingPlanes.length : 0;
+      if (want !== has) { v.mat.clippingPlanes = want ? [clipBelow] : null; v.mat.needsUpdate = true; }
+      v.mesh.renderOrder = want ? 2 : 0;
+    }
+    const p = selectedPart();
+    if (!p) { planeGroup.visible = false; tc.detach(); preview.partId = null; return; }
+    const v = viewFor(p);
+    ghostMat.color.set(p.color).lerp(new THREE.Color(0xffffff), 0.45);
+    ghostMat.wireframe = state.wire;
+    preview.ghost = new THREE.Mesh(v.geom, ghostMat);
+    preview.ghost.renderOrder = 3;
+    preview.stencil = makeStencilGroup(v.geom, clipBelow);
+    scene.add(preview.ghost, preview.stencil);
+    planeGroup.visible = true;
+    if (state.cut.mode === 'translate') { if (tc.object !== planeGroup) tc.attach(planeGroup); }
+    else tc.detach();
+    preview.partId = p.id;
+  }
+
+  function currentFrame() {
+    planeGroup.updateMatrixWorld(true);
+    const e = planeGroup.matrixWorld.elements;
+    const nz = (x, y, z) => { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; };
+    return { o: [planeGroup.position.x, planeGroup.position.y, planeGroup.position.z], u: nz(e[0], e[1], e[2]), v: nz(e[4], e[5], e[6]), n: nz(e[8], e[9], e[10]) };
+  }
+  function planeNormal() { return new THREE.Vector3(0, 0, 1).applyQuaternion(planeGroup.quaternion).normalize(); }
+  function onPlaneMoved() {
+    const n = planeNormal(), o = planeGroup.position;
+    clipBelow.set(n.clone().negate(), n.dot(o));
+    clipAbove.set(n.clone(), -n.dot(o));
+    updatePositionReadout();
+    updateHint();
+    markDirty();
+  }
+  function setPlaneNormal(n) {
+    planeGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n.clone().normalize());
+    computeSliderRange();
+    onPlaneMoved();
+  }
+  function towardCamera(axis) {
+    const toCam = camera.position.clone().sub(planeGroup.position);
+    return axis.clone().multiplyScalar(axis.dot(toCam) >= 0 ? 1 : -1);
+  }
+  function computeSliderRange() {
+    const p = selectedPart();
+    if (!p) return;
+    const n = planeNormal();
+    const c = state.cut.center, b = p.bbox;
+    let lo = Infinity, hi = -Infinity;
+    for (const x of [b.min[0], b.max[0]]) for (const y of [b.min[1], b.max[1]]) for (const z of [b.min[2], b.max[2]]) {
+      const d = (x - c[0]) * n.x + (y - c[1]) * n.y + (z - c[2]) * n.z;
+      lo = Math.min(lo, d); hi = Math.max(hi, d);
+    }
+    state.cut.lo = lo; state.cut.hi = hi;
+  }
+  function planeOffset() {
+    const n = planeNormal(), c = state.cut.center, o = planeGroup.position;
+    return (o.x - c[0]) * n.x + (o.y - c[1]) * n.y + (o.z - c[2]) * n.z;
+  }
+  function tiltInfo() {
+    const n = planeNormal();
+    const c = [Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)];
+    const i = c.indexOf(Math.max(...c));
+    const deg = Math.acos(Math.min(1, c[i])) * 180 / Math.PI;
+    return { deg, axis: 'XYZ'[i], index: i, sign: [n.x, n.y, n.z][i] >= 0 ? 1 : -1 };
+  }
+  function straighten() {
+    const t = tiltInfo();
+    const a = new THREE.Vector3(t.index === 0 ? t.sign : 0, t.index === 1 ? t.sign : 0, t.index === 2 ? t.sign : 0);
+    setPlaneNormal(a);
+    state.cut.skip.clear();
+    scheduleAnalysis(0);
+    renderInspector();
+  }
+  function setPlaneOffset(s) {
+    const n = planeNormal(), c = state.cut.center;
+    planeGroup.position.set(c[0] + n.x * s, c[1] + n.y * s, c[2] + n.z * s);
+    onPlaneMoved();
+  }
+  function sizePlaneVisuals(R) {
+    const s = R * 2.3;
+    planeSheet.scale.set(s, s, 1);
+    capMesh.scale.set(R * 3.2, R * 3.2, 1);
+    const tile = Math.max(3, R / 9);
+    hatch.repeat.set((R * 3.2) / tile, (R * 3.2) / tile);
+    const h = s / 2;
+    const gr = Math.max(0.6, R * 0.035);
+    [[h, 0], [-h, 0], [0, h], [0, -h]].forEach(([x, y], i) => { const g = gripGroup.children[i]; g.position.set(x, y, 0); g.scale.set(gr, gr, gr); });
+    planeFrame.geometry.dispose();
+    planeFrame.geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-h, -h, 0), new THREE.Vector3(h, -h, 0), new THREE.Vector3(h, h, 0), new THREE.Vector3(-h, h, 0)]);
+  }
+  function setGizmoMode(mode) {
+    state.cut.mode = mode;
+    tc.setMode('translate');
+    tc.showX = false; tc.showY = false; tc.showZ = true;
+    if (mode === 'translate' && selectedPart()) { if (tc.object !== planeGroup) tc.attach(planeGroup); }
+    else tc.detach();
+    planeSheet.material.opacity = mode === 'rotate' ? 0.17 : 0.08;
+    gripGroup.visible = mode === 'rotate';
+    updateHint();
+    markDirty();
+  }
+  tc.addEventListener('dragging-changed', (e) => {
+    orbit.enabled = !e.value;
+    if (e.value) { state.cut.stale = true; renderKeyMarkers(); }
+    else {
+      computeSliderRange();
+      state.cut.skip.clear();
+      scheduleAnalysis(40);
+      renderInspector();
+    }
+  });
+  tc.addEventListener('objectChange', onPlaneMoved);
+
+  /* ---------------- analysis, keys ---------------- */
+  function coreCfg() { return { ...state.cfg }; }
+  let analysisTimer = 0;
+  function scheduleAnalysis(delay = 140) {
+    state.cut.stale = true;
+    clearTimeout(analysisTimer);
+    analysisTimer = setTimeout(runAnalysis, delay);
+    renderKeyMarkers();
+  }
+  function runAnalysis() {
+    const p = selectedPart();
+    if (!p) return;
+    const f = currentFrame();
+    const an = K.analyzePlane(p.positions, p.indices, f, coreCfg(), K.diag(p.bbox));
+    state.cut.analysis = an;
+    state.cut.stale = false;
+    if (state.cut.auto) state.cut.keys = an.base.error ? [] : K.autoPlaceKeys(an, coreCfg(), state.cfg.perArea, state.cut.skip);
+    state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
+    evaluateKeys();
+    renderRegions();
+    renderKeyMarkers();
+    renderInspector();
+    updateHint();
+    markDirty();
+  }
+  function evaluateKeys() {
+    const an = state.cut.analysis;
+    state.cut.evals = an && !an.base.error && state.cfg.type !== 'none' ? K.evaluateKeys(an, state.cut.keys, coreCfg(), state.cut.skip) : [];
+  }
+  function clearGroup(g) {
+    for (const c of [...g.children]) {
+      g.remove(c);
+      c.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    }
+  }
+  function renderRegions() {
+    clearGroup(regionGroup);
+    const an = state.cut.analysis;
+    if (!an || an.base.error) return;
+    const R = state.cut.R;
+    const z = Math.max(0.02, R * 0.0006);
+    an.base.regions.forEach((reg, ri) => {
+      const skipped = state.cut.skip.has(ri);
+      const g = new THREE.Group();
+      g.userData.region = ri;
+      for (const li of [reg.outer, ...reg.holes]) {
+        const xy = an.base.loops[li].xy;
+        const pts = [];
+        for (let i = 0; i < xy.length; i += 2) pts.push(new THREE.Vector3(xy[i], xy[i + 1], z));
+        const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: skipped ? 0x5c6168 : 0x2a2100 }));
+        line.renderOrder = 4;
+        g.add(line);
+      }
+      if (skipped) {
+        const flat = [], holes = [];
+        const rings = [reg.outer, ...reg.holes];
+        rings.forEach((li, k) => { if (k) holes.push(flat.length / 2); flat.push(...an.base.loops[li].xy); });
+        const tri = K.earcut(flat, holes);
+        const geom = new THREE.BufferGeometry();
+        const pos = new Float32Array(flat.length / 2 * 3);
+        for (let i = 0; i < flat.length / 2; i++) { pos[3 * i] = flat[2 * i]; pos[3 * i + 1] = flat[2 * i + 1]; pos[3 * i + 2] = z * 0.6; }
+        geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geom.setIndex(tri);
+        const fill = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({ color: 0x9ea4aa, side: THREE.DoubleSide }));
+        fill.renderOrder = 4;
+        g.add(fill);
+      }
+      regionGroup.add(g);
+    });
+  }
+  function renderKeyMarkers() {
+    clearGroup(keyGroup);
+    const cfg = state.cfg;
+    if (!selectedPart() || cfg.type === 'none') { markDirty(); return; }
+    const spec = K.keyGeometrySpec(cfg);
+    const R = state.cut.R;
+    const z = Math.max(0.03, R * 0.0009);
+    state.cut.keys.forEach((k, i) => {
+      const ev = state.cut.evals[i];
+      const stale = state.cut.stale;
+      const bad = !stale && ev && !ev.ok;
+      const active = i === state.cut.active;
+      const color = stale ? 0xd5d8dc : bad ? 0xe5484d : 0xfafbfc;
+      const g = new THREE.Group();
+      g.position.set(k.x, k.y, 0);
+      const footR = spec.r + spec.c;
+      const discGeom = cfg.shape === 'square' ? new THREE.PlaneGeometry(footR * 2, footR * 2) : new THREE.CircleGeometry(footR, 40);
+      const disc = new THREE.Mesh(discGeom, new THREE.MeshBasicMaterial({ color: bad ? 0xe5484d : 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: active ? 0.95 : 0.78 }));
+      disc.position.z = z; disc.renderOrder = 5;
+      g.add(disc);
+      let len, zc, rad = spec.r;
+      if (cfg.type === 'peg') { len = cfg.length; zc = (cfg.pegSide === 'above' ? -1 : 1) * len / 2; }
+      else if (cfg.type === 'dowel') { len = cfg.length; zc = 0; }
+      else { len = cfg.length * 2; zc = 0; }
+      const body = cfg.shape === 'square' ? new THREE.BoxGeometry(rad * 2, rad * 2, len) : new THREE.CylinderGeometry(rad * (cfg.taper && cfg.type === 'peg' ? 0.8 : 1), rad, len, 32);
+      if (cfg.shape !== 'square') {
+        body.rotateX(Math.PI / 2);
+        if (cfg.type === 'peg' && cfg.pegSide === 'above') body.rotateX(Math.PI);
+      }
+      const mesh = new THREE.Mesh(body, new THREE.MeshStandardMaterial({ color, roughness: 0.4, emissive: active ? 0x4a3a00 : 0x000000 }));
+      mesh.position.z = zc; mesh.renderOrder = 5;
+      g.add(mesh);
+      keyGroup.add(g);
+    });
+    markDirty();
+  }
+
+  /* ---------------- selection ---------------- */
+  function selectPart(id) {
+    if (id === state.selectedId) return;
+    state.selectedId = id;
+    const p = selectedPart();
+    if (p) {
+      state.cut.center = p.bbox.center.slice();
+      state.cut.R = K.diag(p.bbox) / 2;
+      planeGroup.position.set(...p.bbox.center);
+      sizePlaneVisuals(state.cut.R);
+      const up = new THREE.Vector3(0, 0, 1);
+      setPlaneNormal(towardCamera(up));
+      state.cut.keys = []; state.cut.auto = true; state.cut.skip = new Set(); state.cut.analysis = null; state.cut.evals = []; state.cut.active = -1;
+      setGizmoMode(state.cut.mode);
+      scheduleAnalysis(0);
+    }
+    syncScene();
+  }
+  /* ---------------- history ---------------- */
+  function commit(parts, label) {
+    history.past.push({ parts: state.parts, label });
+    if (history.past.length > 60) history.past.shift();
+    history.future = [];
+    state.parts = parts;
+  }
+  function undo() {
+    if (!history.past.length) return;
+    const h = history.past.pop();
+    history.future.push({ parts: state.parts, label: h.label });
+    state.parts = h.parts; state.selectedId = null;
+    syncScene();
+    toast('Undid ' + h.label + '.');
+  }
+  function redo() {
+    if (!history.future.length) return;
+    const h = history.future.pop();
+    history.past.push({ parts: state.parts, label: h.label });
+    state.parts = h.parts; state.selectedId = null;
+    syncScene();
+    toast('Redid ' + h.label + '.');
+  }
+
+  /* ---------------- loading ---------------- */
+  const fileInput = $('#fileInput');
+  function busy(msg) {
+    const el = $('#busy');
+    if (msg) { el.querySelector('span').textContent = msg; el.hidden = false; }
+    else el.hidden = true;
+  }
+  const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 16)));
+  async function loadFile(file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (ext !== 'stl' && ext !== 'obj') { toast('Keymaster opens STL and OBJ files. Export your model in one of those formats, then open it here.', 'error'); return; }
+    busy('Opening ' + file.name);
+    await nextFrame();
+    try {
+      const buf = await file.arrayBuffer();
+      const raw = ext === 'stl' ? K.parseSTL(buf) : K.parseOBJ(new TextDecoder().decode(buf));
+      setModel(file.name.replace(/\.[^.]+$/, ''), K.prepareMesh(raw));
+    } catch (err) {
+      toast(err.message || 'This file couldn’t be read.', 'error');
+    } finally { busy(null); }
+  }
+  async function loadSample() {
+    busy('Building the sample');
+    await nextFrame();
+    setModel('Sample knot', K.prepareMesh(K.torusKnot()));
+    busy(null);
+  }
+  function setModel(name, m) {
+    state.model = { name, report: m.report, tris: m.indices.length / 3 };
+    state.nextColor = 1;
+    state.parts = [makePart({ name, color: PALETTE[0], positions: m.positions, indices: m.indices })];
+    history.past = []; history.future = [];
+    state.selectedId = null; state.hidden.clear(); state.explode = 0;
+    $('#empty').hidden = true;
+    syncScene();
+    frameAll();
+    if (m.report.flipped) toast('The model was inside out, so Keymaster flipped it to print correctly.');
+    else if (!m.report.closed) toast('This model has gaps in its surface. Fill holes in the model panel before cutting.', 'warn');
+    else if (state.model.tris > 3e6) toast('This is a very dense model. Cuts may take a few seconds.', 'warn');
+  }
+  function frameAll(target) {
+    const b = target ? target.bbox : modelBounds();
+    const c = new THREE.Vector3(...b.center);
+    const R = Math.max(1, Math.hypot(...b.size) / 2);
+    const dist = R / Math.sin((camera.fov * Math.PI) / 360) * 1.08;
+    const dir = camera.position.clone().sub(orbit.target);
+    if (dir.lengthSq() < 1e-9 || !target) dir.set(0.75, -1.25, 0.8);
+    dir.normalize();
+    camera.near = Math.max(0.05, R / 200); camera.far = R * 60; camera.updateProjectionMatrix();
+    const fromPos = camera.position.clone(), fromTarget = orbit.target.clone();
+    const toPos = c.clone().add(dir.multiplyScalar(dist));
+    placeLights(b.center, R);
+    animate(380, (k) => { camera.position.lerpVectors(fromPos, toPos, k); orbit.target.lerpVectors(fromTarget, c, k); });
+  }
+
+  /* ---------------- cutting ---------------- */
+  async function doCut() {
+    const p = selectedPart();
+    if (!p) return;
+    if (state.cut.stale) runAnalysis();
+    const an = state.cut.analysis;
+    if (!an || an.base.error || !an.base.regions.length) {
+      toast(an && an.base.error ? 'The surface is broken where this cut crosses it. Move the cut or repair the model.' : 'The cut plane doesn’t pass through this part. Slide it into the model first.', 'error');
+      return;
+    }
+    const bad = state.cut.evals.filter(e => !e.ok).length;
+    if (state.cfg.type !== 'none' && bad) {
+      toast(`${bad === 1 ? 'One key needs' : bad + ' keys need'} attention before cutting. Drag ${bad === 1 ? 'it' : 'them'} to a better spot or remove ${bad === 1 ? 'it' : 'them'}.`, 'error', { label: 'Remove', fn: removeBadKeys });
+      return;
+    }
+    busy('Cutting ' + p.name);
+    await nextFrame();
+    let res;
+    try {
+      res = K.cutMesh(p.positions, p.indices, currentFrame(), { scale: K.diag(p.bbox), cfg: coreCfg(), keys: state.cut.keys, skip: state.cut.skip });
+    } catch (err) {
+      busy(null);
+      toast(err.message, 'error');
+      return;
+    }
+    const groups = { below: [], above: [], both: [] };
+    for (const c of res.parts) groups[c.side].push(c);
+    const made = [];
+    const label = (side, i, count) => side === 'both' ? p.name : `${p.name} ${side === 'below' ? 'A' : 'B'}${count > 1 ? i + 1 : ''}`;
+    let first = true;
+    for (const side of ['both', 'below', 'above']) {
+      groups[side].sort((a, b) => b.volume - a.volume);
+      groups[side].forEach((c, i) => {
+        made.push(makePart({ name: label(side, i, groups[side].length), color: first ? p.color : nextColor(), positions: c.positions, indices: c.indices }));
+        first = false;
+      });
+    }
+    res.pins.forEach((pin, i) => made.push(makePart({ name: `${p.name} pin ${i + 1}`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' })));
+    const idx = state.parts.indexOf(p);
+    const parts = state.parts.slice(0, idx).concat(made, state.parts.slice(idx + 1));
+    commit(parts, 'the cut');
+    const n = planeNormal();
+    state.selectedId = null;
+    busy(null);
+    syncScene();
+    // pieces spring apart briefly so the cut reads clearly
+    const gap = state.cut.R * 0.12;
+    made.forEach(mp => {
+      const v = views.get(mp.id);
+      if (!v) return;
+      const c = mp.bbox.center, o = planeGroup.position;
+      const s = (c[0] - o.x) * n.x + (c[1] - o.y) * n.y + (c[2] - o.z) * n.z >= 0 ? 1 : -1;
+      const dir = n.clone().multiplyScalar(s * gap);
+      animate(900, (k) => { const w = Math.sin(k * Math.PI) * (1 - k * 0.3); v.offset.copy(dir).multiplyScalar(w); applyExplode(); });
+    });
+    const pieces = made.filter(m => m.kind !== 'pin').length;
+    toast(`Cut into ${pieces} pieces${res.pins.length ? ` and ${res.pins.length} dowel pins` : ''}. Click a part to keep cutting.`);
+  }
+  function removeBadKeys() {
+    state.cut.keys = state.cut.keys.filter((k, i) => state.cut.evals[i] && state.cut.evals[i].ok);
+    state.cut.auto = false; state.cut.active = -1;
+    evaluateKeys(); renderKeyMarkers(); renderInspector();
+  }
+
+  /* ---------------- model operations ---------------- */
+  function transformAll(fn, label) {
+    const parts = state.parts.map(p => makePart({ ...p, positions: K.transformPositions(p.positions, fn) }));
+    commit(parts, label);
+    state.selectedId = null;
+    syncScene();
+    frameAll();
+  }
+  function rotateAll(axis) {
+    const c = modelBounds().center;
+    const fn = axis === 'x' ? (x, y, z) => [x, c[1] - (z - c[2]), c[2] + (y - c[1])]
+      : axis === 'y' ? (x, y, z) => [c[0] + (z - c[2]), y, c[2] - (x - c[0])]
+        : (x, y, z) => [c[0] - (y - c[1]), c[1] + (x - c[0]), z];
+    transformAll(fn, 'the turn');
+  }
+  function scaleAll(f) {
+    if (!(f > 0) || !isFinite(f)) return;
+    transformAll((x, y, z) => [x * f, y * f, z * f], 'the scale change');
+  }
+  function fillAllHoles() {
+    let filled = 0;
+    const parts = state.parts.map(p => {
+      const r = K.fillHoles(p.positions, p.indices);
+      filled += r.filled;
+      return makePart({ ...p, positions: r.positions, indices: r.indices });
+    });
+    commit(parts, 'hole filling');
+    const rep = K.edgeReport(parts[0].indices);
+    state.model.report = { ...state.model.report, ...rep };
+    syncScene();
+    toast(rep.closed ? `Filled ${filled} ${filled === 1 ? 'hole' : 'holes'}. The model is closed now.` : `Filled ${filled} ${filled === 1 ? 'hole' : 'holes'}. Some gaps are too tangled to fill here; repair them in Blender or Meshmixer.`, rep.closed ? '' : 'warn');
+  }
+
+  /* ---------------- export ---------------- */
+  function safeName(s) { return (s || 'part').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'part'; }
+  async function exportParts(onlyId) {
+    const list = onlyId ? state.parts.filter(p => p.id === onlyId) : state.parts;
+    if (!list.length) return;
+    const used = new Set();
+    const files = list.map(p => {
+      let n = safeName(p.name), k = 2;
+      while (used.has(n)) n = safeName(p.name) + '-' + k++;
+      used.add(n);
+      return { name: n + '.stl', data: new Uint8Array(K.writeSTL(p.positions, p.indices, p.name)) };
+    });
+    const zip = K.makeZip(files);
+    const filename = safeName(state.model ? state.model.name : 'model') + (onlyId ? '-' + safeName(list[0].name) : '-parts') + '.zip';
+    const blob = new Blob([zip], { type: 'application/zip' });
+    if (downloads) {
+      try {
+        await downloads.save({ filename, data: blob });
+        toast(`Saved ${filename} with ${files.length} STL ${files.length === 1 ? 'file' : 'files'}.`);
+        return;
+      } catch (err) {
+        if (err && err.code === 'declined') return;
+        if (err && err.code === 'rate_limited') { toast('A save is already waiting for your answer.', 'warn'); return; }
+      }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast(`Saved ${filename} with ${files.length} STL ${files.length === 1 ? 'file' : 'files'}.`);
+  }
+
+  /* ---------------- pointer interaction ---------------- */
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  function setNdc(e) {
+    const r = canvas.getBoundingClientRect();
+    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+  }
+  function planeHit(e) {
+    setNdc(e);
+    const n = planeNormal();
+    const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(n, planeGroup.position);
+    const hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(pl, hit)) return null;
+    planeGroup.updateMatrixWorld(true);
+    const local = planeGroup.worldToLocal(hit.clone());
+    return { x: local.x, y: local.y };
+  }
+  function pickKey(e) {
+    if (!selectedPart() || state.cfg.type === 'none') return -1;
+    const r = canvas.getBoundingClientRect();
+    planeGroup.updateMatrixWorld(true);
+    camera.updateMatrixWorld();
+    let best = -1, bestD = coarse ? 26 : 16;
+    state.cut.keys.forEach((k, i) => {
+      const w = planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0)).project(camera);
+      const sx = (w.x + 1) / 2 * r.width + r.left, sy = (1 - w.y) / 2 * r.height + r.top;
+      const d = Math.hypot(sx - e.clientX, sy - e.clientY);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    return best;
+  }
+  function cameraOnClearSide() {
+    const n = planeNormal();
+    return n.dot(camera.position.clone().sub(planeGroup.position)) > 0;
+  }
+  const ptr = { down: false, x: 0, y: 0, t: 0, dragKey: -1, tilt: null };
+  function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
+  function toScreen(v) {
+    const r = canvas.getBoundingClientRect();
+    const q = v.clone().project(camera);
+    return [(q.x + 1) / 2 * r.width, (1 - q.y) / 2 * r.height];
+  }
+  function startTilt(h, e) {
+    let L = Math.hypot(h.x, h.y);
+    const dir = L > 1e-6 ? { x: h.x / L, y: h.y / L } : { x: 1, y: 0 };
+    ptr.tilt = { dir, lever: Math.max(L, state.cut.R * 0.35), lastX: e.clientX, lastY: e.clientY };
+    orbit.enabled = false;
+    canvas.setPointerCapture(e.pointerId);
+    canvas.style.cursor = 'grabbing';
+    const half = state.cut.R * 1.15, z = Math.max(0.03, state.cut.R * 0.0009);
+    hinge.geometry.dispose();
+    hinge.geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(dir.y * half, -dir.x * half, z), new THREE.Vector3(-dir.y * half, dir.x * half, z)]);
+    hinge.visible = true;
+    state.cut.stale = true;
+    renderKeyMarkers();
+  }
+  function moveTilt(e) {
+    const t = ptr.tilt;
+    const dx = e.clientX - t.lastX, dy = e.clientY - t.lastY;
+    t.lastX = e.clientX; t.lastY = e.clientY;
+    if (!dx && !dy) return;
+    planeGroup.updateMatrixWorld(true);
+    camera.updateMatrixWorld();
+    const n = planeNormal();
+    const pw = planeGroup.localToWorld(new THREE.Vector3(t.dir.x * t.lever, t.dir.y * t.lever, 0));
+    const eps = t.lever * 0.05;
+    const a = toScreen(pw), b = toScreen(pw.clone().add(n.clone().multiplyScalar(eps)));
+    const sx = (b[0] - a[0]) / eps, sy = (b[1] - a[1]) / eps; // screen pixels per mm along the normal
+    const view = pw.clone().sub(camera.position).normalize();
+    let perp = new THREE.Vector3().crossVectors(view, n);
+    if (perp.lengthSq() < 1e-6) perp = new THREE.Vector3().crossVectors(view, new THREE.Vector3(1, 0, 0));
+    perp.normalize();
+    const c = toScreen(pw.clone().add(perp.multiplyScalar(eps)));
+    const pxPerMm = Math.max(1e-6, Math.hypot(c[0] - a[0], c[1] - a[1]) / eps);
+    const s2 = sx * sx + sy * sy;
+    // Move the grabbed edge along the normal by however far the mouse moved in that direction on screen.
+    const lift = s2 > Math.pow(pxPerMm * 0.25, 2) ? (dx * sx + dy * sy) / s2 : -dy / pxPerMm;
+    const theta = Math.atan2(lift, t.lever) * (e.shiftKey ? 0.25 : 1);
+    planeGroup.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(t.dir.y, -t.dir.x, 0), theta));
+    onPlaneMoved();
+  }
+  function endTilt() {
+    ptr.tilt = null;
+    hinge.visible = false;
+    orbit.enabled = true;
+    canvas.style.cursor = '';
+    computeSliderRange();
+    state.cut.skip.clear();
+    scheduleAnalysis(40);
+    renderInspector();
+  }
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if (tc.dragging || tc.axis) return;
+    ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = performance.now(); ptr.dragKey = -1; ptr.tilt = null;
+    if (selectedPart() && state.cut.mode === 'rotate') {
+      const h = planeHit(e);
+      if (onSheet(h)) startTilt(h, e);
+      return;
+    }
+    const k = pickKey(e);
+    if (k >= 0) {
+      ptr.dragKey = k;
+      state.cut.active = k;
+      orbit.enabled = false;
+      canvas.setPointerCapture(e.pointerId);
+      renderKeyMarkers();
+    }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (ptr.tilt) { moveTilt(e); return; }
+    if (!ptr.down && selectedPart() && state.cut.mode === 'rotate') { canvas.style.cursor = onSheet(planeHit(e)) ? 'grab' : ''; return; }
+    if (ptr.dragKey >= 0) {
+      const h = planeHit(e);
+      if (!h) return;
+      state.cut.keys[ptr.dragKey] = h;
+      state.cut.auto = false;
+      evaluateKeys(); renderKeyMarkers();
+      return;
+    }
+    if (!ptr.down && selectedPart()) canvas.style.cursor = pickKey(e) >= 0 ? 'grab' : '';
+  });
+  canvas.addEventListener('pointercancel', () => { if (ptr.tilt) endTilt(); if (ptr.dragKey >= 0) { ptr.dragKey = -1; orbit.enabled = true; } ptr.down = false; });
+  canvas.addEventListener('pointerup', (e) => {
+    if (!ptr.down) return;
+    ptr.down = false;
+    if (ptr.tilt) { endTilt(); return; }
+    if (ptr.dragKey >= 0) {
+      ptr.dragKey = -1;
+      orbit.enabled = true;
+      renderInspector();
+      return;
+    }
+    const moved = Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y);
+    if (moved < 5 && performance.now() - ptr.t < 700) handleClick(e);
+  });
+  canvas.addEventListener('contextmenu', (e) => {
+    const k = pickKey(e);
+    if (k >= 0) { e.preventDefault(); removeKey(k); }
+  });
+  function handleClick(e) {
+    const p = selectedPart();
+    if (p && state.cut.mode === 'rotate' && onSheet(planeHit(e))) return;
+    if (p && state.cfg.type !== 'none' && cameraOnClearSide() && state.cut.analysis && !state.cut.stale) {
+      const h = planeHit(e);
+      if (h) {
+        const ri = K.regionAt(state.cut.analysis.base, h.x, h.y);
+        if (ri >= 0 && !state.cut.skip.has(ri)) { addKey(h); return; }
+      }
+    }
+    setNdc(e);
+    const meshes = state.parts.filter(q => !state.hidden.has(q.id)).map(q => views.get(q.id).mesh);
+    const hits = raycaster.intersectObjects(meshes, false);
+    if (hits.length) selectPart(hits[0].object.userData.partId);
+    else if (p) selectPart(null);
+  }
+  function addKey(h) {
+    state.cut.keys.push(h);
+    state.cut.auto = false;
+    state.cut.active = state.cut.keys.length - 1;
+    evaluateKeys(); renderKeyMarkers(); renderInspector();
+  }
+  function removeKey(i) {
+    state.cut.keys.splice(i, 1);
+    state.cut.auto = false;
+    state.cut.active = -1;
+    evaluateKeys(); renderKeyMarkers(); renderInspector();
+  }
+
+  // drag and drop
+  ['dragenter', 'dragover'].forEach(ev => stage.addEventListener(ev, (e) => { e.preventDefault(); stage.classList.add('dropping'); }));
+  ['dragleave', 'drop'].forEach(ev => stage.addEventListener(ev, (e) => { e.preventDefault(); if (ev === 'dragleave' && stage.contains(e.relatedTarget)) return; stage.classList.remove('dropping'); }));
+  stage.addEventListener('drop', (e) => { const f = e.dataTransfer && e.dataTransfer.files[0]; if (f) loadFile(f); });
+  fileInput.addEventListener('change', () => { const f = fileInput.files[0]; if (f) loadFile(f); fileInput.value = ''; });
+
+  /* ---------------- keyboard ---------------- */
+  window.addEventListener('keydown', (e) => {
+    const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement && document.activeElement.tagName);
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+    if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); fileInput.click(); return; }
+    if (typing || mod || e.altKey) return;
+    const p = selectedPart();
+    switch (e.key) {
+      case 'Escape': if (p) selectPart(null); break;
+      case 'Enter': if (p) { e.preventDefault(); doCut(); } break;
+      case 'Delete': case 'Backspace': if (p && state.cut.active >= 0) { e.preventDefault(); removeKey(state.cut.active); } break;
+      case 'f': case 'F': frameAll(p || undefined); break;
+      case 'w': case 'W': if (p) { setGizmoMode('translate'); renderInspector(); } break;
+      case 'e': case 'E': if (p) { setGizmoMode('rotate'); renderInspector(); } break;
+      case 'x': case 'X': if (p) alignPlane('x'); break;
+      case 'y': case 'Y': if (p) alignPlane('y'); break;
+      case 'z': case 'Z': if (p) alignPlane('z'); break;
+      default: break;
+    }
+  });
+  function alignPlane(which) {
+    let axis;
+    if (which === 'view') axis = camera.position.clone().sub(orbit.target).normalize();
+    else axis = towardCamera(new THREE.Vector3(which === 'x' ? 1 : 0, which === 'y' ? 1 : 0, which === 'z' ? 1 : 0));
+    setPlaneNormal(axis);
+    state.cut.auto = true; state.cut.skip.clear();
+    scheduleAnalysis(0);
+  }
+  function flipPlane() {
+    planeGroup.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI));
+    state.cut.keys = state.cut.keys.map(k => ({ x: k.x, y: -k.y }));
+    computeSliderRange();
+    onPlaneMoved();
+    state.cut.skip.clear();
+    scheduleAnalysis(0);
+  }
+
+  /* ---------------- UI: chrome, parts list ---------------- */
+  function updateChrome() {
+    $('#undoBtn').disabled = !history.past.length;
+    $('#redoBtn').disabled = !history.future.length;
+    $('#exportBtn').disabled = !state.parts.length;
+    $('#viewTools').hidden = !state.parts.length;
+    $('#wireBtn').setAttribute('aria-pressed', state.wire ? 'true' : 'false');
+    updateHint();
+  }
+  function updateHint() {
+    const el = $('#hint');
+    let t = '';
+    const p = selectedPart();
+    if (!state.parts.length) t = '';
+    else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
+    else if (state.cut.mode === 'rotate') t = coarse ? 'Drag the yellow plane to tip it. Tap Slide to move it instead.' : 'Drag the yellow plane to tip it. Hold Shift for fine control. Press W to slide.';
+    else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
+    else if (state.cfg.type === 'none') t = 'Drag the arrow to slide the cut, then press Enter to cut.';
+    else t = coarse ? 'Drag the arrow to slide the cut. Tap the cut face to add a key, drag keys to move them.' : 'Drag the arrow to slide the cut. Click the cut face to add a key, drag keys to move them, right-click to remove.';
+    el.textContent = t;
+    el.hidden = !t;
+  }
+  let partsSig = '';
+  function renderParts() {
+    const list = $('#partList');
+    const sig = state.parts.map(p => [p.id, p.name, p.color, state.hidden.has(p.id) ? 1 : 0].join(':')).join('|') + '#' + [state.bed.w, state.bed.d, state.bed.h].join(',');
+    if (sig === partsSig && state.parts.length) {
+      list.querySelectorAll('li[data-id]').forEach(li => li.classList.toggle('is-selected', +li.dataset.id === state.selectedId));
+      return;
+    }
+    partsSig = sig;
+    if (!state.parts.length) { list.innerHTML = '<li class="parts-empty">Parts you cut will appear here.</li>'; $('#partsMeta').textContent = ''; return; }
+    const bad = state.parts.filter(p => !fitsBed(p)).length;
+    $('#partsMeta').textContent = `${state.parts.length} ${state.parts.length === 1 ? 'part' : 'parts'}${bad ? `, ${bad} too big for your bed` : ''}`;
+    list.innerHTML = state.parts.map(p => {
+      const s = p.bbox.size;
+      const fit = fitsBed(p);
+      const hidden = state.hidden.has(p.id);
+      return `<li class="part${p.id === state.selectedId ? ' is-selected' : ''}${hidden ? ' is-hidden' : ''}" data-id="${p.id}">
+        <button class="part-main" data-act="select" title="Select ${esc(p.name)}">
+          <span class="swatch" style="background:${p.color}"></span>
+          <span class="part-text"><span class="part-name">${esc(p.name)}</span>
+          <span class="part-dims">${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm</span></span>
+          ${fit ? '' : '<span class="fit no" title="Bigger than your printer bed">Too big</span>'}
+        </button>
+        <button class="icon-btn eye" data-act="toggle-vis" aria-label="${hidden ? 'Show' : 'Hide'} ${esc(p.name)}" aria-pressed="${hidden ? 'false' : 'true'}">${hidden ? ICONS.eyeOff : ICONS.eye}</button>
+      </li>`;
+    }).join('');
+  }
+  $('#partList').addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-id]');
+    if (!li) return;
+    const id = +li.dataset.id;
+    const act = e.target.closest('[data-act]') && e.target.closest('[data-act]').dataset.act;
+    if (act === 'toggle-vis') {
+      if (state.hidden.has(id)) state.hidden.delete(id); else state.hidden.add(id);
+      if (state.hidden.has(id) && state.selectedId === id) state.selectedId = null;
+      syncScene();
+    } else if (act === 'select') selectPart(state.selectedId === id ? null : id);
+  });
+  $('#partList').addEventListener('dblclick', (e) => {
+    const li = e.target.closest('li[data-id]');
+    if (!li || e.target.closest('[data-act="toggle-vis"]')) return;
+    const p = state.parts.find(q => q.id === +li.dataset.id);
+    if (!p) return;
+    const nameEl = li.querySelector('.part-name');
+    const input = document.createElement('input');
+    input.className = 'rename'; input.value = p.name; input.setAttribute('aria-label', 'Part name');
+    nameEl.replaceWith(input);
+    input.focus(); input.select();
+    let finished = false;
+    const done = (save) => { if (finished) return; finished = true; if (save && input.value.trim()) p.name = input.value.trim(); partsSig = ''; renderParts(); renderInspector(); };
+    input.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') done(true); if (ev.key === 'Escape') done(false); });
+    input.addEventListener('blur', () => done(true));
+  });
+
+  /* ---------------- UI: inspector ---------------- */
+  function seg(name, value, options) {
+    return `<div class="seg" role="group" aria-label="${esc(name)}">${options.map(([v, label]) =>
+      `<button type="button" data-act="${name}" data-value="${v}" aria-pressed="${String(v) === String(value)}">${label}</button>`).join('')}</div>`;
+  }
+  function numField(field, label, value, opts = {}) {
+    return `<label class="num"><span>${label}</span><span class="num-wrap"><input type="number" inputmode="decimal" data-cfg="${field}" value="${value}" step="${opts.step || 0.1}" min="${opts.min || 0}" ${opts.max ? `max="${opts.max}"` : ''}><em>${opts.unit || 'mm'}</em></span></label>`;
+  }
+  function renderInspector() {
+    const el = $('#inspector');
+    if (!state.parts.length) {
+      el.innerHTML = `<div class="ins-section intro"><h2>Cut sculptures into printable pieces</h2>
+        <p>Open a figure or sculpture, slide a cut through it, and Keymaster adds pegs, dowel holes or magnet pockets so the pieces line up when you glue them.</p>
+        <p class="muted">Works with closed STL and OBJ meshes in millimeters. Everything runs in your browser; your model isn’t uploaded anywhere.</p></div>`;
+      return;
+    }
+    const p = selectedPart();
+    el.innerHTML = p ? cutPanel(p) : modelPanel();
+    updatePositionReadout();
+  }
+  function modelPanel() {
+    const b = modelBounds();
+    const rep = state.model.report;
+    const total = state.parts.reduce((s, p) => s + p.tris, 0);
+    const health = rep.closed
+      ? `<p class="status ok">${ICONS.check}<span>Closed surface, ready to cut.</span></p>`
+      : `<p class="status warn">${ICONS.alert}<span>${fmtInt(rep.openEdges)} open edges${rep.badEdges ? ` and ${fmtInt(rep.badEdges)} tangled ones` : ''}. Cuts that cross a gap can’t be closed.</span></p>
+         <button class="btn" data-act="fill-holes">Fill holes</button>`;
+    return `<div class="ins-section">
+      <h2>${esc(state.model.name)}</h2>
+      <dl class="facts">
+        <div><dt>Size</dt><dd>${fmt(b.size[0])} × ${fmt(b.size[1])} × ${fmt(b.size[2])} mm</dd></div>
+        <div><dt>Triangles</dt><dd>${fmtInt(total)}</dd></div>
+      </dl>
+      ${health}
+    </div>
+    <div class="ins-section">
+      <h3>Orientation</h3>
+      <p class="muted small">Turn the whole model a quarter turn if it came in lying down.</p>
+      <div class="row">${['x', 'y', 'z'].map(a => `<button class="btn" data-act="rotate" data-value="${a}">Turn on ${a.toUpperCase()}</button>`).join('')}</div>
+    </div>
+    <div class="ins-section">
+      <h3>Scale</h3>
+      <div class="row">
+        <button class="btn" data-act="scale" data-value="0.1">× 0.1</button>
+        <button class="btn" data-act="scale" data-value="10">× 10</button>
+        <button class="btn" data-act="scale" data-value="25.4">Inches to mm</button>
+      </div>
+      <div class="row tight">
+        <label class="num grow"><span>Custom</span><span class="num-wrap"><input type="number" id="scalePct" value="100" min="1" step="1"><em>%</em></span></label>
+        <button class="btn" data-act="scale-custom">Apply</button>
+      </div>
+    </div>
+    <div class="ins-section">
+      <h3>Printer bed</h3>
+      <div class="row three">
+        ${['w', 'd', 'h'].map(k => `<label class="num"><span>${{ w: 'Width', d: 'Depth', h: 'Height' }[k]}</span><span class="num-wrap"><input type="number" data-bed="${k}" value="${state.bed[k]}" min="10" step="1"><em>mm</em></span></label>`).join('')}
+      </div>
+    </div>
+    ${state.parts.length > 1 ? `<div class="ins-section">
+      <h3>Exploded view</h3>
+      <input type="range" id="explode" min="0" max="1" step="0.01" value="${state.explode}" aria-label="Spread parts apart">
+    </div>` : ''}`;
+  }
+  function cutPanel(p) {
+    const c = state.cfg;
+    const an = state.cut.analysis;
+    const regions = an && !an.base.error ? an.base.regions : [];
+    const evals = state.cut.evals;
+    const bad = evals.filter(e => !e.ok);
+    const s = p.bbox.size;
+    let keyStatus = '';
+    if (c.type !== 'none') {
+      if (state.cut.stale) keyStatus = `<p class="status muted">Checking key placement…</p>`;
+      else if (an && an.base.error) keyStatus = `<p class="status warn">${ICONS.alert}<span>The surface is broken where it crosses this cut, so keys can’t be checked. Move the cut slightly or fill holes first.</span></p>`;
+      else if (!regions.length) keyStatus = `<p class="status muted">Slide the cut into the part to see where keys can go.</p>`;
+      else if (!state.cut.keys.length) keyStatus = `<p class="status warn">${ICONS.alert}<span>No room for keys at this size. Try smaller keys, or click the cut face to place one yourself.</span></p>`;
+      else if (bad.length) {
+        const reasons = [...new Set(bad.map(b => b.reason))].join('. ');
+        keyStatus = `<p class="status warn">${ICONS.alert}<span>${bad.length === 1 ? 'One key needs' : bad.length + ' keys need'} attention: ${esc(reasons)}.</span></p><button class="btn small" data-act="remove-bad">Remove ${bad.length === 1 ? 'it' : 'them'}</button>`;
+      } else keyStatus = `<p class="status ok">${ICONS.check}<span>${state.cut.keys.length} ${state.cut.keys.length === 1 ? 'key' : 'keys'} ready, with walls at least ${c.margin} mm thick.</span></p>`;
+    }
+    const lenLabel = c.type === 'magnet' ? 'Thickness' : 'Length';
+    return `<div class="ins-section head">
+      <div class="head-row"><h2>${esc(p.name)}</h2><button class="btn ghost small" data-act="done">Done</button></div>
+      <p class="muted small">${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm, ${fmtInt(p.tris)} triangles</p>
+    </div>
+    <div class="ins-section">
+      <h3>Cut plane</h3>
+      ${seg('gizmo', state.cut.mode, [['translate', 'Slide'], ['rotate', 'Tilt']])}
+      <p class="muted small mode-help">${state.cut.mode === 'rotate'
+        ? 'Drag anywhere on the yellow plane to tip it. The edge you grab rises or falls, like lifting the edge of a tray. Hold Shift for fine control.'
+        : 'Drag the arrow to slide the cut through the part, or use the position slider.'}</p>
+      <div class="row align">
+        <span class="lbl">Align</span>
+        ${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="align" data-value="${a}" title="Press ${a.toUpperCase()}">${a.toUpperCase()}</button>`).join('')}
+        <button class="btn small" data-act="align" data-value="view">To view</button>
+        <button class="btn small" data-act="flip" title="Swap the solid and clear halves">Flip</button>
+      </div>
+      <label class="slider"><span class="lbl">Position</span>
+        <input type="range" id="cutPos" min="${state.cut.lo}" max="${state.cut.hi}" step="${(state.cut.hi - state.cut.lo) / 1000}" value="${planeOffset()}">
+        <output id="cutPosOut"></output></label>
+      <div class="angle-row"><span class="lbl">Angle</span><output id="tiltOut"></output><button class="btn small" data-act="straighten" title="Snap the cut square to the nearest axis">Straighten</button></div>
+      ${regions.length > 1 ? `<div class="areas"><p class="lbl">The cut face has ${regions.length} separate areas. Untick an area to leave it joined.</p>
+        <ul>${regions.map((r, i) => `<li><label><input type="checkbox" data-area="${i}" ${state.cut.skip.has(i) ? '' : 'checked'}> Area ${i + 1} <span class="muted">${fmt(r.area)} mm²</span></label></li>`).join('')}</ul></div>` : ''}
+    </div>
+    <div class="ins-section">
+      <h3>Keys</h3>
+      ${seg('keytype', c.type, [['peg', 'Pegs'], ['dowel', 'Dowels'], ['magnet', 'Magnets'], ['none', 'None']])}
+      ${c.type === 'none' ? '<p class="muted small">The pieces will have flat faces with nothing to line them up.</p>' : `
+      <p class="muted small">${{ peg: 'A peg on one piece fits a socket in the other.', dowel: 'Both pieces get holes, and Keymaster adds printable pins. Metal rods work too.', magnet: 'Both pieces get pockets sized for disc magnets.' }[c.type]}</p>
+      ${seg('shape', c.shape, [['round', 'Round'], ['square', 'Square']])}
+      <div class="row two">
+        ${numField('diameter', c.shape === 'square' ? 'Width' : 'Diameter', c.diameter, { min: 1, step: 0.5 })}
+        ${numField('length', lenLabel, c.length, { min: 0.5, step: 0.5 })}
+      </div>
+      <div class="field"><span class="lbl">Fit</span>
+        ${seg('fit', c.clearance, [['0.1', 'Snug'], ['0.2', 'Standard'], ['0.3', 'Loose']])}
+        <div class="row two">${numField('clearance', 'Gap per side', c.clearance, { min: 0, step: 0.05 })}${numField('margin', 'Wall around keys', c.margin, { min: 0.4, step: 0.2 })}</div>
+      </div>
+      ${c.type === 'peg' ? `<div class="field"><span class="lbl">Pegs go on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}
+        <label class="check"><input type="checkbox" data-cfg="taper" ${c.taper ? 'checked' : ''}> Taper the pegs for easier fitting</label></div>` : ''}
+      <div class="row keyrow">
+        <label class="num"><span>Keys per area</span><select data-cfg="perArea">${[1, 2, 3, 4].map(n => `<option ${n === c.perArea ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <button class="btn" data-act="auto-keys">${state.cut.auto ? 'Re-place keys' : 'Auto-place keys'}</button>
+      </div>
+      ${keyStatus}
+      ${state.cut.active >= 0 && state.cut.keys[state.cut.active] ? `<button class="btn small" data-act="remove-key">Remove selected key</button>` : ''}`}
+    </div>
+    <div class="ins-section cut-action">
+      <button class="btn cut" data-act="cut">${ICONS.cut}<span>Cut part</span><kbd>Enter</kbd></button>
+      <button class="btn ghost small" data-act="export-one">Export this part</button>
+    </div>`;
+  }
+  function updatePositionReadout() {
+    const out = $('#cutPosOut'), range = $('#cutPos');
+    if (!out || !range) return;
+    const s = planeOffset();
+    if (document.activeElement !== range) { range.min = state.cut.lo; range.max = state.cut.hi; range.value = s; }
+    out.textContent = (s >= 0 ? '+' : '') + fmt(s) + ' mm';
+    const to = $('#tiltOut');
+    if (to) { const t = tiltInfo(); to.textContent = t.deg < 0.05 ? `Square to ${t.axis}` : `${t.deg.toFixed(1)}° off ${t.axis}`; }
+  }
+
+  const ins = $('#inspector');
+  ins.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    const act = b.dataset.act, val = b.dataset.value;
+    const c = state.cfg;
+    switch (act) {
+      case 'done': selectPart(null); break;
+      case 'gizmo': setGizmoMode(val); renderInspector(); updateHint(); break;
+      case 'align': alignPlane(val); break;
+      case 'flip': flipPlane(); break;
+      case 'straighten': straighten(); break;
+      case 'keytype': {
+        if (c.type === val) break;
+        c.type = val;
+        if (K.KEY_DEFAULTS[val]) { c.diameter = K.KEY_DEFAULTS[val].diameter; c.length = K.KEY_DEFAULTS[val].length; }
+        state.cut.auto = true; savePrefs(); scheduleAnalysis(0); renderInspector(); updateHint();
+        break;
+      }
+      case 'shape': c.shape = val; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
+      case 'fit': c.clearance = +val; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
+      case 'pegside': c.pegSide = val; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
+      case 'auto-keys': state.cut.auto = true; state.cut.active = -1; scheduleAnalysis(0); renderInspector(); break;
+      case 'remove-bad': removeBadKeys(); break;
+      case 'remove-key': if (state.cut.active >= 0) removeKey(state.cut.active); break;
+      case 'cut': doCut(); break;
+      case 'export-one': exportParts(state.selectedId); break;
+      case 'fill-holes': fillAllHoles(); break;
+      case 'rotate': rotateAll(val); break;
+      case 'scale': scaleAll(+val); break;
+      case 'scale-custom': scaleAll((+$('#scalePct').value || 100) / 100); break;
+      default: break;
+    }
+  });
+  ins.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.dataset.cfg) {
+      const k = t.dataset.cfg;
+      if (t.type === 'checkbox') state.cfg[k] = t.checked;
+      else {
+        const v = parseFloat(t.value);
+        if (!isFinite(v) || v < 0) { renderInspector(); return; }
+        state.cfg[k] = k === 'perArea' ? Math.round(v) : v;
+      }
+      if (k === 'perArea') state.cut.auto = true;
+      savePrefs(); scheduleAnalysis(0); renderInspector();
+    } else if (t.dataset.bed) {
+      const v = parseFloat(t.value);
+      if (isFinite(v) && v > 0) { state.bed[t.dataset.bed] = v; savePrefs(); renderParts(); }
+    } else if (t.dataset.area !== undefined) {
+      const i = +t.dataset.area;
+      if (t.checked) state.cut.skip.delete(i); else state.cut.skip.add(i);
+      if (state.cut.auto) state.cut.keys = K.autoPlaceKeys(state.cut.analysis, coreCfg(), state.cfg.perArea, state.cut.skip);
+      evaluateKeys(); renderRegions(); renderKeyMarkers(); renderInspector();
+    } else if (t.id === 'cutPos') {
+      computeSliderRange(); state.cut.skip.clear(); scheduleAnalysis(0);
+    }
+  });
+  ins.addEventListener('input', (e) => {
+    const t = e.target;
+    if (t.id === 'cutPos') {
+      setPlaneOffset(parseFloat(t.value));
+      state.cut.stale = true; renderKeyMarkers();
+      clearTimeout(analysisTimer);
+      analysisTimer = setTimeout(() => { state.cut.skip.clear(); runAnalysis(); }, 220);
+    } else if (t.id === 'explode') {
+      state.explode = parseFloat(t.value); applyExplode();
+    }
+  });
+
+  /* ---------------- top bar, empty state, view tools ---------------- */
+  $('#openBtn').addEventListener('click', () => fileInput.click());
+  $('#emptyOpen').addEventListener('click', () => fileInput.click());
+  $('#emptySample').addEventListener('click', loadSample);
+  $('#undoBtn').addEventListener('click', undo);
+  $('#redoBtn').addEventListener('click', redo);
+  $('#exportBtn').addEventListener('click', () => exportParts(null));
+  $('#frameBtn').addEventListener('click', () => frameAll(selectedPart() || undefined));
+  $('#wireBtn').addEventListener('click', () => {
+    state.wire = !state.wire;
+    for (const v of views.values()) v.mat.wireframe = state.wire;
+    ghostMat.wireframe = state.wire;
+    updateChrome(); markDirty();
+  });
+
+  /* ---------------- toast ---------------- */
+  let toastTimer = 0;
+  function toast(msg, kind = '', action) {
+    const el = $('#toast');
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.innerHTML = `<span>${esc(msg)}</span>${action ? `<button class="btn small">${esc(action.label)}</button>` : ''}`;
+    if (action) el.querySelector('button').addEventListener('click', () => { action.fn(); el.hidden = true; });
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, kind === 'error' ? 7000 : 4200);
+  }
+
+
+  syncScene();
+  renderInspector();
+})();
+
+</script>
+</body>
+</html>
