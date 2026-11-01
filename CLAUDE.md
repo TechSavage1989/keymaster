@@ -9,6 +9,7 @@ A browser app that cuts 3D-printable sculptures and figures into pieces and adds
 - `src/template.html`: markup and all CSS.
 - `tools/build.py`: inlines `core.js` and `app.js` into `template.html` to produce `index.html` (the shipped single file) and `tests/test.html`.
 - `tests/core.test.js`: geometry tests (Node). `tests/ui_test.py`: interface tests (Playwright, using `tests/mock-three.js` as a three.js stand-in).
+- `tools/sculpt_check.js`: sweeps hundreds of cuts through real model files and reports any part that isn't sealed.
 
 ## Commands
 
@@ -32,6 +33,16 @@ Always rebuild and commit `index.html` with any `src/` change. CI fails if it is
 ## How the cut works (read before touching `cutMesh`)
 
 The plane is a frame `{o, n, u, v}` with `u × v = n`. Key positions are 2D `(x, y)` in that frame, which is the same as the cut plane object's local space in the app. `computeSection` nudges the plane by a tiny amount if any vertex sits on it, chains crossing segments into loops, and `buildRegions` nests loops into areas (outer plus holes). Each side gets its own copy of the section vertices; caps are triangulated with the built-in earcut and then `fixTJunctions` re-inserts any ring points earcut dropped, so cap edges always match the side walls. Skipped areas leave their crossing triangles whole, which is how "leave this area joined" works. Shells the cut never touched (eyes, inner voids) are merged into the piece that contains them.
+
+**Real sculpts are messy, so the cap has several safety layers** (each found on real figure files, each with a test):
+- `prepareMesh` drops loose specks (`removeSpecks`: shells under 0.001 mm³ and 0.5 mm, such as a triangle stored back to back with itself).
+- `buildSection` moves the plane, by a few microns at most, to the middle of the widest gap among nearby vertices, so no section points crowd together beyond float32 precision.
+- `buildRegions` nests by direction, not just depth. An opposite-running loop inside an outline is a hole. A same-running one is an overlapping inner solid (`nested`: its own cap, an obstacle for keys, never keyed). A lone backwards loop is a void speck (`inverted`: capped facing the other way, never shown or keyed).
+- `untangledRing` snips microscopic self-crossing folds out of the outline before earcut. Microscopic holes skip earcut entirely.
+- `fixTJunctions`, `splitThroughPoints` and `patchCap` then make the cap meet every ring edge exactly. `patchCap` orients by topology, because the leftovers are often zero-width slivers.
+- `cutMesh` checks that every part is closed and, if not, retries a hundredth of a millimetre or so either side (`cutOnce`). If every retry fails it throws a plain-language error rather than export an open part.
+
+Before merging any change to sectioning, capping or keys, run `node tools/sculpt_check.js <model files>` on real sculpts as well as the tests. Never commit model files; they are usually someone else's work. `tests/fixtures/sculpt-outlines.json` holds just a few 2D cut outlines that once failed.
 
 Key outlines come from `keyProfile(shape, r, d, angle, res)`. A socket is the peg outline grown by the clearance `d` (never scaled), and the vertex count depends only on `shape` and `res`, so tapered top and bottom rings pair up. **Every key shape must be star-shaped around its centre**: the cap fans and the wall orientation in `cutMesh` and `makePin` rely on it, and `core.test.js` checks it. Fit checks for non-round shapes use `footprintClear`, which follows the real outline. `splitThroughPoints` repairs cap edges that earcut runs straight past ring points, which happens when straight socket sides line up.
 

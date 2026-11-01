@@ -3,3 +3,9 @@ tests/output/
 __pycache__/
 node_modules/
 .DS_Store
+# model files are usually someone else's work: test with them locally, never commit them
+*.stl
+*.STL
+*.obj
+*.OBJ
+*.3mf

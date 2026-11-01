@@ -291,6 +291,66 @@ console.log('area labels');
   check('sliver area still gets a label spot', s3.length >= 1 && isFinite(s3[0].x) && isFinite(s3[0].y), s3[0]);
 }
 
+console.log('real-sculpt defects');
+{
+  // a closed prism over any outline; caps are fans from the first point so they are valid even when the outline crosses itself
+  const prism = (poly, z0, z1) => {
+    const pos = [], idx = [], n = poly.length;
+    for (const z of [z0, z1]) for (const [x, y] of poly) pos.push(x, y, z);
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n; idx.push(i, j, n + j, i, n + j, n + i); }
+    for (let i = 1; i + 1 < n; i++) { idx.push(0, i + 1, i); idx.push(n, n + i, n + i + 1); }
+    return { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
+  };
+  // 1. a solid modelled inside another, running the same way (like a pin inside a leg): not a hole
+  const outer = uvSphere(20, 48, 32), inner = uvSphere(6, 24, 16, [0, 0, 0]);
+  const both = K.prepareMesh(K.mergeMeshes([outer, inner]));
+  const Fz = K.frameFromNormal([0, 0, 1], [0, 0, 0.7]);
+  const secN = K.section(both.positions, both.indices, Fz, 40);
+  check('inner solid is its own area, not a hole', secN.regions.length === 2 && secN.regions.some(r => r.nested) && secN.regions.every(r => !r.holes.length), secN.regions.map(r => [r.area.toFixed(1), r.nested, r.holes.length]));
+  const rn = K.cutMesh(both.positions, both.indices, Fz, { scale: 40, cfg: cfgOf({}) });
+  check('cut through an inner solid gives sealed parts', allClosed(rn.parts), rn.parts.map(p => K.edgeReport(p.indices)));
+  check('cut through an inner solid keeps the volume', Math.abs(sumVol(rn.parts) - both.report.volume) / both.report.volume < 1e-6, [sumVol(rn.parts), both.report.volume]);
+  const pegs = cfgOf({ type: 'peg' });
+  const anN = K.analyzePlane(both.positions, both.indices, Fz, pegs, 40);
+  const ki = K.autoPlaceKeys(anN, pegs, 3, new Set());
+  const evIn = K.evaluateKeys(anN, [{ x: 0, y: 0 }], pegs, new Set())[0];
+  check('keys stay off an inner solid', evIn.ok === false && ki.every(k => Math.hypot(k.x, k.y) > 6 + K.keyGeometrySpec(pegs).outer), [evIn, ki]);
+  check('keyed cut through an inner solid is sealed', allClosed(K.cutMesh(both.positions, both.indices, Fz, { scale: 40, cfg: pegs, keys: ki }).parts));
+  // 2. loose specks: a triangle stored back to back with itself is dropped on load
+  const sp = uvSphere(20, 48, 32);
+  const speck = { positions: new Float32Array([30, 0, 0, 30.1, 0, 0, 30, 0.1, 0]), indices: new Uint32Array([0, 1, 2, 0, 2, 1]) };
+  const ms = K.prepareMesh(K.mergeMeshes([sp, speck]));
+  check('zero-volume speck removed on load', ms.report.specks === 1 && ms.report.closed && ms.positions.length === sp.positions.length, ms.report);
+  check('a model that is all one shell keeps everything', K.prepareMesh(uvSphere(20, 48, 32)).report.specks === 0);
+  // 3. an outline with a microscopic self-crossing fold, and points a thousandth of a millimetre apart
+  const fold = [[0, 0], [20, 0], [20, 9.999], [20.0012, 10.0004], [19.9993, 10.0009], [20, 10.002], [20, 20], [10.0004, 20], [10, 20.0003], [10, 20], [0, 20]];
+  const mf = K.prepareMesh(prism(fold, 0, 10));
+  for (const [nm, F] of [['level', K.frameFromNormal([0, 0, 1], [0, 0, 5])], ['tilted', K.frameFromNormal([0.05, -0.03, 1], [10, 10, 5])]]) {
+    const secF = K.section(mf.positions, mf.indices, F, 30);
+    const rf = K.cutMesh(mf.positions, mf.indices, F, { scale: 30, cfg: cfgOf({}) });
+    check(`${nm} cut through a self-crossing fold is sealed`, !secF.error && allClosed(rf.parts) && Math.abs(sumVol(rf.parts) - mf.report.volume) / mf.report.volume < 1e-6, rf.parts.map(p => K.edgeReport(p.indices)));
+    const short = cfgOf({ type: 'peg', length: 3 }); // the block is 10 mm tall, so standard pegs would break through
+    const kf = K.autoPlaceKeys(K.analyzePlane(mf.positions, mf.indices, F, short, 30), short, 2, new Set());
+    check(`${nm} keyed cut through a self-crossing fold is sealed`, kf.length === 2 && allClosed(K.cutMesh(mf.positions, mf.indices, F, { scale: 30, cfg: short, keys: kf }).parts), kf.length);
+  }
+  // 4. outlines from real sculpts that used to give unsealed parts, replayed as extruded blocks
+  const fx = JSON.parse(fs.readFileSync(__dirname + '/fixtures/sculpt-outlines.json', 'utf8'));
+  for (const { defect, xy } of fx.outlines) {
+    const poly = []; for (let i = 0; i < xy.length; i += 2) poly.push([xy[i], xy[i + 1]]);
+    let a = 0; for (let i = 0; i < poly.length; i++) { const [x0, y0] = poly[i], [x1, y1] = poly[(i + 1) % poly.length]; a += x0 * y1 - x1 * y0; }
+    if (a < 0) poly.reverse();
+    const blk = prism(poly, -5, 5), bb = K.bounds(blk.positions);
+    const rb = K.cutMesh(blk.positions, blk.indices, K.frameFromNormal([0, 0, 1], [bb.center[0], bb.center[1], 0]), { scale: K.diag(bb), cfg: cfgOf({}) });
+    check(`real outline with ${defect}: sealed`, allClosed(rb.parts), rb.parts.map(p => K.edgeReport(p.indices)));
+  }
+  // 5. a vertex a hair off the plane: the plane moves to the widest gap, by at most a few microns
+  const cube = K.prepareMesh(gridCube(6));
+  const near = K.prepareMesh({ positions: cube.positions.map((v, i) => (i % 3 === 2 && Math.abs(v - 0.5) < 1e-6 && i < 60 ? v + 3e-7 : v)), indices: cube.indices });
+  const Fn = K.frameFromNormal([0, 0, 1], [0.5, 0.5, 0.5]);
+  const rnr = K.cutMesh(near.positions, near.indices, Fn, { scale: 1.7, cfg: cfgOf({}) });
+  check('cut next to a near-plane vertex is sealed', allClosed(rnr.parts) && Math.abs(rnr.shift) < 1.7 * 2e-5, [rnr.shift, rnr.parts.map(p => K.edgeReport(p.indices))]);
+}
+
 console.log('separate shells stay with their piece');
 {
   const body = uvSphere(20, 48, 32), eye = uvSphere(2, 16, 12, [0, 0, 12]);
