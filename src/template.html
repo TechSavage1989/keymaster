@@ -206,8 +206,18 @@ h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 .check input, .areas input { accent-color: var(--ink); width: 16px; height: 16px; }
 .slider { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-top: 12px; }
 .slider output { min-width: 72px; text-align: right; font-weight: 500; }
-.angle-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-.angle-row output { flex: 1; font-weight: 500; }
+.angle-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.angle-row output { flex: 1; color: var(--muted); font-size: 13px; }
+.pos-row { grid-template-columns: auto 1fr 92px; }
+.pos-row .num-wrap input { width: 100%; min-width: 0; border: 0; background: transparent; padding: 6px 8px; color: var(--ink); font-size: 14px; outline: none; font-variant-numeric: tabular-nums; }
+.angles-lbl { display: block; margin-top: 14px; }
+.angles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 4px; }
+.angles .num > span:first-child { font-size: 12px; color: var(--muted); }
+.angles input { font-variant-numeric: tabular-nums; }
+.drag-chip {
+  position: absolute; left: 0; top: 0; padding: 4px 10px; border-radius: 999px; background: var(--ink); color: var(--panel);
+  font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; pointer-events: none; box-shadow: 0 2px 10px rgba(0,0,0,.2);
+}
 .mode-help { margin-top: 8px; }
 input[type=range] { width: 100%; accent-color: var(--ink); }
 .shape-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 2px; }
@@ -315,6 +325,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <button class="icon-btn" id="wireBtn" aria-label="Show wireframe" aria-pressed="false" title="Show wireframe"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7zM10 2.5v15M3 6.5l14 7M17 6.5l-14 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
       </div>
       <div class="area-tags" id="areaTags" aria-label="Areas on the cut face"></div>
+      <div class="drag-chip" id="dragChip" hidden></div>
       <p class="hint" id="hint" hidden></p>
       <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
       <div class="busy" id="busy" hidden><span>Working</span></div>

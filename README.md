@@ -6,7 +6,7 @@ Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com*
 
 ## What it does
 
-- **Live cut preview.** Drag the arrow to slide the cut, or switch to Tilt and drag a ring to angle it. The cut face appears as a hatched section while you drag, even on dense sculpts.
+- **Live cut preview.** Drag the arrow to slide the cut and the blue rings to tilt it (hold Shift to snap to 5° steps), or type an exact position and X, Y and Z angles. The cut face appears as a hatched section while you drag, even on dense sculpts.
 - **Cut as many times as you need.** Every piece lands in the parts list and can be cut again. Undo and redo cover every step.
 - **Keys that fit.** Choose pegs (tapered by any amount, right down to a point, with a hole that matches or stays straight), dowel holes with printable pins, or magnet pockets. Keys come in seven shapes: round, square, hexagon, cross, oval, slot, and a D-shape that only fits one way round. Shaped keys line up with each area's long side, and the fit gap is even all the way round. Keys are placed automatically, and you can click the cut face to add one, drag to move it, or right-click to remove it.
 - **Checked before you cut.** Each key is tested for thin walls and for sockets that would break through the surface. Problem keys turn red and explain why.
@@ -18,12 +18,12 @@ Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com*
 
 1. Open the app and choose **Open STL or OBJ**, or drop a file onto the view. **Try the sample** loads a knot to experiment with.
 2. Click a part to select it. The cut plane appears through its middle.
-3. Slide or tilt the plane, or use **Align X/Y/Z** and **To view**. **Flip** swaps the solid and clear halves.
+3. Drag the arrow to slide the plane and a ring to tilt it, type exact values, or use **Align X/Y/Z** and **To view**. **Flip** swaps the solid and clear halves.
 4. Pick a key type and size. Choose a fit: Snug (0.1 mm per side), Standard (0.2 mm), or Loose (0.3 mm).
 5. Press **Cut part** or Enter. Repeat on any piece.
 6. Press **Export parts** to save everything.
 
-Shortcuts: Enter cut, Esc done, W slide, E tilt, X/Y/Z align, F frame, Delete remove key, Ctrl+Z undo, Ctrl+Shift+Z redo.
+Shortcuts: Enter cut, Esc done, X/Y/Z align, F frame, Delete remove key, Ctrl+Z undo, Ctrl+Shift+Z redo.
 
 **Before printing a large piece, print a small test cut.** The right fit depends on your printer, material, orientation and post-processing.
 

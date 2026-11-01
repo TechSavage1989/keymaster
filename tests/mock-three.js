@@ -42,6 +42,7 @@
   class Quaternion {
     constructor(x = 0, y = 0, z = 0, w = 1) { this.x = x; this.y = y; this.z = z; this.w = w; }
     clone() { return new Quaternion(this.x, this.y, this.z, this.w); }
+    copy(q) { this.x = q.x; this.y = q.y; this.z = q.z; this.w = q.w; return this; }
     invert() { this.x = -this.x; this.y = -this.y; this.z = -this.z; return this; }
     setFromAxisAngle(a, ang) { const s = Math.sin(ang / 2); this.x = a.x * s; this.y = a.y * s; this.z = a.z * s; this.w = Math.cos(ang / 2); return this; }
     setFromUnitVectors(f, t) {
@@ -101,7 +102,7 @@
     setIndex(i) { this.index = i; return this; }
     setFromPoints(p) { this.points = p; return this; }
     computeBoundingSphere() {} computeBoundingBox() {}
-    rotateX() { return this; }
+    rotateX() { return this; } rotateY() { return this; } rotateZ() { return this; }
     dispose() { this.disposed = true; }
   }
   class Material {
@@ -128,6 +129,7 @@
     PerspectiveCamera: class extends Object3D { constructor(fov, aspect, near, far) { super(); Object.assign(this, { fov, aspect, near, far }); this.up = new Vector3(0, 1, 0); } updateProjectionMatrix() {} },
     BufferAttribute: class { constructor(a, s) { this.array = a; this.itemSize = s; } },
     PlaneGeometry: class extends BufferGeometry {}, CircleGeometry: class extends BufferGeometry {},
+    TorusGeometry: class extends BufferGeometry {},
     BoxGeometry: class extends BufferGeometry {}, CylinderGeometry: class extends BufferGeometry {},
     MeshBasicMaterial: class extends Material {}, MeshStandardMaterial: class extends Material {}, LineBasicMaterial: class extends Material {},
     CanvasTexture: class { constructor(c) { this.image = c; this.repeat = { set() {} }; } },
