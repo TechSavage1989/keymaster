@@ -674,6 +674,28 @@ with sync_playwright() as p:
     check('splitting off the bar and ball together gives two pieces', pg.locator('#partList li[data-id]').count() == 2 and 'Split off the regions: 2 pieces' in pg.inner_text('#toast'), pg.inner_text('#toast'))
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
+    # a cut line drawn by hand: four points round a ball, closed with Enter, cut like any line
+    pg.click('#drawLineBtn'); pg.wait_for_timeout(200)
+    check('the draw button turns drawing on and the hint explains', pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'true' and 'Click points' in pg.inner_text('#hint'), pg.inner_text('#hint'))
+    rb = math.sqrt(144 - 64); vv = [ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]]
+    for a in (0, 90, 180, 270):
+        q = [ax[k] * 20 + u[k] * rb * math.cos(a * math.pi / 180) + vv[k] * rb * math.sin(a * math.pi / 180) for k in range(3)]
+        n_pts = pg.evaluate(f"KeymasterDebug.drawPoint(0, {q})")
+    check('four clicks make four points, and the panel offers to close the line', n_pts == 4 and '4 points' in pg.inner_text('#cutLineInfo') and pg.locator('[data-act=close-draw]').count() == 1, pg.inner_text('#cutLineInfo'))
+    pg.keyboard.press('Backspace'); pg.wait_for_timeout(100)
+    check('Backspace takes the last point back', '3 points' in pg.inner_text('#cutLineInfo'))
+    pg.evaluate(f"KeymasterDebug.drawPoint(0, {q})"); pg.wait_for_timeout(100)
+    resD = pg.evaluate("KeymasterDebug.closeDrawing()"); pg.wait_for_timeout(200)
+    infoD = pg.inner_text('#cutLineInfo')
+    print('    drawn line:', resD, infoD.replace('\n', ' ')[:150])
+    check('closing the drawn line picks it: two pieces, drawing off', resD['ok'] and resD['pieces'] == 2 and not resD['drawing'] and 'Cut along this line' in infoD and pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'false', (resD, infoD))
+    pg.click('[data-act=cut-line]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
+    check('cutting along the drawn line gives two pieces', pg.locator('#partList li[data-id]').count() == 2)
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
+    pg.click('#drawLineBtn'); pg.wait_for_timeout(100); pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
+    check('Esc stops drawing', pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'false')
     seam2 = [ax[k] * 36 + u[k] * 2.5 for k in range(3)]
     pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam})"); pg.wait_for_timeout(200)
     resL = pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam2}, true)"); pg.wait_for_timeout(200)

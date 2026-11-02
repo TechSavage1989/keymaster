@@ -642,6 +642,15 @@ console.log('curved cuts along a border');
   check('the wavy border really is curved (rises and falls 8 mm)', wz1 - wz0 > 6, [wz0, wz1]);
   const cw = K.cutAlongLoop(sp.positions, sp.indices, loopsW[0]);
   check('cutting along a wavy border gives two sealed pieces', cw.parts.length === 2 && allClosed(cw.parts), cw.parts.map(q => K.edgeReport(q.indices)));
+  // a line drawn by hand: four points round the sphere, joined the shortest way along the surface, cut like a border
+  const zD = 5, rD = Math.sqrt(400 - zD * zD), drawnPts = [0, 90, 180, 270].map(a => [rD * Math.cos(a * Math.PI / 180), rD * Math.sin(a * Math.PI / 180), zD]);
+  const drawn = K.drawnLoop(sp.positions, sp.indices, drawnPts);
+  check('a line drawn through four points closes round the sphere, close to the circle through them', drawn && drawn.closed && drawn.drawn && Math.abs(drawn.length - 2 * Math.PI * rD) / (2 * Math.PI * rD) < 0.1, drawn && [drawn.verts.length, drawn.length, 2 * Math.PI * rD]);
+  const cd = K.cutAlongLoop(sp.positions, sp.indices, drawn);
+  check('cutting along the drawn line gives two sealed pieces, volume kept', cd.parts.length === 2 && allClosed(cd.parts) && Math.abs(sumVol(cd.parts) - sp.report.volume) / sp.report.volume < 1e-6, cd.parts.map(q => q.volume));
+  const back = K.drawnLoop(sp.positions, sp.indices, [drawnPts[0], drawnPts[1], drawnPts[0], drawnPts[2], drawnPts[3]]);
+  check('a line that doubles back on itself is made simple', back && back.closed && new Set(back.verts).size === back.verts.length && Math.abs(back.length - drawn.length) / drawn.length < 0.15, back && [back.verts.length, back.length]);
+  check('fewer than three points make no line', K.drawnLoop(sp.positions, sp.indices, drawnPts.slice(0, 2)) === null);
   check('wavy cut keeps the volume', Math.abs(sumVol(cw.parts) - sp.report.volume) / sp.report.volume < 1e-6, [sumVol(cw.parts), sp.report.volume]);
   // the cut face is drawn as a fine grid inside the line, so it bends smoothly instead of a few big facets: the
   // typical bend between neighbouring face triangles is a few degrees (it was over 40°), and the face has many

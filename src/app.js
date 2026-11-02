@@ -30,6 +30,7 @@
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, angle: 60, fold: 15 };
+  state.draw = { on: false, points: [] }; // a cut line drawn by hand: points clicked on the chosen part
   const history = { past: [], future: [] };
   let uid = 1;
   let downloads = null;
@@ -1231,7 +1232,7 @@
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -1365,6 +1366,7 @@
       if (!hit) { clearPick(); renderPick(); markDirty(); return; }
       const part = state.parts.find(q => q.id === hit.object.userData.partId);
       const local = hit.point.clone().sub(hit.object.position); // undo the exploded-view offset
+      if (state.draw.on && part.id === state.selectedId) { addDrawPoint(part, [local.x, local.y, local.z]); return; }
       regionClick(part, [local.x, local.y, local.z], e.shiftKey);
       return;
     }
@@ -1395,8 +1397,50 @@
     replayPick(part);
   }
   function replayPick(part) {
-    const clicks = state.regions.last ? state.regions.last.clicks : [];
-    clicks.forEach((pt, i) => pickCutLine(part, pt, i > 0));
+    const last = state.regions.last, clicks = last ? last.clicks : [];
+    if (last && last.drawn) pickLoops(part, [last.drawn], { lines: true });
+    clicks.forEach((pt, i) => pickCutLine(part, pt, i > 0 || !!(last && last.drawn)));
+  }
+  // Drawing a cut line by hand: each click adds a point, the line runs between them along the surface, and
+  // closing it (Enter, the button, or a click by the first point) picks it like any other line.
+  function setDrawing(on) {
+    state.draw.on = on; state.draw.points = [];
+    if (on) { clearPick(); state.regions.last = null; }
+    renderDraw(); renderPick(); updateHint();
+    const b = $('#drawLineBtn'); if (b) { b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.textContent = on ? 'Stop drawing' : 'Draw a cut line'; }
+    markDirty();
+  }
+  function addDrawPoint(p, point) {
+    const pts = state.draw.points;
+    if (pts.length >= 3 && Math.hypot(point[0] - pts[0][0], point[1] - pts[0][1], point[2] - pts[0][2]) < K.diag(p.bbox) * 0.02) { closeDrawing(); return; }
+    pts.push(point);
+    renderDraw(); renderPick(); updateHint(); markDirty();
+  }
+  function closeDrawing() {
+    const p = selectedPart();
+    if (!p || state.draw.points.length < 3) { toast('Click at least three points on the part first.'); return; }
+    const loop = K.drawnLoop(p.positions, p.indices, state.draw.points);
+    if (!loop) { toast('Those points can’t be joined along the surface. Keep them on one piece of it.', 'error'); return; }
+    state.draw.on = false; state.draw.points = [];
+    const b = $('#drawLineBtn'); if (b) { b.setAttribute('aria-pressed', 'false'); b.textContent = 'Draw a cut line'; }
+    renderDraw();
+    state.regions.last = { partId: p.id, drawn: loop, clicks: [] };
+    pickLoops(p, [loop], { lines: true });
+    updateHint();
+  }
+  // The line so far: the points as dots, joined along the surface.
+  function renderDraw() {
+    for (const v of views.values()) if (v.drawLine) { v.mesh.remove(v.drawLine); clearGroup(v.drawLine); v.drawLine = null; }
+    const p = selectedPart(), v = p && views.get(p.id), pts = state.draw.points;
+    if (!v || !state.draw.on || !pts.length) return;
+    const g = new THREE.Group(), R = K.diag(p.bbox) * 0.008;
+    for (const q of pts) { const dot = new THREE.Mesh(new THREE.SphereGeometry(R, 10, 8), new THREE.MeshBasicMaterial({ color: 0x2f6fe0, depthTest: false })); dot.position.set(q[0], q[1], q[2]); dot.renderOrder = 9; g.add(dot); }
+    if (pts.length > 1) {
+      const vs = pts.map(q => K.nearestVertex(p.positions, q)), line = [];
+      for (let i = 0; i + 1 < vs.length; i++) { const path = K.surfacePath(p.positions, p.indices, vs[i], vs[i + 1]) || []; for (const w of path) line.push(new THREE.Vector3(p.positions[3 * w], p.positions[3 * w + 1], p.positions[3 * w + 2])); }
+      const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(line), new THREE.LineBasicMaterial({ color: 0x2f6fe0, depthTest: false })); l.renderOrder = 9; g.add(l);
+    }
+    v.drawLine = g; v.mesh.add(g);
   }
   function addKey(h) {
     state.cut.keys.push(h);
@@ -1427,8 +1471,9 @@
     if (typing || mod || e.altKey) return;
     const p = selectedPart();
     switch (e.key) {
-      case 'Escape': if (state.regions.on && state.regions.pick) { clearPick(); renderPick(); markDirty(); } else if (p && state.cut.active >= 0) { state.cut.active = -1; renderKeyMarkers(); renderInspector(); } else if (p) selectPart(null); break;
-      case 'Enter': if (state.regions.on && state.regions.pick && state.regions.pick.result) { e.preventDefault(); cutAlongPick(); } else if (p) { e.preventDefault(); doCut(); } break;
+      case 'Escape': if (state.regions.on && state.draw.on) setDrawing(false); else if (state.regions.on && state.regions.pick) { clearPick(); renderPick(); markDirty(); } else if (p && state.cut.active >= 0) { state.cut.active = -1; renderKeyMarkers(); renderInspector(); } else if (p) selectPart(null); break;
+      case 'Backspace': if (state.regions.on && state.draw.on && state.draw.points.length) { e.preventDefault(); state.draw.points.pop(); renderDraw(); renderPick(); updateHint(); markDirty(); } break;
+      case 'Enter': if (state.regions.on && state.draw.on) { e.preventDefault(); closeDrawing(); } else if (state.regions.on && state.regions.pick && state.regions.pick.result) { e.preventDefault(); cutAlongPick(); } else if (p) { e.preventDefault(); doCut(); } break;
       case 'Delete': case 'Backspace': if (p && state.cut.active >= 0) { e.preventDefault(); removeKey(state.cut.active); } break;
       case 'f': case 'F': frameAll(p || undefined); break;
       case 'x': case 'X': if (p) alignPlane('x'); break;
@@ -1468,6 +1513,7 @@
     let t = '';
     const p = selectedPart();
     if (!state.parts.length) t = '';
+    else if (state.regions.on && state.draw.on) t = `Click points on the part to draw the cut line${state.draw.points.length >= 3 ? '. Enter or a click by the first point closes it' : ' (at least three)'}. Backspace takes the last point back, Esc stops drawing.`;
     else if (state.regions.on) t = !p ? 'Click a part to choose it. Its key settings appear on the right.' : 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds to the pick. Enter cuts, Esc picks again.';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
     else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
@@ -2094,6 +2140,11 @@
   function renderPick() {
     const el = $('#cutLineInfo'), pick = state.regions.pick;
     if (!el) return;
+    if (state.draw.on) {
+      const n = state.draw.points.length;
+      el.innerHTML = `<p class="status muted">${n ? `${n} point${n === 1 ? '' : 's'} so far. ` : ''}${n >= 3 ? 'Close the line to see what the cut would do.' : `Click ${n ? 'more points' : 'points'} on the part; the line follows the surface between them.`}</p>${n >= 3 ? '<button class="btn small" data-act="close-draw">Close the line</button>' : ''}`;
+      return;
+    }
     if (!pick) { el.innerHTML = `<p class="muted small">${selectedPart() ? 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds another region or line. Keys use the settings on the right.' : 'Click a part to choose it, then a region on it to split off.'}</p>`; return; }
     const region = !!pick.regions, nr = region ? pick.regions.length : 0, nl = pick.loops.length;
     const len = `${fmt(pick.loops.reduce((s, l) => s + l.length, 0))} mm`;
@@ -2125,7 +2176,7 @@
     const n = pick.result.parts.length;
     toast(`${pick.regions ? `Split off the ${pick.regions.length === 1 ? 'region' : 'regions'}: ${n} pieces` : `Cut along the ${pick.loops.length === 1 ? 'line' : 'lines'} into ${n} pieces`}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}. Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
   }
-  regionsPanel.addEventListener('click', (e) => { if (e.target.closest('[data-act=cut-line]')) cutAlongPick(); });
+  regionsPanel.addEventListener('click', (e) => { if (e.target.closest('[data-act=cut-line]')) cutAlongPick(); else if (e.target.closest('[data-act=close-draw]')) closeDrawing(); else if (e.target.closest('#drawLineBtn')) { if (!selectedPart()) { toast('Click a part to choose it first.'); return; } setDrawing(!state.draw.on); } });
   function applyRegions() {
     const on = state.regions.on;
     let count = 0;
@@ -2158,7 +2209,7 @@
     if (state.regions.on === on) return;
     state.regions.on = on;
     if (on && !selectedPart() && state.parts.filter(q => !state.hidden.has(q.id)).length === 1) selectPart(state.parts.find(q => !state.hidden.has(q.id)).id); // one part: it's the one
-    if (!on) state.regions.last = null;
+    if (!on) { state.regions.last = null; if (state.draw.on) setDrawing(false); }
     applyRegions();
     updatePreview();
     placeAreaTags(); placeSuggestPins(); updateHint(); renderInspector();
