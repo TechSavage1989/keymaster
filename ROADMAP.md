@@ -23,24 +23,26 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Surface regions: colour a model by where its surface turns sharply, like ZBrush polygroups, with an adjustable threshold.
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
+- Keys on bent curved cuts (1.16): the cut face follows the line, keys stand straight on it at their full length, and each is checked for solid under it.
 - Printable, assemblable cuts (1.15): no piece thinner than the printer's wall, no pieces that hook together or get caged, no cuts that only crack the part. Curved cut lines are straightened and capped flat, so their faces no longer fold into tiny teeth.
 
 ## Next
 
-1. **Curved cuts along the model's own contours.** The owner chose curved cuts that follow a line, and wants Keymaster to find those lines itself: split the surface into regions by creases, normal changes and contours, the way ZBrush makes polygroups, and cut along a region border, such as an arm off at the sleeve hem. Planned in steps, each its own pull request: (a) show the detected surface regions (done: splits at sharp turns, which suits hard-surface models); (a2) also split organic sculpts, where folds and hems are soft, by concave folds and changes in thickness; (b) a sealed curved cut along a chosen border (done: click a border line while regions show); (c) keys on a curved cut face (done: on a flat face at the line's best-fit plane); (d) paint or adjust the cut line by hand.
-2. **Limit the cut to a region.** Draw a circle or box on the plane so only what's inside is cut, even where the cut face is one connected area (take off a hand without slicing into a cape behind it).
-3. **Per-area key settings.** Choose key type, size and count separately for each area of a cut face.
-4. **Locking joints.** Twist-lock (push in and turn) and dovetail slide-in keys that hold pieces together before gluing. Needs test prints from the owner to tune the fit.
-5. **Snap-fit pegs.** Split-tip pegs with a barb that clicks into a groove in the socket. Needs test prints from the owner to tune the fit.
-6. **Cuts in a background thread.** Move `KMCore` into a Web Worker so the screen never freezes on dense models. Show progress. `core.js` already has no dependencies, so it should move unchanged.
-7. **Faster picking and display on huge meshes.** Use a bounding-volume hierarchy for clicks and a lighter display mesh above about 2 million triangles, keeping the full mesh for cutting.
-8. **Save and reopen projects.** A `.keymaster` file holding the parts, names, colors and settings.
-9. **Seam-hiding cut shapes.** Zigzag, stepped and dovetail cuts so seams are less visible and pieces can't slide.
-10. **Hollowing and drain holes.** Shell a part to a chosen wall thickness, with drain holes placed for resin printing.
-11. **Part labels.** Emboss a small part number on a hidden face of each piece.
-12. **Split to fit the bed.** Suggest cuts that make every piece fit the printer bed.
-13. **3MF export** with all parts in one file, already arranged.
-14. **Measure tool.** Click two points to read a distance.
+1. **Plug joints.** The owner's own technique: the cut face itself, pulled in from the edge by a wall's width, sticks out as a plug into a matching pocket in the other piece, with Depth, Wall and Gap settings. On flat and curved cuts, alongside Pegs, Dowels and Magnets. It suits areas too small or oddly shaped for a peg.
+2. **Curved cuts along the model's own contours.** The owner chose curved cuts that follow a line, and wants Keymaster to find those lines itself: split the surface into regions by creases, normal changes and contours, the way ZBrush makes polygroups, and cut along a region border, such as an arm off at the sleeve hem. Planned in steps, each its own pull request: (a) show the detected surface regions (done: splits at sharp turns, which suits hard-surface models); (a2) also split organic sculpts, where folds and hems are soft, by concave folds and changes in thickness; (b) a sealed curved cut along a chosen border (done: click a border line while regions show); (c) keys on a curved cut face (done, on a face that follows the line however it bends); (d) paint or adjust the cut line by hand.
+3. **Limit the cut to a region.** Draw a circle or box on the plane so only what's inside is cut, even where the cut face is one connected area (take off a hand without slicing into a cape behind it).
+4. **Per-area key settings.** Choose key type, size and count separately for each area of a cut face.
+5. **Locking joints.** Twist-lock (push in and turn) and dovetail slide-in keys that hold pieces together before gluing. Needs test prints from the owner to tune the fit.
+6. **Snap-fit pegs.** Split-tip pegs with a barb that clicks into a groove in the socket. Needs test prints from the owner to tune the fit.
+7. **Cuts in a background thread.** Move `KMCore` into a Web Worker so the screen never freezes on dense models. Show progress. `core.js` already has no dependencies, so it should move unchanged.
+8. **Faster picking and display on huge meshes.** Use a bounding-volume hierarchy for clicks and a lighter display mesh above about 2 million triangles, keeping the full mesh for cutting.
+9. **Save and reopen projects.** A `.keymaster` file holding the parts, names, colors and settings.
+10. **Seam-hiding cut shapes.** Zigzag, stepped and dovetail cuts so seams are less visible and pieces can't slide.
+11. **Hollowing and drain holes.** Shell a part to a chosen wall thickness, with drain holes placed for resin printing.
+12. **Part labels.** Emboss a small part number on a hidden face of each piece.
+13. **Split to fit the bed.** Suggest cuts that make every piece fit the printer bed.
+14. **3MF export** with all parts in one file, already arranged.
+15. **Measure tool.** Click two points to read a distance.
 
 ## Ideas to weigh later
 

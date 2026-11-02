@@ -4,7 +4,8 @@
 //   node tools/sculpt_check.js model1.stl model2.obj ...      (set POSITIONS=40 for a denser sweep)
 //
 //   MIN_WALL=1.2   also hold every cut to the printability rules the app uses (no piece thinner than this)
-//   CURVED=1       also cut along every closed region line, as the app's curved cuts do
+//   CURVED=1       also cut along every closed region line, as the app's curved cuts do, without keys and then
+//                  with pegs sized to fit (resin sizes)
 //
 // Refusals are counted by reason: too thin, only a crack, pieces that would hook together, or other. A refusal is
 // fine (the app explains it); a part that isn't sealed is a bug.
@@ -64,8 +65,8 @@ for (const f of files) {
   if (curved) {
     const seg = K.segmentSurface(m.positions, m.indices, { angle: 35 });
     const lines = K.cutLines(m.positions, m.indices, seg).filter(l => l.closed);
-    let cu = 0, cr = 0;
-    const cwhy = {};
+    let cu = 0, cr = 0, keyed = 0, ku = 0;
+    const cwhy = {}, kcfg = { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.1, margin: 0.8, taper: 20, taperSocket: true, pegSide: 'below', sizeMode: 'auto', sizeMin: 1, sizeMax: 5, printer: 'resin' };
     for (const l of lines) {
       total++;
       t = Date.now();
@@ -74,8 +75,15 @@ for (const f of files) {
       slowest = Math.max(slowest, Date.now() - t);
       const vol = r.parts.reduce((a, p) => a + p.volume, 0);
       if (!r.parts.every(p => K.edgeReport(p.indices).closed && p.volume > 0) || Math.abs(vol - V0) / V0 > 1e-5) { unsealed++; cu++; }
+      const an = K.analyzeLoop(m.positions, m.indices, l, kcfg, scale), ks = K.autoFitKeys(an, kcfg, 2, new Set()), ev = K.evaluateKeys(an, ks, kcfg, new Set());
+      const good = ks.filter((k, i) => ev[i].ok);
+      if (!good.length) continue;
+      total++;
+      try { r = K.cutAlongLoop(m.positions, m.indices, l, { cfg: kcfg, keys: good, minThickness }); } catch (e) { refused++; tally(reasons, reasonOf(e)); continue; }
+      keyed++;
+      if (!r.parts.every(p => K.edgeReport(p.indices).closed && p.volume > 0)) { unsealed++; ku++; }
     }
-    console.log(`  ${lines.length} curved cuts along region lines: ${cu} not sealed, ${cr} refused${cr ? ` (${Object.entries(cwhy).map(([k, v]) => `${v} ${k}`).join(', ')})` : ''}`);
+    console.log(`  ${lines.length} curved cuts along region lines: ${cu} not sealed, ${cr} refused${cr ? ` (${Object.entries(cwhy).map(([k, v]) => `${v} ${k}`).join(', ')})` : ''}; ${keyed} cut with pegs, ${ku} of those not sealed`);
   }
 }
 console.log(`\n${total} cuts, ${unsealed} not sealed, ${refused} refused with a message${refused ? ` (${Object.entries(reasons).map(([k, v]) => `${v} ${k}`).join(', ')})` : ''}, ${retried} needed a nudge, slowest ${slowest} ms`);
