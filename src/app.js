@@ -491,7 +491,7 @@
     if (state.cut.auto) { state.cut.keys = placeKeys(an); state.cut.why = whyMap(state.cut.keys); }
     state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
     evaluateKeys();
-    if (state.regions.on && state.regions.last && state.regions.last.partId === p.id) pickCutLine(p, state.regions.last.point); // the pick follows the key settings
+    if (state.regions.on && state.regions.last && state.regions.last.partId === p.id) replayPick(p); // the pick follows the key settings
     renderRegions();
     renderKeyMarkers();
     renderInspector();
@@ -1231,7 +1231,7 @@
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, pickCutLineAt(partIndex, point) { state.regions.last = { partId: state.parts[partIndex].id, point }; pickCutLine(state.parts[partIndex], point); return state.regions.pick ? { closed: state.regions.pick.loop.closed, ok: !!state.regions.pick.result, error: state.regions.pick.error || '', region: state.regions.pick.region, loops: state.regions.pick.loops.length, pieces: state.regions.pick.result ? state.regions.pick.result.parts.length : 0 } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -1365,7 +1365,7 @@
       if (!hit) { clearPick(); renderPick(); markDirty(); return; }
       const part = state.parts.find(q => q.id === hit.object.userData.partId);
       const local = hit.point.clone().sub(hit.object.position); // undo the exploded-view offset
-      regionClick(part, [local.x, local.y, local.z]);
+      regionClick(part, [local.x, local.y, local.z], e.shiftKey);
       return;
     }
     const p = selectedPart();
@@ -1385,10 +1385,18 @@
   }
   // A click on a part while regions show: the first click on a part chooses it, so its key settings show on the
   // right; a click on the chosen part picks a region or a line on it.
-  function regionClick(part, point) {
+  // A plain click picks afresh; a shift-click adds to the pick (another line to cut along, or another region to
+  // split off with the first). The clicks are kept so the pick can be replayed when the key settings change.
+  function regionClick(part, point, add = false) {
     if (part.id !== state.selectedId) { clearPick(); selectPart(part.id); renderPick(); updateHint(); return; }
-    state.regions.last = { partId: part.id, point };
-    pickCutLine(part, point);
+    const last = state.regions.last;
+    if (add && last && last.partId === part.id && state.regions.pick) last.clicks.push(point);
+    else state.regions.last = { partId: part.id, clicks: [point] };
+    replayPick(part);
+  }
+  function replayPick(part) {
+    const clicks = state.regions.last ? state.regions.last.clicks : [];
+    clicks.forEach((pt, i) => pickCutLine(part, pt, i > 0));
   }
   function addKey(h) {
     state.cut.keys.push(h);
@@ -1460,7 +1468,7 @@
     let t = '';
     const p = selectedPart();
     if (!state.parts.length) t = '';
-    else if (state.regions.on) t = !p ? 'Click a part to choose it. Its key settings appear on the right.' : 'Click a region to split it off, or a dark border line to cut along it. Enter cuts, Esc picks again.';
+    else if (state.regions.on) t = !p ? 'Click a part to choose it. Its key settings appear on the right.' : 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds to the pick. Enter cuts, Esc picks again.';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
     else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
     else if (state.cfg.type === 'plug') t = coarse ? 'Drag the arrow to slide the cut, the plane or a ring to tilt it. Each area gets a plug of its own shape.' : 'Drag the arrow to slide the cut, the plane or a ring to tilt it (Shift for fine steps). Each area gets a plug of its own shape. Alt-drag to orbit.';
@@ -1943,18 +1951,30 @@
   }
   // Pick the cut line nearest a point on a part (in the part's own coordinates), try the cut straight away, and
   // show the line and what the cut would do.
-  function pickCutLine(p, point) {
+  function pickCutLine(p, point, add = false) {
+    const prev = add && state.regions.pick && state.regions.pick.partId === p.id ? state.regions.pick : null;
     clearPick();
     const seg = regionsFor(p), near = K.borderLoopNear(p.positions, seg, linesFor(p), point);
-    if (near && near.distance <= K.diag(p.bbox) * 0.015) { pickLoops(p, [near.loop], { loop: near.loop }); return; }
+    const sameLoop = (a, b) => a === b || (a.verts.length === b.verts.length && a.verts[0] === b.verts[0] && a.verts[1] === b.verts[1]);
+    if (near && near.distance <= K.diag(p.bbox) * 0.015) {
+      if (prev && prev.regions) { toast('Shift-click adds lines to lines, or regions to regions. Click to start again.', 'warn'); pickLoops(p, prev.loops, { regions: prev.regions, seg }); return; }
+      const loops = prev ? prev.loops.filter(l => !sameLoop(l, near.loop)) : []; // a line already in the pick comes out again
+      if (!prev || loops.length === prev.loops.length) loops.push(near.loop);
+      pickLoops(p, loops, { lines: true });
+      return;
+    }
     const g = K.regionAtPoint(p.positions, p.indices, seg, point);
-    if (g < 0) { toast('Click a region to split it off, or a dark border line to cut along it.'); renderPick(); return; }
-    pickLoops(p, K.regionLoops(p.positions, p.indices, seg, g), { region: g, seg });
+    if (g < 0) { toast('Click a region to split it off, or a dark border line to cut along it.'); if (prev) pickLoops(p, prev.loops, prev.regions ? { regions: prev.regions, seg } : { lines: true }); else renderPick(); return; }
+    if (prev && !prev.regions) { toast('Shift-click adds lines to lines, or regions to regions. Click to start again.', 'warn'); pickLoops(p, prev.loops, { lines: true }); return; }
+    let regions = prev ? prev.regions.filter(x => x !== g) : []; // a region already in the pick comes out again
+    if (!prev || regions.length === prev.regions.length) regions.push(g);
+    if (!regions.length) { renderPick(); return; }
+    pickLoops(p, K.groupLoops(p.positions, p.indices, seg, regions), { regions, seg });
   }
   // Try the cut along one line, or round a whole region (all its outline loops at once), with keys or a plug on
   // each line from the key settings, and show the lines and what the cut would do.
   function pickLoops(p, loops, info) {
-    const pick = { partId: p.id, loops, loop: info.loop || loops[0], region: info.region, keys: [], plugs: [], perLoop: [], frames: [], ans: [] };
+    const pick = { partId: p.id, loops, loop: loops[0], regions: info.regions, region: info.regions ? info.regions[0] : undefined, keys: [], plugs: [], perLoop: [], frames: [], ans: [] };
     const cfg = coreCfg(), minThickness = minWall(), D = K.diag(p.bbox);
     const closed = loops.length > 0 && loops.every(l => l.closed);
     if (closed && cfg.type !== 'none') {
@@ -1979,7 +1999,7 @@
     } else pick.perLoop = loops.map(() => ({ keys: [], plugs: [] }));
     const run = (withJoints, force) => {
       const o = { cfg, minThickness, force, perLoop: withJoints ? pick.perLoop : loops.map(() => ({ keys: [], plugs: [] })) };
-      return info.region !== undefined ? K.splitRegion(p.positions, p.indices, info.seg, info.region, o) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
+      return info.regions ? K.splitRegions(p.positions, p.indices, info.seg, info.regions, o) : loops.length > 1 ? K.cutAlongLoops(p.positions, p.indices, loops, { ...o, what: 'lines' }) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
     };
     try { pick.result = run(true); }
     catch (err) {
@@ -2074,19 +2094,21 @@
   function renderPick() {
     const el = $('#cutLineInfo'), pick = state.regions.pick;
     if (!el) return;
-    if (!pick) { el.innerHTML = `<p class="muted small">${selectedPart() ? 'Click a region to split it off, or a dark border line to cut along it. Keys use the settings on the right.' : 'Click a part to choose it, then a region on it to split off.'}</p>`; return; }
-    const region = pick.region !== undefined, nl = pick.loops.length;
+    if (!pick) { el.innerHTML = `<p class="muted small">${selectedPart() ? 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds another region or line. Keys use the settings on the right.' : 'Click a part to choose it, then a region on it to split off.'}</p>`; return; }
+    const region = !!pick.regions, nr = region ? pick.regions.length : 0, nl = pick.loops.length;
     const len = `${fmt(pick.loops.reduce((s, l) => s + l.length, 0))} mm`;
-    if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>`; return; }
+    const addHint = '<p class="muted small">Shift-click adds another line, or another region to split off with this one.</p>';
+    if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>${addHint}`; return; }
     const cm3 = (v) => (v / 1000 >= 10 ? Math.round(v / 1000) : (v / 1000).toFixed(1));
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
     const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
     const vols = pick.result.parts.map(q => cm3(q.volume));
-    const what = region ? `This region’s outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting it off gives a piece of ${vols[0]} cm³ and leaves ${vols.length === 2 ? `${vols[1]} cm³` : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')} cm³`}.`
-      : `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]} cm³.`;
+    const what = region ? `${nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} cm³ and leaves ${vols.length === 2 ? `${vols[1]} cm³` : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')} cm³`}.`
+      : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]} cm³.`
+      : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')} cm³.`;
     el.innerHTML = `${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}</span></p>`}
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
-      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>${pick.forced ? (region ? 'Split it off anyway' : 'Cut along it anyway') : region ? 'Split off this region' : 'Cut along this line'}</span></button>`;
+      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>${pick.forced ? (region ? `Split ${nr === 1 ? 'it' : 'them'} off anyway` : `Cut along ${nl === 1 ? 'it' : 'them'} anyway`) : region ? `Split off ${nr === 1 ? 'this region' : 'these regions'}` : `Cut along ${nl === 1 ? 'this line' : 'these lines'}`}</span></button>${addHint}`;
   }
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);
@@ -2101,7 +2123,7 @@
     renderPick();
     const pinsMade = (pick.result.pins || []).length;
     const n = pick.result.parts.length;
-    toast(`${pick.region !== undefined ? `Split off the region: ${n} pieces` : 'Cut along the line into 2 pieces'}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}. Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
+    toast(`${pick.regions ? `Split off the ${pick.regions.length === 1 ? 'region' : 'regions'}: ${n} pieces` : `Cut along the ${pick.loops.length === 1 ? 'line' : 'lines'} into ${n} pieces`}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}. Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
   }
   regionsPanel.addEventListener('click', (e) => { if (e.target.closest('[data-act=cut-line]')) cutAlongPick(); });
   function applyRegions() {

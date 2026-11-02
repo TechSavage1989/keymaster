@@ -987,6 +987,14 @@ console.log('regions by folds, and splitting off a region');
   check('the dumbbell’s bar is a region with two loops', bar >= 0, segB.count);
   const rB = K.splitRegion(bell.positions, bell.indices, segB, bar, { minThickness: 1.2 });
   check('splitting off the bar gives three sealed pieces, the bar first, volume kept', rB.parts.length === 3 && rB.loops === 2 && allClosed(rB.parts) && rB.parts[0].volume < rB.parts[1].volume && Math.abs(sumVol(rB.parts) - bell.report.volume) / bell.report.volume < 1e-6, [rB.parts.map(q => q.volume.toFixed(0)), bell.report.volume]);
+  // several regions as one piece (shift-click): the bar and one ball together have a single outline, the other seam
+  const ballG = (() => { const l = K.regionLoops(bell.positions, bell.indices, segB, bar); const v = l[0].verts[0]; for (let tt = 0; tt < bell.indices.length / 3; tt++) for (let k = 0; k < 3; k++) if (bell.indices[3 * tt + k] === v && segB.groupOf[tt] !== bar) return segB.groupOf[tt]; return -1; })();
+  const unionLoops = K.groupLoops(bell.positions, bell.indices, segB, [bar, ballG]);
+  check('the bar and a ball together have one outline line', ballG >= 0 && unionLoops.length === 1 && unionLoops[0].closed, [ballG, unionLoops.map(l => l.closed)]);
+  const rU = K.splitRegions(bell.positions, bell.indices, segB, [bar, ballG], { minThickness: 1.2 });
+  check('splitting them off together gives two sealed pieces, the bar and ball first, volume kept', rU.parts.length === 2 && rU.loops === 1 && allClosed(rU.parts) && Math.abs(rU.parts[0].volume - (rB.parts[0].volume + rB.parts[1].volume)) < 1 && Math.abs(sumVol(rU.parts) - bell.report.volume) / bell.report.volume < 1e-6, [rU.parts.map(q => q.volume.toFixed(0))]);
+  const rBB = K.splitRegions(bell.positions, bell.indices, segB, [ballG, (() => { for (let g = 0; g < segB.count; g++) if (g !== bar && g !== ballG && segB.areas[g] > 100) return g; return -1; })()], { minThickness: 1.2 });
+  check('the two balls together come off as two separate pieces, leaving the bar', rBB.parts.length === 3 && allClosed(rBB.parts) && Math.abs(rBB.parts[2].volume - rB.parts[0].volume) < 1e-6 && Math.abs(sumVol(rBB.parts) - bell.report.volume) / bell.report.volume < 1e-6, rBB.parts.map(q => q.volume.toFixed(0)));
   // with pegs on each loop
   const pc = cfgOf({ type: 'peg', diameter: 2, length: 3, clearance: 0, margin: 0.8 }), loopsB = K.regionLoops(bell.positions, bell.indices, segB, bar);
   const perLoop = loopsB.map(l => { const an = K.analyzeLoop(bell.positions, bell.indices, l, pc, 60); return { keys: K.autoPlaceKeys(an, pc, 1, new Set()), plugs: [] }; });
