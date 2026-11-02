@@ -2338,7 +2338,7 @@ const KMCore = (() => {
   }
   function cutAlongLoop(P, I, loop, opts = {}) {
     const r = cutAlongLoops(P, I, [loop], opts);
-    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0] };
+    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings };
   }
   /* Cut along several closed lines at once. Side 1 is whatever lies on the left of the lines as they run (the
      triangles holding the lines' own directed edges); side 2 is the rest, and may come apart into several pieces.
@@ -2370,7 +2370,7 @@ const KMCore = (() => {
     const side = new Int8Array(nt);
     const flood = (start, s) => { const st = [start]; side[start] = s; while (st.length) { const t = st.pop(); for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && !side[q]) { side[q] = s; st.push(q); } } } };
     for (const [tA] of seeds) if (!side[tA]) flood(tA, 1);
-    if (seeds.some(([, tB]) => side[tB] === 1)) throw new Error(L > 1 ? 'Cutting along this region’s outline wouldn’t free it (the surface joins up around it).' : 'Cutting along this border wouldn’t split the part in two (the surface joins up around it). Pick a border that goes right round a limb or a sleeve.');
+    if (seeds.some(([, tB]) => side[tB] === 1)) throw new Error(L > 1 ? 'Cutting along this region’s outline wouldn’t free it (the surface joins up around it).' : 'Cutting along this border alone wouldn’t split the part in two: the surface joins up around it, as when a hand holds something that touches the body. Click the region beside the line instead, to cut along its whole outline.');
     for (const [, tB] of seeds) if (!side[tB]) flood(tB, 2);
     // side 2 gets its own copy of every line's vertices
     const copy = new Map();
@@ -2486,6 +2486,8 @@ const KMCore = (() => {
     const keyOf = (x, y, z) => `${x},${y},${z}`;
     const sets = parts.map(q => { const s = new Set(); for (let i = 0; i < q.positions.length; i += 3) s.add(keyOf(q.positions[i], q.positions[i + 1], q.positions[i + 2])); return s; });
     const pair = (c) => { const k = keyOf(P[3 * c.ring[0]], P[3 * c.ring[0] + 1], P[3 * c.ring[0] + 2]); const other = parts.find((q, i) => !q.first && sets[i].has(k)); return [parts.find(q => q.first), other || parts.find(q => !q.first)]; };
+    // The printability rules: a refusal, or with opts.force (the owner's "cut anyway") a warning on the result
+    const warnings = [], refuse = (message, code) => { if (opts.force) { if (!warnings.some(w => w.code === code)) warnings.push({ code, message }); return; } throw guardError(message, code); };
     for (const c of caps) {
       const [p1, p2] = pair(c), F = c.F;
       if (opts.minThickness > 0) { // neither piece may be too thin to print where they meet
@@ -2494,19 +2496,19 @@ const KMCore = (() => {
           let n = 0, thin = 0, inner = 0;
           th.forEach((q, i) => { if (!q) return; n++; if (q[s] < th0) { thin++; if (pts[i].clear >= th0) inner++; } });
           if (n && (thin === n || inner * cellArea >= Math.max(Math.PI * th0 * th0, 0.4 * area)))
-            throw guardError(`Cutting along this line would leave a piece thinner than ${+th0.toFixed(2)} mm, too thin to print. Pick a line round something thicker, or a flat cut here.`, 'thin');
+            refuse(`Cutting along this line would leave a piece thinner than ${+th0.toFixed(2)} mm, too thin to print. Pick a line round something thicker, or a flat cut here.`, 'thin');
         }
       }
       const mid = [p1, p2].map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
       if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(cfg, c.keys, c.plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
         const wedged = L > 1 && caps.filter(d => pair(d)[1] === p2).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
-        throw guardError(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
+        refuse(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
           : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked');
       }
     }
     parts.sort((x, y) => y.volume - x.volume);
-    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs };
+    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings };
   }
   // The keyed cap for a curved cut: the face that follows the line (capHeight), with a hole per key, made once and
   // shared by both pieces so they meet exactly. Round each key's socket outline the face is the same on both sides;
@@ -3045,7 +3047,7 @@ const KMCore = (() => {
   // if any part is open, redo the cut a hundredth of a millimetre or so either side. The keys keep their place.
   function cutMesh(P, I, F, opts) {
     const scale = opts.scale || 1, step = scale * 5e-5;
-    const skip = opts.skip || new Set();
+    const skip = opts.skip || new Set(), warnings = []; // with opts.force, the printability rules warn instead of refusing
     // No piece may be too thin to print. Listed areas stop the cut; a thin speck too small to list (the tip of a
     // strand of hair) is quietly left joined, so it stays on its strand instead of becoming a crumb.
     let joinSpecks = null;
@@ -3056,10 +3058,11 @@ const KMCore = (() => {
         Object.defineProperty(an, '_src', { value: { P, I, F, scale, cache: new Map() } });
         const thin = thinAreas(an, opts.minThickness, skip), shown = new Set(shownRegions(base.regions));
         const bad = thin.filter(q => shown.has(q.region));
-        if (bad.length) throw guardError(thinMessage(base.regions, bad, opts.minThickness), 'thin', { thin: bad });
-        if (thin.length) {
-          joinSpecks = new Set([...skip, ...thin.map(q => q.region)]);
-          if (base.regions.every((r, i) => joinSpecks.has(i))) throw guardError(`This cut only grazes the surface, so the piece it cut off would be thinner than ${+opts.minThickness.toFixed(2)} mm, too thin to print. Move the cut deeper into the model.`, 'thin', { thin });
+        if (bad.length) { if (opts.force) warnings.push({ code: 'thin', message: thinMessage(base.regions, bad, opts.minThickness) }); else throw guardError(thinMessage(base.regions, bad, opts.minThickness), 'thin', { thin: bad }); }
+        const specks = opts.force ? thin.filter(q => !shown.has(q.region)) : thin; // cut anyway: the listed areas are cut, only unlisted specks stay joined
+        if (specks.length) {
+          joinSpecks = new Set([...skip, ...specks.map(q => q.region)]);
+          if (base.regions.every((r, i) => joinSpecks.has(i))) { if (opts.force) joinSpecks = null; else throw guardError(`This cut only grazes the surface, so the piece it cut off would be thinner than ${+opts.minThickness.toFixed(2)} mm, too thin to print. Move the cut deeper into the model.`, 'thin', { thin }); }
         }
       }
     }
@@ -3069,7 +3072,8 @@ const KMCore = (() => {
         const res = cutOnce(P, I, Fk, { ...opts, skip: sk });
         if (res.parts.every(q => edgeReport(q.indices).closed) && res.pins.every(q => edgeReport(q.indices).closed)) {
           res.retries = Math.abs(k) && [0, 1, -1, 2, -2, 4, -4].indexOf(k);
-          checkLocks(res, Fk, sk, opts, scale);
+          try { checkLocks(res, Fk, sk, opts, scale); } catch (e) { if (!opts.force || e.code !== 'locked') throw e; warnings.push({ code: 'locked', message: e.message }); }
+          res.warnings = warnings;
           return res;
         }
       }

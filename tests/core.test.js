@@ -887,6 +887,8 @@ console.log('cuts that can be printed and put together');
   check('a thinner wall setting lets the same cut through', K.thinAreas(anT, 0.6).length === 0);
   const eT = errOf(() => K.cutMesh(towers.positions, towers.indices, Ft, { scale: 40, cfg: cfgOf({}), minThickness: 1.2 }));
   check('cutting it is refused, naming the area', eT && eT.code === 'thin' && /area 2/.test(eT.message) && /thinner than 1.2 mm on the clear side/.test(eT.message) && /leave that area joined/.test(eT.message), eT && eT.message);
+  const fT = K.cutMesh(towers.positions, towers.indices, Ft, { scale: 40, cfg: cfgOf({}), minThickness: 1.2, force: true });
+  check('forced, the flat cut goes through both areas, sealed, keeping the volume, with the refusal as a warning', fT.parts.length === 3 && allClosed(fT.parts) && Math.abs(sumVol(fT.parts) - towers.report.volume) / towers.report.volume < 1e-6 && fT.warnings.length === 1 && fT.warnings[0].code === 'thin' && /area 2/.test(fT.warnings[0].message), [fT.parts.length, fT.warnings]);
   const rT = K.cutMesh(towers.positions, towers.indices, Ft, { scale: 40, cfg: cfgOf({}), minThickness: 1.2, skip: new Set([1]) });
   check('leaving that area joined, the cut goes through: sealed, volume kept', rT.parts.length === 2 && allClosed(rT.parts) && Math.abs(sumVol(rT.parts) - towers.report.volume) / towers.report.volume < 1e-6, [rT.parts.length, sumVol(rT.parts), towers.report.volume]);
   // a sphere: grazing the top is refused, a dome a few millimetres tall is fine, and slanted cuts aren't flagged for their sharp edge
@@ -936,6 +938,8 @@ console.log('cuts that can be printed and put together');
   const lP = K.borderLoops(sp2.positions, K.bordersFromGroups(sp2.positions, sp2.indices, gP)).find(l => l.closed);
   const eP = errOf(() => K.cutAlongLoop(sp2.positions, sp2.indices, lP, { minThickness: 1.2 }));
   check('a curved cut round a patch 0.4 mm deep is refused as too thin', eP && eP.code === 'thin' && /thinner than 1.2 mm/.test(eP.message), eP && eP.message);
+  const fP = K.cutAlongLoop(sp2.positions, sp2.indices, lP, { minThickness: 1.2, force: true });
+  check('…but can be forced: two sealed pieces and a thin warning', fP.parts.length === 2 && allClosed(fP.parts) && fP.warnings.length === 1 && fP.warnings[0].code === 'thin', [fP.parts.length, fP.warnings]);
   check('…and is fine for a much thinner limit', allClosed(K.cutAlongLoop(sp2.positions, sp2.indices, lP, { minThickness: 0.15 }).parts));
   // zig-zag lines are straightened so the cap doesn't fold into teeth
   const gZ = new Int32Array(ntP);
@@ -1008,6 +1012,9 @@ console.log('regions by folds, and splitting off a region');
   const segF = K.bordersFromGroups(frame.positions, frame.indices, gBar), lF = K.regionLoops(frame.positions, frame.indices, segF, 1);
   let wedged = ''; try { K.splitRegion(frame.positions, frame.indices, segF, 1); } catch (e) { wedged = e.message; }
   check('a bar bridging two walls of one piece, with wavy cut faces, is refused and told to split a neighbour first', lF.length === 2 && /held at more than one end/.test(wedged) && /neighbours first/.test(wedged), [lF.length, wedged]);
+  // the owner can force a cut: the refusal becomes a warning on the result, and the pieces are still sealed
+  const forced = K.splitRegion(frame.positions, frame.indices, segF, 1, { force: true });
+  check('forced, the bridging bar still comes off, sealed, with the refusal as a warning', forced.parts.length >= 2 && allClosed(forced.parts) && forced.warnings.length === 1 && forced.warnings[0].code === 'locked' && /held at more than one end/.test(forced.warnings[0].message) && Math.abs(sumVol(forced.parts) - frame.report.volume) / frame.report.volume < 1e-6, [forced.parts.length, forced.warnings]);
   check('the region under a point, and none far from the surface', K.regionAtPoint(bell.positions, bell.indices, segB, [2.5, 0, 30]) === bar && K.regionAtPoint(bell.positions, bell.indices, segB, [500, 0, 0]) === -1);
 }
 

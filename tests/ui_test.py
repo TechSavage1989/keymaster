@@ -29,20 +29,31 @@ def lathe_stl(path, radius, length, seg=48, rings=160):
             for p_ in tri: f.write(struct.pack('<3f', *p_))
             f.write(b'\0\0')
 
-def dumbbell_stl(path):
-    # two 12 mm balls joined by a 5 mm bar, tipped at an odd angle, as a binary STL
+def dumbbell_stl(path, bar=2.5):
+    # two 12 mm balls joined by a 5 mm bar (or thinner), tipped at an odd angle, as a binary STL
+    import math
+    def r(z):
+        ball = lambda c: math.sqrt(max(0, 144 - (z - c) ** 2)) if abs(z - c) < 12 else 0
+        return max(ball(12), ball(48), bar if 6 < z < 54 else 0, 0.05)
+    profile_stl(path, r, 60, b'dumbbell')
+
+def flangeball_stl(path):
+    # a 24 mm ball with a flange round its middle, 2 mm wide and half a millimetre thick, tipped at an odd angle:
+    # the flange's rim is its own region, and the piece it would make is far too thin to print
+    import math
+    profile_stl(path, lambda z: max(math.sqrt(max(0, 144 - (z - 12) ** 2)), 14 if abs(z - 12) <= 0.25 else 0, 0.05), 24, b'flangeball')
+
+def profile_stl(path, r, length, name):
+    # a lathe of r(z) along a tipped axis, closed with fans at both ends, as a binary STL
     import math, struct
     ax = [0.55, 0.3, 0.78]; L = math.sqrt(sum(v * v for v in ax)); ax = [v / L for v in ax]
     u = [ax[1], -ax[0], 0]; L = math.sqrt(sum(v * v for v in u)); u = [v / L for v in u]
     v = [ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]]
-    def r(z):
-        ball = lambda c: math.sqrt(max(0, 144 - (z - c) ** 2)) if abs(z - c) < 12 else 0
-        return max(ball(12), ball(48), 2.5 if 6 < z < 54 else 0, 0.05)
     seg, rings = 40, 100
     pt = lambda z, a, rr: [ax[k] * z + u[k] * math.cos(a) * rr + v[k] * math.sin(a) * rr for k in range(3)]
-    grid = [[pt(60 * i / rings, 2 * math.pi * j / seg, r(60 * i / rings)) for j in range(seg)] for i in range(1, rings)]
+    grid = [[pt(length * i / rings, 2 * math.pi * j / seg, r(length * i / rings)) for j in range(seg)] for i in range(1, rings)]
     tris = []
-    a0, a1 = pt(0, 0, 0), pt(60, 0, 0)
+    a0, a1 = pt(0, 0, 0), pt(length, 0, 0)
     for j in range(seg):
         k = (j + 1) % seg
         tris.append((a0, grid[0][k], grid[0][j]))
@@ -50,7 +61,7 @@ def dumbbell_stl(path):
         for i in range(rings - 2):
             tris.append((grid[i][j], grid[i][k], grid[i + 1][k])); tris.append((grid[i][j], grid[i + 1][k], grid[i + 1][j]))
     with open(path, 'wb') as f:
-        f.write(b'dumbbell'.ljust(80, b' ')); f.write(struct.pack('<I', len(tris)))
+        f.write(name.ljust(80, b' ')); f.write(struct.pack('<I', len(tris)))
         for tri in tris:
             f.write(struct.pack('<3f', 0, 0, 0))
             for p_ in tri: f.write(struct.pack('<3f', *p_))
@@ -647,6 +658,22 @@ with sync_playwright() as p:
     check('splitting off the bar gives three pieces, A, B and C', len(names3) == 3 and all(n.endswith((' A', ' B', ' C')) for n in names3) and 'Split off the region' in pg.inner_text('#toast'), names3)
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     check('undo puts the dumbbell back together again', pg.locator('#partList li[data-id]').count() == 1)
+    # a region whose piece would be too thin to print (the face of a flange half a millimetre thick) is refused, but the owner can split it off anyway
+    flangeball_stl(str(OUT / 'flangeball.stl'))
+    pg.set_input_files('#fileInput', str(OUT / 'flangeball.stl'))
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1 && document.querySelector('#partList .part-name').innerText.includes('flangeball')", timeout=20000)
+    if pg.get_attribute('#regionsBtn', 'aria-pressed') != 'true': pg.click('#regionsBtn')
+    pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000); pg.wait_for_timeout(300)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
+    topT = [ax[k] * 11.64 + u[k] * 13 for k in range(3)]
+    resT = pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {topT})"); pg.wait_for_timeout(200)
+    infoT = pg.inner_text('#cutLineInfo')
+    print('    flange face region:', resT, infoT.replace('\n', ' ')[:160])
+    check('a region too thin to print warns, and offers to split it off anyway', bool(resT) and resT['ok'] and resT['region'] is not None and 'thinner than' in infoT and 'Split it off anyway' in infoT, (resT, infoT))
+    pg.click('[data-act=cut-line]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 3", timeout=15000)
+    check('splitting it off anyway gives the pieces (the flange face, and the ball in two), and says it went against the warning', pg.locator('#partList li[data-id]').count() == 3 and 'against the warning' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     # keys on a curved cut: an arm in a sleeve, cut at the hem, gets pegs sized to fit
     import math as _m
     def arm_r(z):
@@ -722,7 +749,16 @@ with sync_playwright() as p:
     tag = pg.locator('#areaTags [data-area-tag="1"]')
     check('the area’s label in the view says too thin', 'too thin' in tag.inner_text(), tag.inner_text())
     pg.click('[data-act=cut]'); pg.wait_for_timeout(300)
-    check('cutting it is held back, with the reason', 'too thin to print' in pg.inner_text('#toast') and pg.locator('#partList li[data-id]').count() == 1, pg.inner_text('#toast'))
+    check('cutting it is held back, with the reason, and offers to cut anyway', 'too thin to print' in pg.inner_text('#toast') and 'Cut anyway' in pg.inner_text('#toast') and pg.locator('#partList li[data-id]').count() == 1, pg.inner_text('#toast'))
+    check('the footer offers to cut anyway too', pg.locator('#keyStatus [data-act=cut-anyway]').count() == 1)
+    pg.click('#keyStatus [data-act=cut-anyway]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length >= 2", timeout=15000)
+    check('cut anyway goes through, and says so', pg.locator('#partList li[data-id]').count() >= 2 and 'Cut made anyway' in pg.inner_text('#toast') and 'too thin' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    pg.keyboard.press('Control+z'); pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1", timeout=15000)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
+    pg.keyboard.press('z'); pg.wait_for_timeout(300)
+    pg.fill('#cutPosNum', '-0.25'); pg.press('#cutPosNum', 'Tab'); pg.wait_for_timeout(700)
+    check('after undo the sliver warning is back', 'would leave a sliver thinner than' in pg.inner_text('#keyStatus'), pg.inner_text('#keyStatus'))
     pg.click('#keyStatus [data-act=join-thin]'); pg.wait_for_timeout(300)
     check('one click leaves that area joined, and the warning goes', tag.get_attribute('aria-pressed') == 'false' and 'sliver' not in pg.inner_text('#keyStatus'), pg.inner_text('#keyStatus'))
     pg.click('[data-act=cut]')
