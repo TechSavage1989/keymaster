@@ -651,6 +651,46 @@ console.log('curved cuts along a border');
   const back = K.drawnLoop(sp.positions, sp.indices, [drawnPts[0], drawnPts[1], drawnPts[0], drawnPts[2], drawnPts[3]]);
   check('a line that doubles back on itself is made simple', back && back.closed && new Set(back.verts).size === back.verts.length && Math.abs(back.length - drawn.length) / drawn.length < 0.15, back && [back.verts.length, back.length]);
   check('fewer than three points make no line', K.drawnLoop(sp.positions, sp.indices, drawnPts.slice(0, 2)) === null);
+  // A sunk face: the face across the wavy cut pushed 1 mm into the bigger piece, with a wall down from the line, so
+  // the cap piece keeps a millimetre of thickness right to its edge. The cap piece gains about the face's area times
+  // the depth; the pieces still seal and the volume is kept.
+  // (the line is turned first so its smaller side is side 1, as the app does before planning keys: the recess goes
+  // into the bigger piece)
+  const orientedW = K.orientLoops(sp.positions, sp.indices, [loopsW[0]], { what: 'lines' }).loops[0];
+  const sunk = K.cutAlongLoop(sp.positions, sp.indices, orientedW, { sink: 1, minThickness: 1 });
+  const anS = K.analyzeLoop(sp.positions, sp.indices, orientedW, { type: 'none', sink: 1, margin: 1 }, 40);
+  const smallPlain = Math.min(...cw.parts.map(q => q.volume)), smallSunk = Math.min(...sunk.parts.map(q => q.volume)), faceArea = anS.base.regions[0].area;
+  check('a sunk face: full depth, sealed, volume kept', sunk.sink > 0.95 && anS.curved.sink > 0.95 && allClosed(sunk.parts) && Math.abs(sumVol(sunk.parts) - sp.report.volume) / sp.report.volume < 1e-6, [sunk.sink, anS.curved.sink, sumVol(sunk.parts)]);
+  // Where the line runs along the ball's widest part there is no solid straight below it, so the recess fades out
+  // there (it never breaks out); elsewhere it is a full millimetre deep
+  const depths = anS.curved.sunk.depth, deepRim = depths.filter(d => d > 0.95).length;
+  check('the recess is a millimetre deep along most of the line and fades where there is only air beyond', deepRim > depths.length * 0.4 && depths.every(d => d <= 1 + 1e-9), [deepRim, depths.length]);
+  check('the smaller piece gains a slab in proportion', (smallSunk - smallPlain) > 0.3 * faceArea && (smallSunk - smallPlain) < 1.05 * faceArea, [smallSunk - smallPlain, faceArea]);
+  // the slab really is there: along the frame normal, the smaller piece is at least a millimetre thick at the line
+  // wherever the recess is full depth
+  const thickAtRim = (() => { // a hair inside the line (right on it, the ray would run down the wall)
+    const F = anS.frame, piece = sunk.parts.find(q => q.volume === smallSunk), g = K.rayGrid(piece.positions, piece.indices, F), xy = anS.base.loops[0].xy, n = xy.length / 2;
+    const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2];
+    let cx = 0, cy = 0; for (let i = 0; i < n; i++) { cx += xy[2 * i] / n; cy += xy[2 * i + 1] / n; }
+    let worst = Infinity, missed = 0, hit = 0;
+    for (let i = 0; i < n; i += 4) {
+      if (depths[i] < 0.95) continue;
+      const dx = cx - xy[2 * i], dy = cy - xy[2 * i + 1], L = Math.hypot(dx, dy) || 1, x = xy[2 * i] + 0.5 * dx / L, y = xy[2 * i + 1] + 0.5 * dy / L;
+      const r = K.solidRuns(g, x + ox + 1.3e-7, y + oy + 0.7e-7);
+      if (!r.length) { missed++; continue; } // a ray down the wall itself
+      hit++;
+      let best = 0; for (let k = 0; k < r.length; k += 2) best = Math.max(best, r[k + 1] - r[k]); worst = Math.min(worst, best);
+    }
+    return missed > hit / 5 ? 0 : worst;
+  })();
+  check('…so the piece is at least a millimetre thick right at the line there', thickAtRim > 0.95, thickAtRim);
+  const tightS = cfgOf({ type: 'peg', clearance: 0, taper: 0, sink: 1 });
+  const keysS = (() => { const a = K.analyzeLoop(sp.positions, sp.indices, orientedW, tightS, 40), ks = K.autoPlaceKeys(a, tightS, 3, new Set()), ev = K.evaluateKeys(a, ks, tightS, new Set()); return ks.filter((k, i) => ev[i].ok); })();
+  const sunkK = K.cutAlongLoop(sp.positions, sp.indices, orientedW, { cfg: tightS, keys: keysS, sink: 1, minThickness: 1 });
+  check('pegs on a sunk face: sealed, still sunk', sunkK.sink > 0.95 && keysS.length >= 2 && allClosed(sunkK.parts), [sunkK.sink, keysS.length]);
+  // with a wall thicker than the ball required beyond the face, there is no room to sink: the cut is as before
+  const noRoom = K.cutAlongLoop(sp.positions, sp.indices, orientedW, { sink: 1, cfg: cfgOf({ margin: 30 }) });
+  check('no room to sink: the face stays where it was, and the cut is still sealed', noRoom.sink === 0 && allClosed(noRoom.parts) && Math.abs(Math.min(...noRoom.parts.map(q => q.volume)) - smallPlain) < 1e-6, [noRoom.sink, noRoom.parts.map(q => q.volume)]);
   check('wavy cut keeps the volume', Math.abs(sumVol(cw.parts) - sp.report.volume) / sp.report.volume < 1e-6, [sumVol(cw.parts), sp.report.volume]);
   // the cut face is drawn as a fine grid inside the line, so it bends smoothly instead of a few big facets: the
   // typical bend between neighbouring face triangles is a few degrees (it was over 40°), and the face has many
