@@ -406,7 +406,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.19, build ec5e52. After an update, refresh the page and check this changes.">v1.19 · ec5e52</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.20, build e47b29. After an update, refresh the page and check this changes.">v1.20 · e47b29</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -4375,6 +4375,7 @@ const KMCore = (() => {
     if (state.cut.auto) { state.cut.keys = placeKeys(an); state.cut.why = whyMap(state.cut.keys); }
     state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
     evaluateKeys();
+    if (state.regions.on && state.regions.last && state.regions.last.partId === p.id) pickCutLine(p, state.regions.last.point); // the pick follows the key settings
     renderRegions();
     renderKeyMarkers();
     renderInspector();
@@ -5113,7 +5114,7 @@ const KMCore = (() => {
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { pickCutLineAt(partIndex, point) { pickCutLine(state.parts[partIndex], point); return state.regions.pick ? { closed: state.regions.pick.loop.closed, ok: !!state.regions.pick.result, error: state.regions.pick.error || '', region: state.regions.pick.region, loops: state.regions.pick.loops.length, pieces: state.regions.pick.result ? state.regions.pick.result.parts.length : 0 } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, pickCutLineAt(partIndex, point) { state.regions.last = { partId: state.parts[partIndex].id, point }; pickCutLine(state.parts[partIndex], point); return state.regions.pick ? { closed: state.regions.pick.loop.closed, ok: !!state.regions.pick.result, error: state.regions.pick.error || '', region: state.regions.pick.region, loops: state.regions.pick.loops.length, pieces: state.regions.pick.result ? state.regions.pick.result.parts.length : 0 } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -5247,7 +5248,7 @@ const KMCore = (() => {
       if (!hit) { clearPick(); renderPick(); markDirty(); return; }
       const part = state.parts.find(q => q.id === hit.object.userData.partId);
       const local = hit.point.clone().sub(hit.object.position); // undo the exploded-view offset
-      pickCutLine(part, [local.x, local.y, local.z]);
+      regionClick(part, [local.x, local.y, local.z]);
       return;
     }
     const p = selectedPart();
@@ -5264,6 +5265,13 @@ const KMCore = (() => {
     const hits = raycaster.intersectObjects(meshes, false);
     if (hits.length) selectPart(hits[0].object.userData.partId);
     else if (p) selectPart(null);
+  }
+  // A click on a part while regions show: the first click on a part chooses it, so its key settings show on the
+  // right; a click on the chosen part picks a region or a line on it.
+  function regionClick(part, point) {
+    if (part.id !== state.selectedId) { clearPick(); selectPart(part.id); renderPick(); updateHint(); return; }
+    state.regions.last = { partId: part.id, point };
+    pickCutLine(part, point);
   }
   function addKey(h) {
     state.cut.keys.push(h);
@@ -5335,7 +5343,7 @@ const KMCore = (() => {
     let t = '';
     const p = selectedPart();
     if (!state.parts.length) t = '';
-    else if (state.regions.on) t = 'Click a region to split it off, or a dark border line to cut along it. Enter cuts, Esc picks again.';
+    else if (state.regions.on) t = !p ? 'Click a part to choose it. Its key settings appear on the right.' : 'Click a region to split it off, or a dark border line to cut along it. Enter cuts, Esc picks again.';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
     else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
     else if (state.cfg.type === 'plug') t = coarse ? 'Drag the arrow to slide the cut, the plane or a ring to tilt it. Each area gets a plug of its own shape.' : 'Drag the arrow to slide the cut, the plane or a ring to tilt it (Shift for fine steps). Each area gets a plug of its own shape. Alt-drag to orbit.';
@@ -5943,7 +5951,7 @@ const KMCore = (() => {
   function renderPick() {
     const el = $('#cutLineInfo'), pick = state.regions.pick;
     if (!el) return;
-    if (!pick) { el.innerHTML = `<p class="muted small">Click a region to split it off, or a dark border line to cut along it. Keys use your key settings.</p>`; return; }
+    if (!pick) { el.innerHTML = `<p class="muted small">${selectedPart() ? 'Click a region to split it off, or a dark border line to cut along it. Keys use the settings on the right.' : 'Click a part to choose it, then a region on it to split off.'}</p>`; return; }
     const region = pick.region !== undefined, nl = pick.loops.length;
     const len = `${fmt(pick.loops.reduce((s, l) => s + l.length, 0))} mm`;
     if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>`; return; }
@@ -6004,6 +6012,8 @@ const KMCore = (() => {
   function setRegions(on) {
     if (state.regions.on === on) return;
     state.regions.on = on;
+    if (on && !selectedPart() && state.parts.filter(q => !state.hidden.has(q.id)).length === 1) selectPart(state.parts.find(q => !state.hidden.has(q.id)).id); // one part: it's the one
+    if (!on) state.regions.last = null;
     applyRegions();
     updatePreview();
     placeAreaTags(); placeSuggestPins(); updateHint(); renderInspector();
