@@ -2336,6 +2336,78 @@ const KMCore = (() => {
     straightCache.set(loop, { I, out });
     return out;
   }
+  /* ---------- lines drawn by hand ----------
+     The owner's "manual painting": click points on the surface and the line runs from each to the next along the
+     surface's own edges, the shortest way, then closes back to the first. The result is a loop like any border
+     loop, so cutAlongLoop, keys and plugs work on it unchanged. */
+  const adjCache = new WeakMap();
+  function vertexAdjacency(P, I) {
+    let adj = adjCache.get(I);
+    if (adj) return adj;
+    const nv = P.length / 3, deg = new Int32Array(nv + 1);
+    for (let i = 0; i < I.length; i += 3) for (let k = 0; k < 3; k++) { deg[I[i + k] + 1]++; }
+    for (let v = 0; v < nv; v++) deg[v + 1] += deg[v];
+    const fill = deg.slice(0, nv), to = new Int32Array(deg[nv]), len = new Float32Array(deg[nv]);
+    for (let i = 0; i < I.length; i += 3) for (let k = 0; k < 3; k++) {
+      const a = I[i + k], b = I[i + (k + 1) % 3], L = Math.hypot(P[3 * a] - P[3 * b], P[3 * a + 1] - P[3 * b + 1], P[3 * a + 2] - P[3 * b + 2]);
+      to[fill[a]] = b; len[fill[a]++] = L; // each triangle adds a -> b; the twin triangle adds b -> a
+    }
+    adj = { start: deg, to, len };
+    adjCache.set(I, adj);
+    return adj;
+  }
+  // The vertex nearest a point.
+  function nearestVertex(P, point) {
+    let best = -1, bd = Infinity;
+    for (let v = 0; v < P.length / 3; v++) { const d = (P[3 * v] - point[0]) ** 2 + (P[3 * v + 1] - point[1]) ** 2 + (P[3 * v + 2] - point[2]) ** 2; if (d < bd) { bd = d; best = v; } }
+    return best;
+  }
+  // The shortest way along the surface's edges from vertex a to vertex b (Dijkstra with a binary heap), as the
+  // vertices from a to b inclusive. Edges are charged a little extra for straying from the straight line between
+  // the two points, so the way runs where a hand would draw it instead of wandering round bumps.
+  function surfacePath(P, I, a, b) {
+    if (a === b) return [a];
+    const adj = vertexAdjacency(P, I), nv = P.length / 3;
+    const A = [P[3 * a], P[3 * a + 1], P[3 * a + 2]], B = [P[3 * b], P[3 * b + 1], P[3 * b + 2]], AB = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], D = Math.hypot(...AB) || 1;
+    const stray = (v) => { // distance of a vertex from the segment a-b
+      const q = [P[3 * v] - A[0], P[3 * v + 1] - A[1], P[3 * v + 2] - A[2]], s = Math.max(0, Math.min(1, (q[0] * AB[0] + q[1] * AB[1] + q[2] * AB[2]) / (D * D)));
+      return Math.hypot(q[0] - s * AB[0], q[1] - s * AB[1], q[2] - s * AB[2]);
+    };
+    const dist = new Float64Array(nv).fill(Infinity), prev = new Int32Array(nv).fill(-1), heap = [];
+    const push = (x) => { heap.push(x); let i = heap.length - 1; while (i > 0) { const pI = (i - 1) >> 1; if (heap[pI][0] <= heap[i][0]) break; [heap[pI], heap[i]] = [heap[i], heap[pI]]; i = pI; } };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+    dist[a] = 0; push([0, a]);
+    while (heap.length) {
+      const [d, v] = pop();
+      if (d > dist[v]) continue;
+      if (v === b) break;
+      for (let e = adj.start[v]; e < adj.start[v + 1]; e++) {
+        const w = adj.to[e], nd = d + adj.len[e] * (1 + 2 * stray(w) / D);
+        if (nd < dist[w]) { dist[w] = nd; prev[w] = v; push([nd, w]); }
+      }
+    }
+    if (prev[b] < 0) return null; // no way there (a separate shell)
+    const path = []; for (let v = b; v >= 0; v = prev[v]) path.push(v);
+    return path.reverse();
+  }
+  // A closed line through the given points (the nearest vertex to each), joined the shortest way along the surface
+  // and back to the first. Where the line would cross itself, the detour is dropped so the loop is simple.
+  // Returns a loop like borderLoops gives (verts, closed, length, drawn), or null if the points can't be joined.
+  function drawnLoop(P, I, points) {
+    if (points.length < 3) return null;
+    const vs = points.map(q => nearestVertex(P, q)), verts = [];
+    for (let i = 0; i < vs.length; i++) {
+      const path = surfacePath(P, I, vs[i], vs[(i + 1) % vs.length]);
+      if (!path) return null;
+      for (let k = 0; k + 1 < path.length; k++) verts.push(path[k]); // the last vertex starts the next leg
+    }
+    // make it simple: when a vertex comes round again, the loop between the two visits goes
+    const seen = new Map(), ring = [];
+    for (const v of verts) { if (seen.has(v)) { const at = seen.get(v); for (let k = at; k < ring.length; k++) seen.delete(ring[k]); ring.length = at; } seen.set(v, ring.length); ring.push(v); }
+    if (ring.length < 3) return null;
+    let length = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; length += Math.hypot(P[3 * p] - P[3 * q], P[3 * p + 1] - P[3 * q + 1], P[3 * p + 2] - P[3 * q + 2]); }
+    return { verts: ring, closed: true, length, drawn: true };
+  }
   function cutAlongLoop(P, I, loop, opts = {}) {
     const r = cutAlongLoops(P, I, [loop], opts);
     return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings };
@@ -3552,7 +3624,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
