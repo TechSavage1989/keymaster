@@ -23,6 +23,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Surface regions: colour a model by where its surface turns sharply, like ZBrush polygroups, with an adjustable threshold.
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
+- Sunk cut faces (1.25): the face across a curved cut is pushed into the other piece with a wall down from the line, as deep as that piece can hold, so the split-off piece keeps its thickness to the edge and seats into a recess.
 - Cut lines drawn by hand (1.24): click points on the part and the line runs between them along the surface, then cuts like any border line, with keys or a plug.
 - Shift-click picks (1.23): several regions split off as one piece, or several lines cut at once, with a line that doesn't free anything saying to add another.
 - Cut anyway (1.22): the too-thin and hooked refusals can be overridden, on flat cuts and region splits, with the warning kept. A line that doesn't free a piece says to click the region beside it instead.
@@ -37,19 +38,20 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 ## Next
 
 1. **Curved cuts along the model's own contours.** The owner chose curved cuts that follow a line, and wants Keymaster to find those lines itself: split the surface into regions by creases, normal changes and contours, the way ZBrush makes polygroups, and cut along a region border, such as an arm off at the sleeve hem. Planned in steps, each its own pull request: (a) show the detected surface regions (done: splits at sharp turns, which suits hard-surface models); (a2) also split organic sculpts by concave folds (done; thickness changes still to try); (b) a sealed curved cut along a chosen border (done: click a border line while regions show); (c) keys on a curved cut face (done, on a face that follows the line however it bends); (d) draw the cut line by hand (done: click points, the line follows the surface between them); (e) split off a region along its whole outline (done).
-2. **Limit the cut to a region.** Draw a circle or box on the plane so only what's inside is cut, even where the cut face is one connected area (take off a hand without slicing into a cape behind it).
-3. **Per-area key settings.** Choose key type, size and count separately for each area of a cut face.
-4. **Locking joints.** Twist-lock (push in and turn) and dovetail slide-in keys that hold pieces together before gluing. Needs test prints from the owner to tune the fit.
-5. **Snap-fit pegs.** Split-tip pegs with a barb that clicks into a groove in the socket. Needs test prints from the owner to tune the fit.
-6. **Cuts in a background thread.** Move `KMCore` into a Web Worker so the screen never freezes on dense models. Show progress. `core.js` already has no dependencies, so it should move unchanged.
-7. **Faster picking and display on huge meshes.** Use a bounding-volume hierarchy for clicks and a lighter display mesh above about 2 million triangles, keeping the full mesh for cutting.
-8. **Save and reopen projects.** A `.keymaster` file holding the parts, names, colors and settings.
-9. **Seam-hiding cut shapes.** Zigzag, stepped and dovetail cuts so seams are less visible and pieces can't slide.
-10. **Hollowing and drain holes.** Shell a part to a chosen wall thickness, with drain holes placed for resin printing.
-11. **Part labels.** Emboss a small part number on a hidden face of each piece.
-12. **Split to fit the bed.** Suggest cuts that make every piece fit the printer bed.
-13. **3MF export** with all parts in one file, already arranged.
-14. **Measure tool.** Click two points to read a distance.
+2. **Curved cuts through hollowed models.** A curved cut only cuts the outer surface; an inner void shell the cap passes through should be cut by the cap too (a hollowed figure's cavity spans both pieces). Today such a cut is refused as a dip.
+3. **Limit the cut to a region.** Draw a circle or box on the plane so only what's inside is cut, even where the cut face is one connected area (take off a hand without slicing into a cape behind it).
+4. **Per-area key settings.** Choose key type, size and count separately for each area of a cut face.
+5. **Locking joints.** Twist-lock (push in and turn) and dovetail slide-in keys that hold pieces together before gluing. Needs test prints from the owner to tune the fit.
+6. **Snap-fit pegs.** Split-tip pegs with a barb that clicks into a groove in the socket. Needs test prints from the owner to tune the fit.
+7. **Cuts in a background thread.** Move `KMCore` into a Web Worker so the screen never freezes on dense models. Show progress. `core.js` already has no dependencies, so it should move unchanged.
+8. **Faster picking and display on huge meshes.** Use a bounding-volume hierarchy for clicks and a lighter display mesh above about 2 million triangles, keeping the full mesh for cutting.
+9. **Save and reopen projects.** A `.keymaster` file holding the parts, names, colors and settings.
+10. **Seam-hiding cut shapes.** Zigzag, stepped and dovetail cuts so seams are less visible and pieces can't slide.
+11. **Hollowing and drain holes.** Shell a part to a chosen wall thickness, with drain holes placed for resin printing.
+12. **Part labels.** Emboss a small part number on a hidden face of each piece.
+13. **Split to fit the bed.** Suggest cuts that make every piece fit the printer bed.
+14. **3MF export** with all parts in one file, already arranged.
+15. **Measure tool.** Click two points to read a distance.
 
 ## Ideas to weigh later
 

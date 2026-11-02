@@ -26,7 +26,7 @@
     wire: false,
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5 },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1 },
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, angle: 60, fold: 15 };
@@ -2020,6 +2020,9 @@
   // Try the cut along one line, or round a whole region (all its outline loops at once), with keys or a plug on
   // each line from the key settings, and show the lines and what the cut would do.
   function pickLoops(p, loops, info) {
+    // lines picked by hand are turned to agree first (the smaller side is side 1), so keys are planned in the frames
+    // the cut will use; a region's outline already agrees
+    if (!info.regions && loops.length && loops.every(l => l.closed)) { try { loops = K.orientLoops(p.positions, p.indices, loops, { what: 'lines' }).loops; } catch (err) { /* the cut will say why */ } }
     const pick = { partId: p.id, loops, loop: loops[0], regions: info.regions, region: info.regions ? info.regions[0] : undefined, keys: [], plugs: [], perLoop: [], frames: [], ans: [] };
     const cfg = coreCfg(), minThickness = minWall(), D = K.diag(p.bbox);
     const closed = loops.length > 0 && loops.every(l => l.closed);
@@ -2044,7 +2047,7 @@
       }
     } else pick.perLoop = loops.map(() => ({ keys: [], plugs: [] }));
     const run = (withJoints, force) => {
-      const o = { cfg, minThickness, force, perLoop: withJoints ? pick.perLoop : loops.map(() => ({ keys: [], plugs: [] })) };
+      const o = { cfg, minThickness, force, sink: Math.max(0, +state.cfg.sink || 0), perLoop: withJoints ? pick.perLoop : loops.map(() => ({ keys: [], plugs: [] })) };
       return info.regions ? K.splitRegions(p.positions, p.indices, info.seg, info.regions, o) : loops.length > 1 ? K.cutAlongLoops(p.positions, p.indices, loops, { ...o, what: 'lines' }) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
     };
     try { pick.result = run(true); }
@@ -2154,10 +2157,11 @@
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
     const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
     const vols = pick.result.parts.map(q => cm3(q.volume));
+    const sinks = (pick.result.sinks || []).filter(s => s > 0.05), sunkLine = sinks.length ? ` The face is sunk ${fmt(Math.max(...sinks))} mm into the other piece${sinks.length < nl ? ' on ' + (sinks.length === 1 ? 'one line' : `${sinks.length} lines`) : ''}, so this piece keeps its thickness to the edge.` : state.cfg.sink > 0 ? ' There’s no room to sink the face here.' : '';
     const what = region ? `${nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} cm³ and leaves ${vols.length === 2 ? `${vols[1]} cm³` : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')} cm³`}.`
       : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]} cm³.`
       : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')} cm³.`;
-    el.innerHTML = `${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}</span></p>`}
+    el.innerHTML = `${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}${sunkLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}${sunkLine}</span></p>`}
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
       <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>${pick.forced ? (region ? `Split ${nr === 1 ? 'it' : 'them'} off anyway` : `Cut along ${nl === 1 ? 'it' : 'them'} anyway`) : region ? `Split off ${nr === 1 ? 'this region' : 'these regions'}` : `Cut along ${nl === 1 ? 'this line' : 'these lines'}`}</span></button>${addHint}`;
   }
@@ -2220,6 +2224,10 @@
     else setRegions(false);
   });
   $('#regionsAngle').addEventListener('input', (e) => { $('#regionsAngleOut').textContent = `${e.target.value}°`; });
+  $('#sinkDepth').addEventListener('change', (e) => {
+    state.cfg.sink = Math.max(0, +e.target.value || 0); e.target.value = state.cfg.sink;
+    const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
+  });
   $('#regionsAngle').addEventListener('change', (e) => {
     state.regions.fold = +e.target.value;
     clearPick();

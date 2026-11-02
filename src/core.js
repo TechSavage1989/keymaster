@@ -2051,6 +2051,9 @@ const KMCore = (() => {
       nx += (P[p + 1] - P[q + 1]) * (P[p + 2] + P[q + 2]); ny += (P[p + 2] - P[q + 2]) * (P[p] + P[q]); nz += (P[p] - P[q]) * (P[p + 1] + P[q + 1]);
       cx += P[p]; cy += P[p + 1]; cz += P[p + 2];
     }
+    // the same frame whichever way the line runs (lines picked together may be turned round to agree)
+    const big = Math.abs(nx) >= Math.abs(ny) && Math.abs(nx) >= Math.abs(nz) ? nx : Math.abs(ny) >= Math.abs(nz) ? ny : nz;
+    if (big < 0) { nx = -nx; ny = -ny; nz = -nz; }
     const F = frameFromNormal(norm3([nx, ny, nz]), [cx / n, cy / n, cz / n]);
     const xy = new Float64Array(2 * n), h = new Float64Array(n);
     let dev = 0;
@@ -2217,7 +2220,9 @@ const KMCore = (() => {
     const { F, xy, h, dev } = loopFrame(P, loop.verts);
     const L = makeLoop(loop.verts, [], xy);
     const base = { error: null, loops: [L], regions: buildRegions([L]) };
-    const an = { frame: F, base, depth: [], curved: { deviation: dev, heightAt: capHeightGrid(xy, h) } };
+    const into2 = intoSide2(xy), sunk = cfg && cfg.sink > 0 ? sunkRing(P, I, F, loop.verts, xy, h, into2, cfg.sink, cfg.margin || 0.8) : null;
+    if (sunk) { const L2 = makeLoop(loop.verts, [], sunk.xy2); base.loops = [L2]; base.regions = buildRegions([L2]); }
+    const an = { frame: F, base, depth: [], curved: { deviation: dev, heightAt: sunk ? capHeightGrid(sunk.xy2, sunk.h2) : capHeightGrid(xy, h), sink: sunk ? sunk.max : 0, into2, sunk } };
     Object.defineProperty(an, '_src', { value: { P, I, F, scale, cfg, cache: new Map() } });
     Object.defineProperty(an.curved, 'rays', { get() { return raysFor(P, I, F); } });
     return an;
@@ -2408,21 +2413,71 @@ const KMCore = (() => {
     let length = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; length += Math.hypot(P[3 * p] - P[3 * q], P[3 * p + 1] - P[3 * q + 1], P[3 * p + 2] - P[3 * q + 2]); }
     return { verts: ring, closed: true, length, drawn: true };
   }
-  function cutAlongLoop(P, I, loop, opts = {}) {
-    const r = cutAlongLoops(P, I, [loop], opts);
-    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings };
+  // Which way, along the line's frame normal, the material of side 2 (the piece that doesn't hold the line's
+  // forward edges) lies: +1 or -1.
+  function intoSide2(xy) {
+    let area2 = 0; const n = xy.length / 2;
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n; area2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
+    return area2 > 0 ? -1 : 1;
   }
-  /* Cut along several closed lines at once. Side 1 is whatever lies on the left of the lines as they run (the
-     triangles holding the lines' own directed edges); side 2 is the rest, and may come apart into several pieces.
-     A single line splits a part in two; a region's whole outline, all its loops together, splits the region off
-     even where the surface loops back on itself (an arm whose hand rests on the hip). Keys or a plug go on each
-     line, from opts.keys and opts.plugs for one line or opts.perLoop[i] for several. */
-  function cutAlongLoops(P, I, loopsIn, opts = {}) {
+  /* A sunk cut face: the face across a curved cut, pushed into the other piece with a wall down from the line,
+     so the piece the line goes round keeps at least that much thickness right up to its edge (the owner's
+     "impossibly thin walls": a shallow region split off along its outline is a lens that thins to nothing at the
+     rim). The other piece gets the matching recess, the way kit parts seat into one another. Each line point is
+     pushed into the other piece as far as there is solid to hold it with a wall to spare, checked along lines
+     through the model (none where only air lies beyond the line, as under an overhang); the depths are smoothed
+     along the line so the wall changes gently, and the face over the sunk
+     ring is checked the same way. Returns { xy2, h2, depth, max } in the line's frame, or null for no sink. The
+     walls run straight along the line's frame normal: following the other piece's surface was tried and dropped,
+     because on a bumpy line the pushed points crossed each other. */
+  function sunkRing(P, I, F, ring, xy, h, into2, want, wall) {
+    const n = ring.length, g = raysFor(P, I, F), nv = P.length / 3;
+    const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2], oz = F.o[0] * F.n[0] + F.o[1] * F.n[1] + F.o[2] * F.n[2];
+    // straight into the other piece along the frame normal, so the recess walls are parallel and the piece lifts
+    // straight out (walls that followed the other piece's surface crossed each other on bumpy lines)
+    const dir = [0, 0, into2], dirs = []; for (let i = 0; i < n; i++) dirs.push(dir);
+    // how deep each point can go: the sunk point needs a wall of solid beyond it, and must be inside at all
+    const roomAt = (x, y, z) => { const r = solidRuns(g, x + ox + 1.3e-7, y + oy + 0.7e-7), c = z + oz; for (let i = 0; i < r.length; i += 2) if (r[i] - 1e-6 <= c && c <= r[i + 1] + 1e-6) return into2 > 0 ? [r[i + 1] - c, c - r[i]] : [c - r[i], r[i + 1] - c]; return null; };
+    const depth = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      let s = want;
+      for (let tries = 0; tries < 5 && s > 0.02; tries++) {
+        const r = roomAt(xy[2 * i] + s * dirs[i][0], xy[2 * i + 1] + s * dirs[i][1], h[i] + s * dirs[i][2]);
+        if (r && r[0] >= wall && r[1] >= 0.05) break;
+        s /= 2;
+        if (tries === 4) s = 0;
+      }
+      depth[i] = s;
+    }
+    // smoothed along the line: no deeper than its neighbours within a wall's length, then averaged over the same
+    const len = new Float64Array(n); for (let i = 0; i < n; i++) { const j = (i + 1) % n; len[i] = Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1], h[j] - h[i]); }
+    const window = (i, f) => { let acc = f.init, run = 0; for (let k = 0; k <= n / 2; k++) { if (k > 0 && (run += len[(i + k - 1) % n]) > wall) break; acc = f.step(acc, depth[(i + k) % n]); } run = 0; for (let k = 1; k <= n / 2; k++) { if ((run += len[(i + n - k) % n]) > wall) break; acc = f.step(acc, depth[(i + n - k) % n]); } return f.done(acc); };
+    const lows = new Float64Array(n); for (let i = 0; i < n; i++) lows[i] = window(i, { init: Infinity, step: Math.min, done: (a) => a });
+    depth.set(lows);
+    const smooth = new Float64Array(n); for (let i = 0; i < n; i++) smooth[i] = window(i, { init: [0, 0], step: (a, v) => [a[0] + v, a[1] + 1], done: (a) => a[0] / a[1] });
+    let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, smooth[i]);
+    if (max < 0.05) return null;
+    const xy2 = new Float64Array(2 * n), h2 = new Float64Array(n);
+    const build = (scale) => { for (let i = 0; i < n; i++) { const s = smooth[i] * scale; xy2[2 * i] = xy[2 * i] + s * dirs[i][0]; xy2[2 * i + 1] = xy[2 * i + 1] + s * dirs[i][1]; h2[i] = h[i] + s * dirs[i][2]; } };
+    // the face over the sunk ring must have a wall of solid beyond it too (a thin body under a region)
+    for (let scale = 1; scale > 0.1; scale *= 0.5) {
+      build(scale);
+      const H = capHeight(xy2, h2), L = makeLoop(ring, [], xy2), base = { loops: [L], regions: buildRegions([L]) }, rooms = [];
+      for (const q of regionSamples(base, 0, 150)) { const r = roomAt(q.x, q.y, H(q.x, q.y)); rooms.push(r ? r[0] : 0); }
+      rooms.sort((a, b) => a - b);
+      if (!rooms.length || rooms[Math.floor(0.1 * rooms.length)] >= 0.75 * wall) { const d = Array.from(smooth, v => v * scale); return { xy2, h2, depth: d, max: max * scale }; }
+    }
+    return null;
+  }
+  /* Lines cut together must agree: each piece of surface they bound has to lie on one side of every line round
+     it. Side 1 holds every line's forward edges, side 2 the rest (a region and its neighbours; two balls picked
+     together and the bar between them). Returns the loops, turned round where needed, with the side numbers of
+     every triangle; throws where the lines don't free a piece, or can't agree. Called before keys are planned, so
+     the frames the keys are planned in are the frames the cut uses. */
+  function orientLoops(P, I, loopsIn, opts = {}) {
     const loops = loopsIn.map(l => straightLoop(P, I, l));
     if (loops.some(l => !l.closed)) throw new Error('This border doesn’t go all the way round, so it can’t split the part. Pick one that circles a limb or the edge of a sleeve.');
     const nv = P.length / 3, nt = I.length / 3, rings = loops.map(l => l.verts.slice()), L = rings.length;
-    const offs = []; let nn = nv; for (const r of rings) { offs.push(nn); nn += r.length; }
-    const extra = nn, M = extra + 2 * L; // centre points for fans after the copies
     const cutEdge = new Set();
     for (const ring of rings) for (let i = 0; i < ring.length; i++) { const a = ring[i], b = ring[(i + 1) % ring.length]; cutEdge.add(a < b ? a * nv + b : b * nv + a); }
     // neighbours across every edge that isn't on a line
@@ -2449,9 +2504,6 @@ const KMCore = (() => {
     for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const w = want.get(I[3 * t + k] * nv + I[3 * t + (k + 1) % 3]); if (w) sidesOf[w[0]][w[1]] = comp[t]; }
     if (sidesOf.some(s => s[0] < 0 || s[1] < 0)) throw new Error('This border runs along an edge of the surface that isn’t closed. Fill holes in the model panel first.');
     if (sidesOf.some(([a, b]) => a === b)) throw new Error(L > 1 ? (opts.what === 'lines' ? 'Cutting along these lines wouldn’t free a piece yet: the surface still joins up around them. Shift-click another line that goes round the same piece, such as where it touches something else.' : 'Cutting along this region’s outline wouldn’t free it (the surface joins up around it).') : 'Cutting along this border alone wouldn’t split the part in two: the surface joins up around it, as when a hand holds something that touches the body. Click the region beside the line instead, to cut along its whole outline, or shift-click more lines.');
-    // Two sides: side 1 holds every line's forward edges, side 2 the rest, so each piece lies on one side of every
-    // line round it (a region and its neighbours; two balls picked together and the bar between them). Lines whose
-    // forward side lands on side 2 are turned round. Pieces no line touches stay on neither side (loose shells).
     const colour = new Int8Array(nc);
     for (let seed = 0; seed < L; seed++) {
       if (colour[sidesOf[seed][0]] || colour[sidesOf[seed][1]]) continue;
@@ -2465,9 +2517,32 @@ const KMCore = (() => {
         }
       }
     }
-    rings.forEach((ring, li) => { if (colour[sidesOf[li][0]] === 2) ring.reverse(); });
+    // For a region, side 1 is the region. For lines picked by hand, side 1 is the smaller side (less surface), so a
+    // sunk face recesses into the bigger piece and the keys' "solid half" means the bigger piece.
+    if (opts.what !== 'region') {
+      const area = [0, 0, 0];
+      for (let t = 0; t < nt; t++) { const c = colour[comp[t]]; if (!c) continue; const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], d = 3 * I[3 * t + 2]; area[c] += Math.hypot(...cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[d] - P[a], P[d + 1] - P[a + 1], P[d + 2] - P[a + 2]])); }
+      if (area[1] > area[2]) for (let c = 0; c < nc; c++) if (colour[c]) colour[c] = 3 - colour[c];
+    }
+    const out = loops.map((l, li) => (colour[sidesOf[li][0]] === 2 ? { ...l, verts: l.verts.slice().reverse() } : l));
     const side = new Int8Array(nt);
     for (let t = 0; t < nt; t++) side[t] = colour[comp[t]];
+    return { loops: out, side };
+  }
+  function cutAlongLoop(P, I, loop, opts = {}) {
+    const r = cutAlongLoops(P, I, [loop], opts);
+    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings, sinks: r.sinks, sink: r.sinks[0] };
+  }
+  /* Cut along several closed lines at once. Side 1 is whatever lies on the left of the lines as they run (the
+     triangles holding the lines' own directed edges); side 2 is the rest, and may come apart into several pieces.
+     A single line splits a part in two; a region's whole outline, all its loops together, splits the region off
+     even where the surface loops back on itself (an arm whose hand rests on the hip). Keys or a plug go on each
+     line, from opts.keys and opts.plugs for one line or opts.perLoop[i] for several. */
+  function cutAlongLoops(P, I, loopsIn, opts = {}) {
+    const { loops, side } = orientLoops(P, I, loopsIn, opts);
+    const nv = P.length / 3, nt = I.length / 3, rings = loops.map(l => l.verts), L = rings.length;
+    const offs = []; let nn = nv; for (const r of rings) { offs.push(nn); nn += r.length; }
+    const extra = nn, M = extra + 2 * L; // centre points for fans after the copies
     // side 2 gets its own copy of every line's vertices
     const copy = new Map();
     rings.forEach((ring, li) => ring.forEach((v, i) => copy.set(v, offs[li] + i)));
@@ -2510,37 +2585,57 @@ const KMCore = (() => {
       // flattened, the cap is fanned from a centre point instead: a fan only joins line points to the centre.
       let clash = keep.length < n;
       for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) if (surf.has(ek(cap[i + k], cap[i + (k + 1) % 3]))) { clash = true; break; }
-      const per = opts.perLoop ? opts.perLoop[li] || {} : opts;
-      const sec = { loops: [makeLoop(ring, [], xy)] }; sec.regions = buildRegions(sec.loops);
-      const keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(sec, k.x, k.y) === 0);
-      const plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : [];
-      return { ring, n, lf, F, xy, wantCCW, cap, clash, keys, plugs, joined: keys.length + plugs.length, sec, xyOf, step: capStep(xy), H: capHeight(xy, lf.h) };
+      const per = opts.perLoop ? opts.perLoop[li] || {} : opts, into2 = wantCCW ? 1 : -1;
+      // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
+      // keys and its checks then all work on the sunk ring
+      const sunk = opts.sink > 0 ? sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8) : null;
+      const faceOf = (fxy, fh) => { const sec = { loops: [makeLoop(ring, [], fxy)] }; sec.regions = buildRegions(sec.loops); return { xy: fxy, h: fh, sec, step: capStep(fxy), H: capHeight(fxy, fh) }; };
+      const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
+      c.use = (which) => { const f = which === 'sunk' && c.sunkFace ? c.sunkFace : c.plain; Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0 }); c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length; };
+      c.use('sunk');
+      return c;
     });
-    const joined = caps.some(c => c.joined), allKeys = caps.flatMap(c => c.keys), allPlugs = caps.flatMap(c => c.plugs);
+    const joined = caps.some(c => c.joined); // the same whichever face is used: keys sit inside both outlines or neither matters
+    const allKeys = caps.flatMap(c => c.keys), allPlugs = caps.flatMap(c => c.plugs);
     const base1 = tris[1].length, base2 = tris[2].length;
     let pins = [];
     const makeParts = (fan, fine = true) => { // fan: per loop, fan the cap from a centre point; fine: draw caps as grids
       tris[1].length = base1; tris[2].length = base2; pins = [];
       let src = pos;
       caps.forEach((c, li) => {
-        const { ring, n, F, xy, wantCCW, cap } = c;
-        if (c.joined) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys, cfg, surf, ek, c.plugs); src = r.V; pins.push(...r.pins); }
+        const { ring, n, F, xy, wantCCW, cap, sunk } = c;
+        if (c.joined) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys, cfg, surf, ek, c.plugs, sunk); src = r.V; pins.push(...r.pins); }
         else {
-          let flatTris = cap;
           const xyMap = new Map([[extra + 2 * li, null]]);
+          // the new points on the face that follows the line, each with a copy for the other piece
+          const addAt = (x, y, z) => { const q = [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z), v1 = src.length / 3; src.push(q[0], q[1], q[2], q[0], q[1], q[2]); copy.set(v1, v1 + 1); return v1; };
+          const addVertex = (x, y) => addAt(x, y, c.H(x, y));
+          // a sunk face: the line's points pushed into side 2, with a wall from each line edge down to them; the cap
+          // then spans the sunk ring
+          let capRing = ring, lowOf = null;
+          if (sunk) {
+            const low = ring.map((v, i) => { const id = addAt(sunk.xy2[2 * i], sunk.xy2[2 * i + 1], sunk.h2[i]); xyMap.set(id, [sunk.xy2[2 * i], sunk.xy2[2 * i + 1]]); return id; });
+            for (let i = 0; i < n; i++) {
+              const a = ring[i], b = ring[(i + 1) % n], la = low[i], lb = low[(i + 1) % n];
+              tris[1].push(b, a, la, b, la, lb); // against side 1's line edge a -> b, and along the sunk ring's la -> lb
+              tris[2].push(copy.get(b), copy.get(la), copy.get(a), copy.get(b), copy.get(lb), copy.get(la));
+            }
+            lowOf = new Map(ring.map((v, i) => [v, low[i]]));
+            capRing = low;
+          }
+          const xyOfCap = (id) => xyMap.get(id) || c.xyOf(id);
+          let flatTris = lowOf ? cap.map(v => (lowOf.has(v) ? lowOf.get(v) : v)) : cap;
           if (fan[li]) {
-            const c1 = extra + 2 * li, c2 = c1 + 1, [fx, fy] = fanCentre(xy);
-            const fc = [0, 1, 2].map(k => F.o[k] + F.u[k] * fx + F.v[k] * fy);
+            const c1 = extra + 2 * li, c2 = c1 + 1, [fx, fy] = fanCentre(c.xy), fz = sunk ? sunk.h2.reduce((s, v) => s + v, 0) / n : 0;
+            const fc = [0, 1, 2].map(k => F.o[k] + F.u[k] * fx + F.v[k] * fy + F.n[k] * fz);
             for (const cc of [c1, c2]) { src[3 * cc] = fc[0]; src[3 * cc + 1] = fc[1]; src[3 * cc + 2] = fc[2]; }
             xyMap.set(c1, [fx, fy]); copy.set(c1, c2);
             flatTris = [];
-            for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; flatTris.push(c1, b, a); } // runs against side 1's line, like the flat cap
+            for (let i = 0; i < n; i++) { const a = capRing[i], b = capRing[(i + 1) % n]; flatTris.push(c1, b, a); } // runs against side 1's line, like the flat cap
           }
-          // the new points on the face that follows the line, each with a copy for the other piece
-          const addVertex = (x, y) => { const z = c.H(x, y), q = [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z), v1 = src.length / 3; src.push(q[0], q[1], q[2], q[0], q[1], q[2]); copy.set(v1, v1 + 1); return v1; };
           // the grid cap is tried even where the plain cap would be fanned (its band may avoid the surface edge the
           // flat cap doubled); a band edge between two line points that still doubles a surface edge means the plain cap
-          let grid = fine ? gridCap([ring], c.xyOf, c.H, c.step, addVertex, xyMap, wantCCW) : null;
+          let grid = fine ? gridCap([capRing], xyOfCap, c.H, c.step, addVertex, xyMap, wantCCW) : null;
           if (grid) for (let i = 0; grid && i < grid.length; i += 3) for (let k = 0; k < 3; k++) { const a = grid[i + k], b = grid[i + (k + 1) % 3]; if (a < M && b < M && surf.has(ek(a, b))) { grid = null; break; } }
           const capTris = grid || flatTris;
           for (const v of capTris) tris[1].push(v);
@@ -2573,13 +2668,33 @@ const KMCore = (() => {
       }
       return parts;
     };
-    let parts = makeParts(caps.map(c => c.clash));
-    if (!joined && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(c => c.clash), false); // a grid cap didn't seal: plain caps
-    if (!joined && caps.some(c => !c.clash) && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(() => true), false); // a flat cap didn't seal: fan them instead
-    if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // a line rings a dip, so the "piece" would be empty air
-      throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
-    for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
+    const buildParts = () => {
+      let parts = makeParts(caps.map(c => c.clash));
+      if (!joined && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(c => c.clash), false); // a grid cap didn't seal: plain caps
+      if (!joined && caps.some(c => !c.clash) && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(() => true), false); // a flat cap didn't seal: fan them instead
+      if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // a line rings a dip, so the "piece" would be empty air
+        throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
+      for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
+      return parts;
+    };
     const tol = Math.max(1e-4, diag(bounds(P)) * 2e-6);
+    // Sunk faces at both ends of a piece trap it between two recesses (a sleeve sunk into the shoulder and the
+    // cuff), so when the pieces lock the longest line alone is sunk, then none, before the refusal stands.
+    const sinkPlans = [caps.map(c => (c.sunkFace ? 'sunk' : 'plain'))];
+    if (caps.filter(c => c.sunkFace).length > 1) { const longest = caps.reduce((b, c) => (c.sunkFace && (b < 0 || c.xy.length > caps[b].xy.length) ? caps.indexOf(c) : b), -1); sinkPlans.push(caps.map((c, i) => (i === longest ? 'sunk' : 'plain'))); }
+    if (caps.some(c => c.sunkFace)) sinkPlans.push(caps.map(() => 'plain'));
+    let parts, warnings;
+    for (let pi = 0; pi < sinkPlans.length; pi++) {
+      const last = pi === sinkPlans.length - 1;
+      caps.forEach((c, i) => c.use(sinkPlans[pi][i]));
+      parts = buildParts();
+      try { warnings = checkPieces(parts, last); break; } catch (e) { if (last || e.code !== 'locked') throw e; }
+    }
+    parts.sort((x, y) => y.volume - x.volume);
+    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings, sinks: caps.map(c => c.sink) };
+    // The printability rules on the pieces: a refusal, or with opts.force (the owner's "cut anyway") a warning on the
+    // result. Thrown (never a warning) while a sink plan can still be retried.
+    function checkPieces(parts, canForce) {
     // the two pieces each line separates: side 1, and the piece of side 2 holding that line's copied vertices
     const keyOf = (x, y, z) => `${x},${y},${z}`;
     const sets = parts.map(q => { const s = new Set(); for (let i = 0; i < q.positions.length; i += 3) s.add(keyOf(q.positions[i], q.positions[i + 1], q.positions[i + 2])); return s; });
@@ -2588,8 +2703,7 @@ const KMCore = (() => {
       const mine = parts.find((q, i) => q.first && sets[i].has(k)), other = parts.find((q, i) => !q.first && sets[i].has(k));
       return [mine || parts.find(q => q.first), other || parts.find(q => !q.first)];
     };
-    // The printability rules: a refusal, or with opts.force (the owner's "cut anyway") a warning on the result
-    const warnings = [], refuse = (message, code) => { if (opts.force) { if (!warnings.some(w => w.code === code)) warnings.push({ code, message }); return; } throw guardError(message, code); };
+    const warnings = [], refuse = (message, code) => { if (opts.force && canForce) { if (!warnings.some(w => w.code === code)) warnings.push({ code, message }); return; } throw guardError(message, code); };
     for (const c of caps) {
       const [p1, p2] = pair(c), F = c.F;
       if (opts.minThickness > 0) { // neither piece may be too thin to print where they meet
@@ -2609,18 +2723,19 @@ const KMCore = (() => {
           : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked');
       }
     }
-    parts.sort((x, y) => y.volume - x.volume);
-    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings };
+    return warnings;
+    }
   }
   // The keyed cap for a curved cut: the face that follows the line (capHeight), with a hole per key, made once and
   // shared by both pieces so they meet exactly. Round each key's socket outline the face is the same on both sides;
   // inside it, the peg's piece has a narrow ring of face out to the peg (the fit gap) and then the peg, and the
   // socket's piece has the socket. Keys are straight, along the plane's normal, sized as keyLevels describes.
-  function curvedLoopCap(pos, tris, ring, copy, xy, hts, F, wantCCW1, keys, cfg, surf, ek, plugs = []) {
+  function curvedLoopCap(pos, tris, ring, copy, xy0, hts0, F, wantCCW1, keys, cfg, surf, ek, plugs = [], sunk = null) {
     const V = Array.from(pos), n = ring.length;
     const addV = (q) => { V.push(q[0], q[1], q[2]); return V.length / 3 - 1; };
     const at = (x, y, z) => [F.o[0] + F.u[0] * x + F.v[0] * y + F.n[0] * z, F.o[1] + F.u[1] * x + F.v[1] * y + F.n[1] * z, F.o[2] + F.u[2] * x + F.v[2] * y + F.n[2] * z];
     const posOf = (i) => [V[3 * i], V[3 * i + 1], V[3 * i + 2]];
+    const xy = sunk ? sunk.xy2 : xy0, hts = sunk ? sunk.h2 : hts0; // on a sunk face everything sits on the sunk ring
     const H = capHeight(xy, hts);
     const sec = { loops: [makeLoop(ring, [], xy)] }; sec.regions = buildRegions(sec.loops);
     const sgOf = (s) => ((s === 1 ? wantCCW1 : !wantCCW1) ? -1 : 1); // which way each piece's material lies
@@ -2634,9 +2749,21 @@ const KMCore = (() => {
       if (Math.abs(full - kept) > Math.max(0.01 * kept, 0.05)) throw new Error('This line crosses over itself when flattened, so keys can’t sit on it.');
     }
     // the shared face: the line, with each key's socket outline as a hole
-    const flat = [], ids = [], holes = [], rings = [ring], ringXY = new Map(), other = new Map();
-    for (let i = 0; i < n; i++) { ringXY.set(ring[i], [xy[2 * i], xy[2 * i + 1]]); other.set(ring[i], copy.get(ring[i])); }
-    for (const q of keep) { ids.push(ring[q]); flat.push(xy[2 * q], xy[2 * q + 1]); }
+    const flat = [], ids = [], holes = [], ringXY = new Map(), other = new Map();
+    for (let i = 0; i < n; i++) { ringXY.set(ring[i], [xy0[2 * i], xy0[2 * i + 1]]); other.set(ring[i], copy.get(ring[i])); }
+    // a sunk face: the line's points pushed into side 2, with a wall from each line edge down to them
+    let capRing = ring;
+    if (sunk) {
+      const low = ring.map((v, i) => { const q = at(xy[2 * i], xy[2 * i + 1], hts[i]), v1 = addV(q), v2 = addV(q); other.set(v1, v2); ringXY.set(v1, [xy[2 * i], xy[2 * i + 1]]); return v1; });
+      for (let i = 0; i < n; i++) {
+        const a = ring[i], b = ring[(i + 1) % n], la = low[i], lb = low[(i + 1) % n];
+        tris[1].push(b, a, la, b, la, lb);
+        tris[2].push(other.get(b), other.get(la), other.get(a), other.get(b), other.get(lb), other.get(la));
+      }
+      capRing = low;
+    }
+    const rings = [capRing];
+    for (const q of keep) { ids.push(capRing[q]); flat.push(xy[2 * q], xy[2 * q + 1]); }
     // every key or plug as four outlines: the socket's mouth and the peg's base on the face, the peg's end and the
     // socket's floor; with its length and each socket's depth
     const items = keys.map(k => {
@@ -2731,7 +2858,7 @@ const KMCore = (() => {
     const loops = groupLoops(P, I, seg, groups), one = groups.length === 1;
     if (!loops.length) throw new Error(one ? 'This region covers the whole surface, so there is nothing to split it from.' : 'These regions cover the whole surface, so there is nothing to split them from.');
     if (loops.some(l => !l.closed)) throw new Error(`${one ? 'This region’s' : 'These regions’'} outline pinches to a point somewhere, so it can’t be cut along cleanly. Try a different fold angle.`);
-    const r = cutAlongLoops(P, I, loops, opts);
+    const r = cutAlongLoops(P, I, loops, { ...opts, what: 'region' });
     r.parts = [...r.parts.filter(q => q.first), ...r.parts.filter(q => !q.first)]; // the regions' own piece (or pieces, when they don't touch) first
     for (const q of r.parts) delete q.first;
     return { ...r, loops: loops.length };
@@ -3624,7 +3751,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };

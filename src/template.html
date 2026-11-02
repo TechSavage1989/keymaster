@@ -278,7 +278,9 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .status svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
 .status.ok { color: var(--ok); }
 .status.warn { color: var(--warn); }
-.btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; align-items: center; }
+.inline-num { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.inline-num input { width: 52px; }
 .status + .btn { margin-top: 8px; }
 .cut-action { display: grid; gap: 8px; position: sticky; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -6px 14px -10px rgba(0,0,0,.25); }
 .btn.cut { min-height: 42px; font-size: 15px; }
@@ -455,7 +457,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <div class="rp-head"><strong>Surface regions</strong><output id="regionsCount"></output></div>
         <label class="slider"><span class="lbl">Split at folds over</span><input type="range" id="regionsAngle" min="5" max="45" step="5" value="15" aria-label="Split the surface where it folds inward more sharply than this"><output id="regionsAngleOut">15°</output></label>
         <p class="muted small">Colours show the surface’s parts, split where it folds inward, like ZBrush polygroups.</p>
-        <div class="btn-row"><button class="btn small" id="drawLineBtn" aria-pressed="false" title="Click points on the part to draw your own cut line along the surface">Draw a cut line</button></div>
+        <div class="btn-row"><button class="btn small" id="drawLineBtn" aria-pressed="false" title="Click points on the part to draw your own cut line along the surface">Draw a cut line</button><label class="inline-num" title="Push the cut face this far into the other piece, with a wall down from the line, so the piece keeps its thickness to the edge. 0 turns it off."><span class="lbl">Sink face</span><input type="number" id="sinkDepth" min="0" step="0.2" value="1" aria-label="Sink the cut face into the other piece by this much"><span class="unit">mm</span></label></div>
         <div id="cutLineInfo" class="cut-line-info"></div>
       </div>
       <p class="hint" id="hint" hidden></p>
