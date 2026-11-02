@@ -406,7 +406,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.16, build accbab. After an update, refresh the page and check this changes.">v1.16 · accbab</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.17, build 4cf149. After an update, refresh the page and check this changes.">v1.17 · 4cf149</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -2613,12 +2613,13 @@ const KMCore = (() => {
     let clash = keep.length < n;
     for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) if (surf.has(ek(cap[i + k], cap[i + (k + 1) % 3]))) { clash = true; break; }
     const cfg = opts.cfg || { type: 'none' };
-    const keys = cfg.type === 'none' ? [] : (opts.keys || []).filter(k => regionAt({ loops: [makeLoop(ring, [], xy)], regions: buildRegions([makeLoop(ring, [], xy)]) }, k.x, k.y) === 0);
+    const keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (opts.keys || []).filter(k => regionAt({ loops: [makeLoop(ring, [], xy)], regions: buildRegions([makeLoop(ring, [], xy)]) }, k.x, k.y) === 0);
+    const plugs = cfg.type === 'plug' ? (opts.plugs || []).filter(q => q.ok) : [], joined = keys.length + plugs.length;
     let V = null, pins = [];
     const flatCap = cap.slice(), base1 = tris[1].length, base2 = tris[2].length;
     const makeParts = (fan) => {
       tris[1].length = base1; tris[2].length = base2;
-      if (keys.length) ({ V, pins } = curvedLoopCap(pos, tris, ring, copy, xy, lf.h, F, wantCCW, keys, cfg, surf, ek));
+      if (keys.length || plugs.length) ({ V, pins } = curvedLoopCap(pos, tris, ring, copy, xy, lf.h, F, wantCCW, keys, cfg, surf, ek, plugs));
       else if (fan) {
         const c1 = nv + n, c2 = nv + n + 1, [fx, fy] = fanCentre(xy);
         const fc = [0, 1, 2].map(k => F.o[k] + F.u[k] * fx + F.v[k] * fy);
@@ -2654,7 +2655,7 @@ const KMCore = (() => {
       return parts;
     };
     let parts = makeParts(clash);
-    if (!keys.length && !clash && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(true); // the flat cap didn't seal: fan it instead
+    if (!joined && !clash && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(true); // the flat cap didn't seal: fan it instead
     if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // the line rings a dip, so the "piece" would be empty air
       throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
     for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
@@ -2671,8 +2672,8 @@ const KMCore = (() => {
       }
     }
     const mid = parts.map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
-    if (lockedPairs(parts, F.n, tol, { anyDirection: !keys.length, distance: pullDistance(cfg, keys), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
-      throw guardError(keys.length ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
+    if (lockedPairs(parts, F.n, tol, { anyDirection: !joined, distance: pullDistance(cfg, keys, plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
+      throw guardError(joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
         : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked');
     }
     parts.sort((x, y) => y.volume - x.volume);
@@ -2682,7 +2683,7 @@ const KMCore = (() => {
   // shared by both pieces so they meet exactly. Round each key's socket outline the face is the same on both sides;
   // inside it, the peg's piece has a narrow ring of face out to the peg (the fit gap) and then the peg, and the
   // socket's piece has the socket. Keys are straight, along the plane's normal, sized as keyLevels describes.
-  function curvedLoopCap(pos, tris, ring, copy, xy, hts, F, wantCCW1, keys, cfg, surf, ek) {
+  function curvedLoopCap(pos, tris, ring, copy, xy, hts, F, wantCCW1, keys, cfg, surf, ek, plugs = []) {
     const V = Array.from(pos), n = ring.length;
     const addV = (q) => { V.push(q[0], q[1], q[2]); return V.length / 3 - 1; };
     const at = (x, y, z) => [F.o[0] + F.u[0] * x + F.v[0] * y + F.n[0] * z, F.o[1] + F.u[1] * x + F.v[1] * y + F.n[1] * z, F.o[2] + F.u[2] * x + F.v[2] * y + F.n[2] * z];
@@ -2703,12 +2704,16 @@ const KMCore = (() => {
     const flat = [], ids = [], holes = [], rings = [ring], ringXY = new Map(), other = new Map();
     for (let i = 0; i < n; i++) { ringXY.set(ring[i], [xy[2 * i], xy[2 * i + 1]]); other.set(ring[i], copy.get(ring[i])); }
     for (const q of keep) { ids.push(ring[q]); flat.push(xy[2 * q], xy[2 * q + 1]); }
-    for (const k of keys) {
+    // every key or plug as four outlines: the socket's mouth and the peg's base on the face, the peg's end and the
+    // socket's floor; with its length and each socket's depth
+    const items = keys.map(k => {
       k.cfg = keyCfg(cfg, k); k.spec = keyGeometrySpec(k.cfg); k.angle = keyAngle(sec, 0, k.cfg);
-      const ks = k.spec, out = keyProfile(ks.shape, ks.r, ks.cs, k.angle, ks.res), inn = keyProfile(ks.shape, ks.r, 0, k.angle, ks.res);
-      const z = (px, py) => H(k.x + px, k.y + py);
-      k.sock = out.map(([px, py]) => ({ x: k.x + px, y: k.y + py, z: z(px, py) }));
-      k.peg = inn.map(([px, py]) => ({ x: k.x + px, y: k.y + py, z: z(px, py) }));
+      const ks = k.spec, at2 = (prof) => prof.map(([px, py]) => [k.x + px, k.y + py]);
+      return Object.assign(k, { mouth2: at2(keyProfile(ks.shape, ks.r, ks.cs, k.angle, ks.res)), base2: at2(keyProfile(ks.shape, ks.r, 0, k.angle, ks.res)), end2: at2(keyProfile(ks.shape, ks.r * ks.taper, 0, k.angle, ks.res)), floor2: at2(keyProfile(ks.shape, ks.r * ks.sockTip, ks.cs, k.angle, ks.res)), len: k.cfg.length, gap: ks.cs, depthOn: (sg) => (ks.sockets.find(q => q.side === sg) || { depth: k.cfg.length + ks.ca }).depth });
+    }).concat(plugs.filter(q => q.ok).map(q => ({ x: q.x, y: q.y, plug: true, mouth2: q.mouth, base2: q.base, end2: q.top, floor2: q.floor, len: q.depth, gap: cfg.clearance, depthOn: () => q.depth + q.ca })));
+    for (const k of items) {
+      k.sock = k.mouth2.map(([x, y]) => ({ x, y, z: H(x, y) }));
+      k.peg = k.base2.map(([x, y]) => ({ x, y, z: H(x, y) }));
       let lo = H(k.x, k.y), hi = lo;
       for (const q of k.sock.concat(k.peg)) { lo = Math.min(lo, q.z); hi = Math.max(hi, q.z); }
       k.lo = lo; k.hi = hi;
@@ -2739,32 +2744,28 @@ const KMCore = (() => {
         if (nn[0] * e[0] + nn[1] * e[1] + nn[2] * e[2] < 0) T.push(a, c, b); else T.push(a, b, c);
       };
       const face = [-sg * nrm[0], -sg * nrm[1], -sg * nrm[2]]; // the face looks away from this piece's material
-      for (const k of keys) {
-        const ks = k.spec, kc = k.cfg, sock = k.ids[s];
-        // a tube from a rim on the face to a flat end at height z, pointing along dir
-        const tube = (rim, endProf, z, dir, role) => {
-          const end = endProf.map(([px, py]) => addV(at(k.x + px, k.y + py, z))), centre = addV(at(k.x, k.y, z)), axis0 = at(k.x, k.y, 0), m = rim.length;
+      for (const k of items) {
+        const sock = k.ids[s];
+        // a tube from a rim on the face to a flat end at height z: walls that face along their own edges (out of a
+        // peg or plug, into a socket), so any outline works, and the end triangulated flat
+        const tube = (rim, rimXY, endXY, z, dir, role) => {
+          const end = endXY.map(([x, y]) => addV(at(x, y, z))), m = rim.length, ccw = outlineArea(rimXY) > 0, w = role === 'peg' ? 1 : -1;
           for (let i = 0; i < m; i++) {
-            const a = rim[i], b = rim[(i + 1) % m], c = end[(i + 1) % m], d = end[i];
-            const A = posOf(a), C = posOf(c), mid = [(A[0] + C[0]) / 2, (A[1] + C[1]) / 2, (A[2] + C[2]) / 2];
-            const along = (mid[0] - axis0[0]) * nrm[0] + (mid[1] - axis0[1]) * nrm[1] + (mid[2] - axis0[2]) * nrm[2];
-            let rx = mid[0] - axis0[0] - nrm[0] * along, ry = mid[1] - axis0[1] - nrm[1] * along, rz = mid[2] - axis0[2] - nrm[2] * along;
-            if (role === 'socket') { rx = -rx; ry = -ry; rz = -rz; }
-            pushOriented(a, b, c, [rx, ry, rz]); pushOriented(a, c, d, [rx, ry, rz]);
-            const e = role === 'peg' ? [nrm[0] * dir, nrm[1] * dir, nrm[2] * dir] : [-nrm[0] * dir, -nrm[1] * dir, -nrm[2] * dir];
-            pushOriented(centre, end[i], end[(i + 1) % m], e);
+            const j = (i + 1) % m, dx = rimXY[j][0] - rimXY[i][0], dy = rimXY[j][1] - rimXY[i][1];
+            const ox = (ccw ? dy : -dy) * w, oy = (ccw ? -dx : dx) * w, e = [F.u[0] * ox + F.v[0] * oy, F.u[1] * ox + F.v[1] * oy, F.u[2] * ox + F.v[2] * oy];
+            pushOriented(rim[i], rim[j], end[j], e); pushOriented(rim[i], end[j], end[i], e);
           }
+          T.push(...endCap(end, endXY, (role === 'peg' ? dir : -dir) > 0));
         };
-        if (cfg.type === 'peg' && sg === pegSide) {
+        if ((cfg.type === 'peg' || k.plug) && sg === pegSide) {
           // the fit gap: a ring of face from the socket outline in to the peg (none with no gap), then the peg itself
-          const peg = ks.cs > 1e-9 ? k.peg.map(q => addV(at(q.x, q.y, q.z))) : sock, m = peg.length;
+          const peg = k.gap > 1e-9 ? k.peg.map(q => addV(at(q.x, q.y, q.z))) : sock, m = peg.length;
           if (peg !== sock) for (let i = 0; i < m; i++) { const j = (i + 1) % m; pushOriented(sock[i], sock[j], peg[j], face); pushOriented(sock[i], peg[j], peg[i], face); }
-          const S = -sg, tip = (S > 0 ? k.hi : k.lo) + S * kc.length;
-          tube(peg, keyProfile(ks.shape, ks.r * ks.taper, 0, k.angle, ks.res), tip, S, 'peg');
+          const S = -sg, tip = (S > 0 ? k.hi : k.lo) + S * k.len;
+          tube(peg, k.gap > 1e-9 ? k.base2 : k.mouth2, k.end2, tip, S, 'peg');
         } else {
-          const sk = ks.sockets.find(q => q.side === sg) || { depth: kc.length + ks.ca };
-          const floor = (sg > 0 ? k.hi : k.lo) + sg * sk.depth;
-          tube(sock, keyProfile(ks.shape, ks.r * ks.sockTip, ks.cs, k.angle, ks.res), floor, sg, 'socket');
+          const floor = (sg > 0 ? k.hi : k.lo) + sg * k.depthOn(sg);
+          tube(sock, k.mouth2, k.floor2, floor, sg, 'socket');
         }
       }
     }
@@ -2970,6 +2971,213 @@ const KMCore = (() => {
   }
 
 
+  /* ---------- plugs ----------
+     A plug is the cut face itself, pulled in from the edge by a wall, standing out from one piece into a matching
+     pocket in the other: one per area, the way professional kits join large parts. Its outline is found on a fine
+     grid: how far each point is from the area's edge, keep what's at least a wall (and the gap) in, round off narrow
+     necks and sharp corners so no wall goes thin, trace it and smooth it. The top and the pocket are offsets of
+     that outline, point for point, so all four rings pair up. */
+  // squared distances, in cells, from every cell to the nearest site (cells holding 0); others hold 1e20
+  function dt1(f, n, d, v, z) {
+    let k = 0; v[0] = 0; z[0] = -1e30; z[1] = 1e30;
+    for (let q = 1; q < n; q++) {
+      let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+      k++; v[k] = q; z[k] = s; z[k + 1] = 1e30;
+    }
+    k = 0;
+    for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) * (q - v[k]) + f[v[k]]; }
+  }
+  function distanceField(site, nx, ny) {
+    const g = new Float64Array(nx * ny), L = Math.max(nx, ny), f = new Float64Array(L), d = new Float64Array(L), v = new Int32Array(L), z = new Float64Array(L + 1);
+    for (let i = 0; i < nx * ny; i++) g[i] = site[i] ? 0 : 1e20;
+    for (let x = 0; x < nx; x++) { for (let y = 0; y < ny; y++) f[y] = g[x * ny + y]; dt1(f, ny, d, v, z); for (let y = 0; y < ny; y++) g[x * ny + y] = d[y]; }
+    for (let y = 0; y < ny; y++) { for (let x = 0; x < nx; x++) f[x] = g[x * ny + y]; dt1(f, nx, d, v, z); for (let x = 0; x < nx; x++) g[x * ny + y] = Math.sqrt(d[x]); }
+    return g;
+  }
+  // the zero line of a field sampled at cell centres (positive inside), as closed loops of points
+  function contourLoops(f, nx, ny, x0, y0, h) {
+    const pt = new Map(), next = new Map();
+    const P = (i, j) => [x0 + (i + 0.5) * h, y0 + (j + 0.5) * h];
+    const edgePoint = (i0, j0, i1, j1) => { // where the zero crossing sits on the edge between two cell centres
+      const key = i0 === i1 ? `v${i0},${Math.min(j0, j1)}` : `h${Math.min(i0, i1)},${j0}`;
+      if (!pt.has(key)) { const a = f[i0 * ny + j0], b = f[i1 * ny + j1], t = a / (a - b), p = P(i0, j0), q = P(i1, j1); pt.set(key, [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]); }
+      return key;
+    };
+    for (let i = 0; i + 1 < nx; i++) for (let j = 0; j + 1 < ny; j++) {
+      const a = f[i * ny + j] > 0, b = f[(i + 1) * ny + j] > 0, c = f[(i + 1) * ny + j + 1] > 0, d = f[i * ny + j + 1] > 0;
+      const code = (a ? 1 : 0) | (b ? 2 : 0) | (c ? 4 : 0) | (d ? 8 : 0);
+      if (code === 0 || code === 15) continue;
+      const S = () => edgePoint(i, j, i + 1, j), E = () => edgePoint(i + 1, j, i + 1, j + 1), N = () => edgePoint(i, j + 1, i + 1, j + 1), W = () => edgePoint(i, j, i, j + 1);
+      // segments run with the inside on their left (corners a, b, c, d go anticlockwise from the lower left)
+      const seg = (p, q) => next.set(p, q);
+      switch (code) {
+        case 1: seg(W(), S()); break; case 2: seg(S(), E()); break; case 3: seg(W(), E()); break;
+        case 4: seg(E(), N()); break; case 6: seg(S(), N()); break; case 7: seg(W(), N()); break;
+        case 8: seg(N(), W()); break; case 9: seg(N(), S()); break; case 11: seg(N(), E()); break;
+        case 12: seg(E(), W()); break; case 13: seg(E(), S()); break; case 14: seg(S(), W()); break;
+        case 5: { const mid = a + c > 0 && (f[i * ny + j] + f[(i + 1) * ny + j] + f[(i + 1) * ny + j + 1] + f[i * ny + j + 1]) > 0; if (mid) { seg(W(), N()); seg(E(), S()); } else { seg(W(), S()); seg(E(), N()); } break; }
+        case 10: { const mid = (f[i * ny + j] + f[(i + 1) * ny + j] + f[(i + 1) * ny + j + 1] + f[i * ny + j + 1]) > 0; if (mid) { seg(S(), W()); seg(N(), E()); } else { seg(S(), E()); seg(N(), W()); } break; }
+      }
+    }
+    const loops = [], used = new Set();
+    for (const start of next.keys()) {
+      if (used.has(start)) continue;
+      const loop = []; let k = start;
+      while (k !== undefined && !used.has(k)) { used.add(k); loop.push(pt.get(k)); k = next.get(k); }
+      if (loop.length >= 3 && k === start) loops.push(loop);
+    }
+    return loops;
+  }
+  const outlineArea = (pts) => { let s = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; s += a[0] * b[1] - b[0] * a[1]; } return s / 2; };
+  // points spread evenly along a closed outline, then smoothed a little to take the grid's stair-steps out
+  function evenRing(pts, n) {
+    const L = [0]; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; L.push(L[i] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+    const per = L[pts.length], out = [];
+    for (let k = 0, i = 0; k < n; k++) {
+      const s = (k / n) * per; while (L[i + 1] < s) i++;
+      const a = pts[i], b = pts[(i + 1) % pts.length], t = (s - L[i]) / ((L[i + 1] - L[i]) || 1);
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+    }
+    for (let pass = 0; pass < 2; pass++) { const c = out.map(p => [p[0], p[1]]); for (let i = 0; i < n; i++) { const a = c[(i + n - 1) % n], b = c[(i + 1) % n]; out[i] = [c[i][0] * 0.5 + (a[0] + b[0]) * 0.25, c[i][1] * 0.5 + (a[1] + b[1]) * 0.25]; } }
+    return out;
+  }
+  // an anticlockwise outline moved out (d > 0) or in (d < 0) by d at right angles, point for point
+  function offsetRing(pts, d) {
+    const n = pts.length, out = [];
+    for (let i = 0; i < n; i++) {
+      const a = pts[(i + n - 1) % n], b = pts[i], c = pts[(i + 1) % n];
+      let ex = b[0] - a[0], ey = b[1] - a[1], l = Math.hypot(ex, ey) || 1; const n1 = [ey / l, -ex / l];
+      ex = c[0] - b[0]; ey = c[1] - b[1]; l = Math.hypot(ex, ey) || 1; const n2 = [ey / l, -ex / l];
+      let bx = n1[0] + n2[0], by = n1[1] + n2[1]; const bl = Math.hypot(bx, by) || 1; bx /= bl; by /= bl;
+      const s = d / Math.max(0.5, bx * n1[0] + by * n1[1]);
+      out.push([b[0] + bx * s, b[1] + by * s]);
+    }
+    return out;
+  }
+  // A flat end (a plug's top, a pocket's floor) as triangles over vertex ids, all facing +n (up) or -n. The facing
+  // is set for the whole outline at once: earcut leaves slivers where points line up, and a sliver's own normal
+  // can't be trusted.
+  function endCap(ids, pts, up) {
+    const flat = flatOf(pts), loc = earcut(flat, []), out = [];
+    let sum = 0; for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
+    const flip = up ? sum < 0 : sum > 0;
+    for (let i = 0; i < loc.length; i += 3) { if (flip) out.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]); else out.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]); }
+    return out;
+  }
+  const flatOf = (pts) => { const o = new Float64Array(pts.length * 2); pts.forEach((p, i) => { o[2 * i] = p[0]; o[2 * i + 1] = p[1]; }); return o; };
+  const ringOk = (pts) => outlineArea(pts) > 0 && !findSelfCrossings(flatOf(pts)).length;
+  // The plug's outline for one area, before any slope or gap: at least `inset` in from the edge everywhere, with
+  // narrow parts and corners rounded to radius `round`. Returns { ring (anticlockwise), x, y (its deepest point),
+  // inradius } or { reason }.
+  function plugShape(sec, ri, inset, round) {
+    const reg = sec.regions[ri];
+    if (reg.holes.length || (reg.islands && reg.islands.length)) return { reason: 'Area has a hole through it' };
+    const xy = sec.loops[reg.outer].xy, [bx0, by0, bx1, by1] = reg.bbox;
+    const h = Math.max(Math.max(bx1 - bx0, by1 - by0) / 160, 0.02), pad = 3;
+    const nx = Math.ceil((bx1 - bx0) / h) + 2 * pad, ny = Math.ceil((by1 - by0) / h) + 2 * pad, x0 = bx0 - pad * h, y0 = by0 - pad * h;
+    // which cells are inside the area: a scanline fill against its outline
+    const inside = new Uint8Array(nx * ny), nr = xy.length / 2;
+    for (let j = 0; j < ny; j++) {
+      const y = y0 + (j + 0.5) * h, xs = [];
+      for (let i = 0, k = nr - 1; i < nr; k = i++) { const ay = xy[2 * k + 1], by = xy[2 * i + 1]; if ((ay > y) !== (by > y)) xs.push(xy[2 * k] + (y - ay) / (by - ay) * (xy[2 * i] - xy[2 * k])); }
+      xs.sort((a, b) => a - b);
+      for (let s = 0; s + 1 < xs.length; s += 2) for (let i = Math.max(0, Math.ceil((xs[s] - x0) / h - 0.5)); i < nx && x0 + (i + 0.5) * h <= xs[s + 1]; i++) inside[i * ny + j] = 1;
+    }
+    const D = distanceField(inside.map(v => 1 - v), nx, ny); // cells from the edge (to the nearest outside cell)
+    const deep = inset / h + 0.5 + round / h, core = new Uint8Array(nx * ny);
+    let any = false;
+    for (let i = 0; i < nx * ny; i++) if (inside[i] && D[i] >= deep) { core[i] = 1; any = true; }
+    if (!any) return { reason: 'Area too small for a plug' };
+    const E = distanceField(core, nx, ny); // cells from the core; the plug is the core grown back by `round`
+    const r = round / h, plug = new Uint8Array(nx * ny);
+    for (let i = 0; i < nx * ny; i++) if (E[i] <= r) plug[i] = 1;
+    // keep the biggest connected piece
+    const comp = new Int32Array(nx * ny).fill(-1), sizes = [];
+    for (let s = 0; s < nx * ny; s++) {
+      if (!plug[s] || comp[s] >= 0) continue;
+      const id = sizes.length, st = [s]; comp[s] = id; let cnt = 0;
+      while (st.length) { const c = st.pop(); cnt++; const i = Math.floor(c / ny), j = c % ny; for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) { if (a < 0 || b < 0 || a >= nx || b >= ny) continue; const q = a * ny + b; if (plug[q] && comp[q] < 0) { comp[q] = id; st.push(q); } } }
+      sizes.push(cnt);
+    }
+    const best = sizes.indexOf(Math.max(...sizes));
+    const f = new Float64Array(nx * ny);
+    let deepest = -1, dx = 0, dy = 0;
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+      const c = i * ny + j;
+      f[c] = comp[c] === best ? r - E[c] : -Math.max(0.5, E[c] - r);
+      if (comp[c] === best && D[c] > deepest) { deepest = D[c]; dx = x0 + (i + 0.5) * h; dy = y0 + (j + 0.5) * h; }
+    }
+    const loops = contourLoops(f, nx, ny, x0, y0, h);
+    if (!loops.length) return { reason: 'Area too small for a plug' };
+    let outer = loops[0]; for (const L of loops) if (Math.abs(outlineArea(L)) > Math.abs(outlineArea(outer))) outer = L;
+    if (outlineArea(outer) < 0) outer.reverse();
+    let per = 0; for (let i = 0; i < outer.length; i++) { const a = outer[i], b = outer[(i + 1) % outer.length]; per += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+    const ring = evenRing(outer, Math.max(24, Math.min(360, Math.round(per / Math.max(h * 1.5, 0.15)))));
+    return { ring, x: dx, y: dy, inradius: Math.max(0, (deepest - 0.5) * h - inset), h };
+  }
+  /* The plugs for a cut, one per area that's cut. Depth is as deep as fits, up to half the plug's narrower width
+     (2 to 10 mm), or the depth set; the pocket is checked along lines through the model so it never breaks out, and
+     a shallower plug is used where the other piece is thin. The sides slope by cfg.plugSlope degrees (5 by
+     default) so it seats easily, and the pocket follows the slope with the fit gap held at right angles to it.
+     Returns [{ region, ok, reason, x, y, base, top, mouth, floor, depth, side }], side being the pocket's side. */
+  function planPlugs(an, cfg, skip) {
+    const out = [];
+    if (cfg.type !== 'plug' || !an || an.base.error) return out;
+    const sec = an.base, m = cfg.margin, c = cfg.clearance, ca = c + 0.1, floorT = Math.max(0.8, m * 0.75);
+    const tanS = Math.tan((Math.max(0, Math.min(30, cfg.plugSlope === undefined ? 5 : cfg.plugSlope)) * Math.PI) / 180), gs = c * Math.sqrt(1 + tanS * tanS);
+    const S = cfg.pegSide === 'above' ? -1 : +1, round = Math.max(1, m);
+    const src = an._src, F = an.frame, H = an.curved ? an.curved.heightAt : () => 0;
+    const g = src ? raysFor(src.P, src.I, F) : null;
+    const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2], oz = F.o[0] * F.n[0] + F.o[1] * F.n[1] + F.o[2] * F.n[2];
+    // how far solid runs from the face at (x, y) into the pocket's side, past `level` (-Infinity: none there at all)
+    const past = (x, y, level) => {
+      if (!g) return Infinity;
+      const r = solidRuns(g, x + ox + 1.3e-7, y + oy + 0.7e-7), cz = H(x, y) + oz + S * 1e-4;
+      for (let i = 0; i < r.length; i += 2) if (r[i] <= cz && cz <= r[i + 1]) return S > 0 ? r[i + 1] - oz - level : level - (r[i] - oz);
+      return -Infinity;
+    };
+    // one try at a plug pulled in by `inset`: its outline and how deep its pocket can go
+    const attempt = (ri, inset) => {
+      const sh = plugShape(sec, ri, inset, round);
+      if (sh.reason) return sh;
+      const base = sh.ring, mouth = offsetRing(base, gs);
+      let lo = Infinity, hi = -Infinity;
+      for (const q of mouth) { const z = H(q[0], q[1]); lo = Math.min(lo, z); hi = Math.max(hi, z); }
+      const from = S > 0 ? hi : lo;
+      // the deepest the pocket can go: solid past its floor everywhere inside it, and solid round its walls to the floor
+      let room = Infinity;
+      const xs = base.map(q => q[0]), ys = base.map(q => q[1]), qx0 = Math.min(...xs), qx1 = Math.max(...xs), qy0 = Math.min(...ys), qy1 = Math.max(...ys);
+      const step = Math.max(sh.h * 2, Math.sqrt(((qx1 - qx0) * (qy1 - qy0)) / 60)), fb = flatOf(base), inner = [[sh.x, sh.y]];
+      for (let x = qx0 + step / 2; x < qx1; x += step) for (let y = qy0 + step / 2; y < qy1; y += step) if (pointInRing(fb, x, y)) inner.push([x, y]);
+      for (const [x, y] of inner) room = Math.min(room, past(x, y, from) - ca - floorT);
+      const band = offsetRing(base, gs + 0.75 * m), every = Math.max(1, Math.floor(band.length / 48));
+      for (let i = 0; i < band.length; i += every) room = Math.min(room, past(band[i][0], band[i][1], from) - ca);
+      const want = cfg.plugDepthMode === 'set' && cfg.plugDepth > 0 ? cfg.plugDepth : Math.max(2, Math.min(10, sh.inradius));
+      return { ...sh, base, mouth, room, want, depth: Math.min(want, room) };
+    };
+    for (const ri of shownRegions(sec.regions)) {
+      if (skip && skip.has(ri)) continue;
+      if (sec.regions[ri].nested) continue;
+      // A plug that fills the face can only be shallow where the other piece thins towards its edge (any rounded
+      // part), so try it pulled further in too, and keep the one that goes deepest, up to the depth wanted.
+      let best = null, why = null;
+      for (const k of [1, 1.5, 2, 3, 4, 6]) {
+        const a = attempt(ri, m * k + gs);
+        if (a.reason) { why = why || a.reason; break; } // pulled in further it only gets smaller
+        if (!(a.room > -Infinity)) { why = 'A pocket would break out of the other piece here'; continue; }
+        if (!best || a.depth > best.depth + 0.05) best = a;
+        if (a.depth >= a.want - 1e-6) break;
+      }
+      if (!best || best.depth < 1) { out.push({ region: ri, ok: false, reason: best && best.depth > -Infinity ? 'The other piece is too thin here for a plug' : why || 'Area too small for a plug' }); continue; }
+      const { base, mouth, depth, want } = best;
+      const top = offsetRing(base, -depth * tanS), floor = offsetRing(top, gs);
+      if (![base, top, mouth, floor].every(ringOk)) { out.push({ region: ri, ok: false, reason: 'Area too irregular for a plug' }); continue; }
+      out.push({ region: ri, ok: true, x: best.x, y: best.y, base, top, mouth, floor, depth, side: S, ca, short: depth < want - 1e-6, want });
+    }
+    return out;
+  }
+
   /* ---------- the cut ---------- */
   // Every exported part must be a closed solid. Real sculpts carry microscopic defects (self-crossing folds,
   // near-duplicate points) that can still defeat the cap at one exact plane position, so check the result and,
@@ -3010,9 +3218,10 @@ const KMCore = (() => {
     return attempt(skip);
   }
   // How far apart pieces must slide before they're free: past the longest key, and at least 3 mm.
-  function pullDistance(cfg, keys) {
+  function pullDistance(cfg, keys, plugs) {
     let L = 0;
-    if (cfg && cfg.type !== 'none') for (const k of keys || [{}]) L = Math.max(L, keyCfg(cfg, k).length || 0);
+    if (cfg && cfg.type === 'plug') for (const q of plugs || []) L = Math.max(L, q.ok ? q.depth : 0);
+    else if (cfg && cfg.type !== 'none') for (const k of keys || [{}]) L = Math.max(L, keyCfg(cfg, k).length || 0);
     return Math.max(3, L + 1);
   }
   function guardError(message, code, extra) { const e = new Error(message); e.code = code; Object.assign(e, extra || {}); return e; }
@@ -3023,7 +3232,7 @@ const KMCore = (() => {
   // can always go in last, at a slant.
   function checkLocks(res, F, skip, opts, scale) {
     const cfg = opts.cfg || { type: 'none' }, unkeyed = cfg.type === 'none' || !res.keysUsed;
-    const locked = lockedPairs(res.parts, F.n, Math.max(1e-4, scale * 2e-6), { anyDirection: (A, B) => unkeyed || A.side === B.side, distance: pullDistance(cfg, opts.keys), only: (A, B) => A.side === 'both' || B.side === 'both' || A.side === B.side });
+    const locked = lockedPairs(res.parts, F.n, Math.max(1e-4, scale * 2e-6), { anyDirection: (A, B) => unkeyed || A.side === B.side, distance: pullDistance(cfg, opts.keys, opts.plugs), only: (A, B) => A.side === 'both' || B.side === 'both' || A.side === B.side });
     if (!locked.length) return;
     const across = locked.some(([i, j]) => res.parts[i].side === 'both' || res.parts[j].side === 'both');
     throw guardError(across && skip.size ? `With ${areaNames(res.regions, [...skip])} left joined, the pieces would hook round each other, so they couldn’t be put together after printing. Cut more areas, or move the cut.`
@@ -3087,11 +3296,24 @@ const KMCore = (() => {
     const keys = (cfg.type === 'none' ? [] : (opts.keys || [])).map(k => ({ ...k, region: -1 }));
     const tmpSec = { loops, regions };
     for (const k of keys) { k.region = regionAt(tmpSec, k.x, k.y); k.cfg = keyCfg(cfg, k); k.spec = k.o || k.a ? keyGeometrySpec(k.cfg) : spec; k.angle = keyAngle(tmpSec, k.region, k.cfg); }
+    const plugs = (cfg.type === 'plug' ? (opts.plugs || []).filter(q => q.ok) : []).map(q => ({ ...q, region: regionAt(tmpSec, q.x, q.y) }));
     const pins = [];
+    // a plug or its pocket: walls from a ring on the face to a flat end at height z, and the end itself. Walls face
+    // out of a plug and into a pocket; any outline works, as each wall faces along its own edge.
+    const prism = (rim, rimXY, endXY, z, role) => {
+      const m = rim.length, end = endXY.map(([x, y]) => addV(at(x, y, z))), ccw = outlineArea(rimXY) > 0, s = role === 'peg' ? 1 : -1;
+      for (let i = 0; i < m; i++) {
+        const j = (i + 1) % m, dx = rimXY[j][0] - rimXY[i][0], dy = rimXY[j][1] - rimXY[i][1];
+        const ox = (ccw ? dy : -dy) * s, oy = (ccw ? -dx : dx) * s, e = [u[0] * ox + v[0] * oy, u[1] * ox + v[1] * oy, u[2] * ox + v[2] * oy];
+        pushOriented(rim[i], rim[j], end[j], e); pushOriented(rim[i], end[j], end[i], e);
+      }
+      const cap = endCap(end, endXY, Math.sign(z) * s > 0);
+      for (let i = 0; i < cap.length; i += 3) T.push3(cap[i], cap[i + 1], cap[i + 2]);
+    };
 
     regions.forEach((reg, ri) => {
       if (skip.has(ri)) return;
-      const myKeys = keys.filter(k => k.region === ri);
+      const myKeys = keys.filter(k => k.region === ri), myPlug = plugs.find(q => q.region === ri);
       for (const side of [-1, +1]) { // -1 = below the plane (cap faces +n), +1 = above (cap faces -n)
         const flat = [], ids = [], holes = [], rings = [], ringXY = new Map();
         const pushRing = (ringIds, xy, area) => {
@@ -3127,6 +3349,13 @@ const KMCore = (() => {
           pushRing(ring, xy);
           tubes.push({ k, role, prof1, depth, dir, ring });
         }
+        let plugTube = null;
+        if (myPlug) { // the plug stands on the other side from its pocket
+          const role = side === myPlug.side ? 'socket' : 'peg', rimXY = role === 'peg' ? myPlug.base : myPlug.mouth;
+          const ring = rimXY.map(([x, y]) => addV(at(x, y, 0)));
+          pushRing(ring, Array.from(flatOf(rimXY)));
+          plugTube = { role, ring, rimXY, endXY: role === 'peg' ? myPlug.top : myPlug.floor, z: myPlug.side * (role === 'peg' ? myPlug.depth : myPlug.depth + myPlug.ca) };
+        }
         const loc = earcut(flat, holes);
         let sum = 0;
         for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
@@ -3142,6 +3371,7 @@ const KMCore = (() => {
         splitThroughPoints(capTris, rings, xyOf);
         patchCap(capTris, rings, xyOf, wantCCW);
         for (let i = 0; i < capTris.length; i += 3) T.push3(capTris[i], capTris[i + 1], capTris[i + 2]);
+        if (plugTube) prism(plugTube.ring, plugTube.rimXY, plugTube.endXY, plugTube.z, plugTube.role);
         for (const tb of tubes) {
           const z = tb.dir * tb.depth;
           const ring1 = tb.prof1.map(([px, py]) => addV(at(tb.k.x + px, tb.k.y + py, z)));
@@ -3172,7 +3402,7 @@ const KMCore = (() => {
       const names = areaNames(regions, comps.cracked), one = comps.cracked.length === 1;
       throw guardError(`The joined areas hold both sides of ${names} together, so cutting ${one ? 'it' : 'them'} would only make a crack, not separate pieces. Cut another area too, or leave ${one ? 'it' : 'them'} joined.`, 'crack', { regions: comps.cracked });
     }
-    return { parts: comps, pins, shift: sec.shift, regions, keysUsed: keys.filter(k => k.region >= 0 && !skip.has(k.region)).length };
+    return { parts: comps, pins, shift: sec.shift, regions, keysUsed: keys.filter(k => k.region >= 0 && !skip.has(k.region)).length + plugs.filter(q => q.region >= 0 && !skip.has(q.region)).length };
   }
 
   function makePin(at, k, spec, L) {
@@ -3417,7 +3647,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
@@ -3454,8 +3684,8 @@ const KMCore = (() => {
     wire: false,
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0 },
-    cut: { keys: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5 },
+    cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, angle: 35 };
   const history = { past: [], future: [] };
@@ -3864,6 +4094,9 @@ const KMCore = (() => {
 
   /* ---------------- analysis, keys ---------------- */
   function coreCfg() { return { ...state.cfg, sizeMax: state.cfg.diameter }; }
+  // Pegs, dowels and magnets are keys placed at points; a plug is the area's own shape, one per area.
+  function pointKeys() { return ['peg', 'dowel', 'magnet'].includes(state.cfg.type); }
+  function plugsShown() { const shown = new Set(shownAreas()); return state.cut.plugs.filter(q => shown.has(q.region) && !state.cut.skip.has(q.region)); }
   // The thinnest a piece may be: the Wall setting, and never more than the printer handles reliably.
   function minWall() {
     const pr = K.PRINTERS[state.cfg.printer === 'resin' ? 'resin' : 'fdm'].wall;
@@ -3882,7 +4115,7 @@ const KMCore = (() => {
   }
   // Keys for the current cut: sized to fit each area (the default), or all at the size set in the panel.
   function placeKeys(an) {
-    if (!an || an.base.error) return [];
+    if (!an || an.base.error || !pointKeys()) return [];
     return state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, coreCfg(), state.cfg.perArea, state.cut.skip) : K.autoFitKeys(an, coreCfg(), state.cfg.perArea, state.cut.skip);
   }
   let analysisTimer = 0;
@@ -3902,6 +4135,7 @@ const KMCore = (() => {
     state.cut.hoverArea = -1;
     state.cut.labels = an.base.error ? [] : an.base.regions.map((r, ri) => ({ samples: K.regionSamples(an.base, ri), x: 0, y: 0 }));
     state.cut.thin = an.base.error ? [] : K.thinAreas(an, minWall());
+    state.cut.plugs = an.base.error || state.cfg.type !== 'plug' ? [] : K.planPlugs(an, coreCfg());
     if (state.cut.focus && !an.base.error) { // a narrow-point suggestion: cut just the limb it found, leave the rest joined
       planeGroup.updateMatrixWorld(true);
       const l = planeGroup.worldToLocal(state.cut.focus.clone());
@@ -3924,7 +4158,7 @@ const KMCore = (() => {
   }
   function evaluateKeys() {
     const an = state.cut.analysis;
-    state.cut.evals = an && !an.base.error && state.cfg.type !== 'none' ? K.evaluateKeys(an, state.cut.keys, coreCfg(), state.cut.skip) : [];
+    state.cut.evals = an && !an.base.error && pointKeys() ? K.evaluateKeys(an, state.cut.keys, coreCfg(), state.cut.skip) : [];
   }
   function clearGroup(g) {
     for (const c of [...g.children]) {
@@ -3987,7 +4221,7 @@ const KMCore = (() => {
   function areasWithoutKeys() {
     const an = state.cut.analysis;
     if (state.cfg.type === 'none' || !an || an.base.error || state.cut.stale) return [];
-    const has = new Set(state.cut.keys.map(k => K.regionAt(an.base, k.x, k.y)));
+    const has = new Set(state.cfg.type === 'plug' ? state.cut.plugs.filter(q => q.ok).map(q => q.region) : state.cut.keys.map(k => K.regionAt(an.base, k.x, k.y)));
     return shownAreas().filter(i => !state.cut.skip.has(i) && !has.has(i));
   }
   function noKeyMessage(list, everywhere) {
@@ -4006,15 +4240,15 @@ const KMCore = (() => {
   }
   function updateLabelPoints() {
     if (!state.cut.labels.length) return;
-    const avoid = state.cfg.type === 'none' ? 0 : K.keyGeometrySpec(state.cfg).outer + state.cfg.margin;
-    const keys = state.cfg.type === 'none' ? [] : state.cut.keys;
+    const avoid = !pointKeys() ? 0 : K.keyGeometrySpec(state.cfg).outer + state.cfg.margin;
+    const keys = !pointKeys() ? [] : state.cut.keys;
     for (const l of state.cut.labels) Object.assign(l, K.pickLabelPoint(l.samples, keys, avoid));
   }
   function renderAreaTags() {
     const shown = shownAreas(), noKey = new Set(areasWithoutKeys()), thin = new Set(thinShown().map(q => q.region));
     tagLayer.innerHTML = shown.length > 1 ? shown.map((i, k) => {
       const cut = !state.cut.skip.has(i);
-      return `<button class="area-tag${i === state.cut.hoverArea ? ' is-hover' : ''}" data-area-tag="${i}" aria-pressed="${cut}" title="${cut ? `Area ${k + 1} will be cut. Click to leave it joined.` : `Area ${k + 1} stays joined. Click to cut it.`}"><b>${k + 1}</b>${cut ? 'Cut' : 'Joined'}${cut && thin.has(i) ? '<i>too thin</i>' : cut && noKey.has(i) ? '<i>no key</i>' : ''}</button>`;
+      return `<button class="area-tag${i === state.cut.hoverArea ? ' is-hover' : ''}" data-area-tag="${i}" aria-pressed="${cut}" title="${cut ? `Area ${k + 1} will be cut. Click to leave it joined.` : `Area ${k + 1} stays joined. Click to cut it.`}"><b>${k + 1}</b>${cut ? 'Cut' : 'Joined'}${cut && thin.has(i) ? '<i>too thin</i>' : cut && noKey.has(i) ? `<i>no ${state.cfg.type === 'plug' ? 'plug' : 'key'}</i>` : ''}</button>`;
     }).join('') : '';
     updateLabelPoints();
     placeAreaTags();
@@ -4060,11 +4294,26 @@ const KMCore = (() => {
   });
   tagLayer.addEventListener('mouseover', (e) => { const b = e.target.closest('[data-area-tag]'); if (b) setHoverArea(+b.dataset.areaTag); });
   tagLayer.addEventListener('mouseout', (e) => { if (!e.relatedTarget || !tagLayer.contains(e.relatedTarget)) setHoverArea(-1); });
+  function renderPlugMarkers() {
+    const R = state.cut.R, z = Math.max(0.03, R * 0.0009);
+    for (const q of plugsShown()) {
+      if (!q.ok || state.cut.stale) continue;
+      const g = new THREE.Group();
+      const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(q.base.map(([x, y]) => new THREE.Vector3(x, y, z))), new THREE.LineBasicMaterial({ color: 0x1d1d1b }));
+      line.renderOrder = 6;
+      const body = new THREE.Mesh(prismGeometry(q.base, q.top, 0, q.side * q.depth), new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.5, transparent: true, opacity: 0.55, depthWrite: false }));
+      body.renderOrder = 5;
+      g.add(line, body);
+      keyGroup.add(g);
+    }
+    markDirty();
+  }
   function renderKeyMarkers() {
     clearGroup(keyGroup);
     updateLabelPoints();
     const cfg = state.cfg;
     if (!selectedPart() || cfg.type === 'none') { markDirty(); return; }
+    if (cfg.type === 'plug') { renderPlugMarkers(); return; }
     const spec = K.keyGeometrySpec(cfg);
     const R = state.cut.R;
     const z = Math.max(0.03, R * 0.0009);
@@ -4374,7 +4623,7 @@ const KMCore = (() => {
       return;
     }
     const bad = state.cut.evals.filter(e => !e.ok).length;
-    if (state.cfg.type !== 'none' && bad) {
+    if (pointKeys() && bad) {
       toast(`${bad === 1 ? 'One key needs' : bad + ' keys need'} attention before cutting. Drag ${bad === 1 ? 'it' : 'them'} to a better spot or remove ${bad === 1 ? 'it' : 'them'}.`, 'error', { label: 'Remove', fn: removeBadKeys });
       return;
     }
@@ -4382,7 +4631,7 @@ const KMCore = (() => {
     await nextFrame();
     let res;
     try {
-      res = K.cutMesh(p.positions, p.indices, currentFrame(), { scale: K.diag(p.bbox), cfg: coreCfg(), keys: state.cut.keys, skip: state.cut.skip, minThickness: minWall() });
+      res = K.cutMesh(p.positions, p.indices, currentFrame(), { scale: K.diag(p.bbox), cfg: coreCfg(), keys: pointKeys() ? state.cut.keys : [], plugs: state.cfg.type === 'plug' ? state.cut.plugs.filter(q => q.ok && !state.cut.skip.has(q.region)) : [], skip: state.cut.skip, minThickness: minWall() });
     } catch (err) {
       busy(null);
       toast(err.message, 'error');
@@ -4512,7 +4761,7 @@ const KMCore = (() => {
     return { x: local.x, y: local.y };
   }
   function pickKey(e) {
-    if (!selectedPart() || state.cfg.type === 'none') return -1;
+    if (!selectedPart() || !pointKeys()) return -1;
     const r = canvas.getBoundingClientRect();
     planeGroup.updateMatrixWorld(true);
     camera.updateMatrixWorld();
@@ -4769,7 +5018,7 @@ const KMCore = (() => {
       if (h) {
         const ri = K.regionAt(state.cut.analysis.base, h.x, h.y);
         if (ri >= 0 && state.cut.skip.has(ri)) { toggleArea(ri); return; }
-        if (ri >= 0 && state.cfg.type !== 'none') { addKey(h); return; }
+        if (ri >= 0 && pointKeys()) { addKey(h); return; }
       }
     }
     setNdc(e);
@@ -4851,6 +5100,7 @@ const KMCore = (() => {
     else if (state.regions.on) t = 'Click a dark border line to cut along it. Press Enter to cut, Esc to pick again.';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
     else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
+    else if (state.cfg.type === 'plug') t = coarse ? 'Drag the arrow to slide the cut, the plane or a ring to tilt it. Each area gets a plug of its own shape.' : 'Drag the arrow to slide the cut, the plane or a ring to tilt it (Shift for fine steps). Each area gets a plug of its own shape. Alt-drag to orbit.';
     else if (state.cfg.type === 'none') t = coarse ? 'Drag the arrow to slide the cut, the plane or a ring to tilt it. Drag outside the plane to orbit.' : 'Drag the arrow to slide the cut, the plane or a ring to tilt it (Shift for fine steps). Drag outside the plane, or hold Alt, to orbit.';
     else t = coarse ? 'Drag the arrow to slide, the plane or a ring to tilt. Tap the cut face to add a key. Drag outside the plane to orbit.' : 'Drag the arrow to slide, the plane or a ring to tilt. Click the cut face to add a key, or a key to set it up on its own. Alt-drag to orbit.';
     el.textContent = t;
@@ -5078,7 +5328,24 @@ const KMCore = (() => {
     const bad = evals.filter(e => !e.ok);
     const s = p.bbox.size;
     let keyStatus = '';
-    if (c.type !== 'none') {
+    if (c.type === 'plug') {
+      const pl = plugsShown(), ok = pl.filter(q => q.ok), no = pl.filter(q => !q.ok), many = shown.length > 1, num = (i) => shown.indexOf(i) + 1;
+      if (state.cut.stale) keyStatus = `<p class="status muted">Fitting plugs…</p>`;
+      else if (an && an.base.error) keyStatus = `<p class="status warn">${ICONS.alert}<span>The surface is broken where it crosses this cut, so plugs can’t be checked. Move the cut slightly or fill holes first.</span></p>`;
+      else if (!regions.length) keyStatus = `<p class="status muted">Slide the cut into the part to see the plugs.</p>`;
+      else {
+        if (ok.length) {
+          const ds = ok.map(q => q.depth), lo = Math.min(...ds), hi = Math.max(...ds), deep = lo.toFixed(1) === hi.toFixed(1) ? `${fmt(lo)} mm deep` : `${fmt(lo)} to ${fmt(hi)} mm deep`;
+          keyStatus = `<p class="status ok">${ICONS.check}<span>${ok.length === 1 ? (many ? `A plug in area ${num(ok[0].region)}` : 'A plug') : `Plugs in ${ok.length} areas`} ${deep}, with walls at least ${c.margin} mm thick${ok.some(q => q.short) ? ' (shallower where the other piece is thin)' : ''}.</span></p>`;
+        }
+        if (no.length) {
+          const said = { 'Area too small for a plug': 'too small', 'Area has a hole through it': 'it has a hole through it', 'The other piece is too thin here for a plug': 'the other piece is too thin', 'A pocket would break out of the other piece here': 'the pocket would break out of the other piece', 'Area too irregular for a plug': 'its shape is too irregular' };
+          const why = [...new Set(no.map(q => said[q.reason] || q.reason))].join(', or ');
+          const where = many ? (no.length === 1 ? `area ${num(no[0].region)}` : `areas ${no.map(q => num(q.region)).sort((a, b) => a - b).join(', ')}`) : '';
+          keyStatus += `<p class="status warn no-key">${ICONS.alert}<span>${ok.length ? `No plug in ${where}` : many ? `No plug in ${where}` : 'No room for a plug on this cut'}: ${esc(why)}. Try a thinner wall, pegs, or a different cut.</span></p>`;
+        }
+      }
+    } else if (c.type !== 'none') {
       if (state.cut.stale) keyStatus = `<p class="status muted">Checking key placement…</p>`;
       else if (an && an.base.error) keyStatus = `<p class="status warn">${ICONS.alert}<span>The surface is broken where it crosses this cut, so keys can’t be checked. Move the cut slightly or fill holes first.</span></p>`;
       else if (!regions.length) keyStatus = `<p class="status muted">Slide the cut into the part to see where keys can go.</p>`;
@@ -5097,14 +5364,20 @@ const KMCore = (() => {
     }
     const lenLabel = c.type === 'magnet' ? 'Thickness' : 'Length';
     const shownShape = K.keyGeometrySpec(c).shape;
-    const typeLine = { peg: 'A peg on one piece fits a socket in the other.', dowel: 'Holes in both pieces, with printable pins. Metal rods work too.', magnet: 'Pockets in both pieces, sized for disc magnets.' }[c.type];
+    const typeLine = { peg: 'A peg on one piece fits a socket in the other.', dowel: 'Holes in both pieces, with printable pins. Metal rods work too.', magnet: 'Pockets in both pieces, sized for disc magnets.', plug: 'The cut face itself, pulled in from the edge, stands out into a matching pocket in the other piece.' }[c.type];
+    const plugPanel = () => `<p class="muted small type-line">${typeLine}</p>
+      <div class="inline"><span class="lbl">Depth</span>${seg('plugdepth', c.plugDepthMode === 'set' ? 'set' : 'auto', [['auto', 'As deep as fits'], ['set', 'Set']])}</div>
+      <div class="grid2">${c.plugDepthMode === 'set' ? inlineField('plugDepth', 'Depth', c.plugDepth || 5, { min: 1, step: 0.5, aria: 'Plug depth' }) : '<span class="muted small size-note">Up to 10 mm</span>'}${inlineField('plugSlope', 'Slope', c.plugSlope === undefined ? 5 : c.plugSlope, { min: 0, max: 30, step: 1, unit: '°', aria: 'Slope of the plug’s sides' })}</div>
+      <div class="inline"><span class="lbl">Fit</span>${seg('fit', c.clearance, [['0.1', 'Snug'], ['0.2', 'Standard'], ['0.3', 'Loose']])}</div>
+      <div class="grid2">${inlineField('clearance', 'Gap', c.clearance, { min: 0, step: 0.05, aria: 'Gap per side' })}${inlineField('margin', 'Wall', c.margin, { min: 0.4, step: 0.2, aria: 'Wall round the plug' })}</div>
+      <div class="inline"><span class="lbl">Plug on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}</div>`;
     return `<div class="ins-section head">
       <div class="head-row"><h2>${esc(p.name)}</h2><span><button class="btn ghost small" data-act="export-one" title="Export this part on its own">Export</button><button class="btn ghost small" data-act="done">Done</button></span></div>
       <p class="muted small">${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm, ${fmtInt(p.tris)} triangles</p>
     </div>
-    ${state.cut.active >= 0 && state.cut.keys[state.cut.active] && c.type !== 'none' ? keyEditor(state.cut.active) : `<div class="ins-section keys" aria-label="Keys">
-      ${seg('keytype', c.type, [['peg', 'Pegs'], ['dowel', 'Dowels'], ['magnet', 'Magnets'], ['none', 'None']]).replace(/data-value="(\w+)"/g, (m, v) => `${m} title="${({ peg: 'A peg on one piece fits a socket in the other', dowel: 'Holes in both pieces, with printable pins. Metal rods work too', magnet: 'Pockets in both pieces, sized for disc magnets', none: 'No keys: flat faces' })[v]}"`)}
-      ${c.type === 'none' ? '<p class="muted small">The pieces will have flat faces with nothing to line them up.</p>' : `
+    ${state.cut.active >= 0 && state.cut.keys[state.cut.active] && pointKeys() ? keyEditor(state.cut.active) : `<div class="ins-section keys" aria-label="Keys">
+      ${seg('keytype', c.type, [['peg', 'Pegs'], ['dowel', 'Dowels'], ['magnet', 'Magnets'], ['plug', 'Plug'], ['none', 'None']]).replace(/data-value="(\w+)"/g, (m, v) => `${m} title="${({ peg: 'A peg on one piece fits a socket in the other', dowel: 'Holes in both pieces, with printable pins. Metal rods work too', magnet: 'Pockets in both pieces, sized for disc magnets', plug: 'The cut face itself stands out into a matching pocket', none: 'No keys: flat faces' })[v]}"`)}
+      ${c.type === 'none' ? '<p class="muted small">The pieces will have flat faces with nothing to line them up.</p>' : c.type === 'plug' ? plugPanel() : `
       ${c.type !== 'peg' ? `<p class="muted small type-line">${typeLine}</p>` : ''}
       <div class="shape-head"><span class="lbl">Shape</span><span class="shape-name">${SHAPE_NAMES[shownShape]}</span></div>
       ${shapePicker(c)}
@@ -5170,6 +5443,7 @@ const KMCore = (() => {
       }
       case 'shape': c.shape = val; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
       case 'fit': c.clearance = +val; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
+      case 'plugdepth': c.plugDepthMode = val; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
       case 'sizemode': c.sizeMode = val; state.cut.auto = true; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
       case 'printer': {
         const pr = K.PRINTERS[val];
@@ -5309,26 +5583,32 @@ const KMCore = (() => {
     clearPick();
     const near = K.borderLoopNear(p.positions, regionsFor(p), linesFor(p), point);
     if (!near || near.distance > K.diag(p.bbox) * 0.03) { toast('Click on or next to one of the dark border lines to cut along it.'); renderPick(); return; }
-    const pick = { partId: p.id, loop: near.loop, keys: [] };
+    const pick = { partId: p.id, loop: near.loop, keys: [], plugs: [] };
     // keys: placed and checked like a flat cut's, on the flat face at the line's best-fit plane
     const cfg = coreCfg();
     if (near.loop.closed && cfg.type !== 'none') {
       try {
         const an = K.analyzeLoop(p.positions, p.indices, near.loop, cfg, K.diag(p.bbox));
         pick.frame = an.frame; pick.an = an;
+        if (cfg.type === 'plug') {
+          pick.plugs = K.planPlugs(an, cfg).filter(q => q.ok);
+          if (!pick.plugs.length) { const why = (K.planPlugs(an, cfg)[0] || {}).reason || 'no room'; pick.noKeys = `No plug inside this line (${why.charAt(0).toLowerCase() + why.slice(1)}), so it will be cut without one.`; }
+        } else {
         const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, cfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, cfg, state.cfg.perArea, new Set());
         const ok = K.evaluateKeys(an, keys, cfg, new Set());
         pick.keys = keys.filter((k, i) => ok[i].ok);
         if (!pick.keys.length) pick.noKeys = 'No room for keys inside this line at these settings, so it will be cut without them.';
+        }
       } catch (err) { pick.noKeys = 'Keys couldn’t be placed on this line, so it will be cut without them.'; }
     }
     const minThickness = minWall();
-    try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { cfg, keys: pick.keys, minThickness }); }
+    try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { cfg, keys: pick.keys, plugs: pick.plugs, minThickness }); }
     catch (err) {
-      if (pick.keys.length && err.code !== 'thin') { // still offer the cut, without keys
+      if ((pick.keys.length || pick.plugs.length) && err.code !== 'thin') { // still offer the cut, without keys
+        const what = pick.plugs.length ? 'A plug' : 'Keys', it = pick.plugs.length ? 'one' : 'them';
         try {
-          pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { minThickness }); pick.keys = [];
-          pick.noKeys = err.code === 'locked' ? 'Keys would make the pieces slide straight apart, and here they’d catch on each other, so it will be cut without them.' : 'Keys didn’t fit cleanly here, so it will be cut without them.';
+          pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { minThickness }); pick.keys = []; pick.plugs = [];
+          pick.noKeys = err.code === 'locked' ? `${what} would make the pieces slide straight apart, and here they’d catch on each other, so it will be cut without ${it}.` : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`;
         } catch (e2) { pick.error = e2.message; }
       } else pick.error = err.message;
     }
@@ -5341,6 +5621,7 @@ const KMCore = (() => {
       line.renderOrder = 9;
       v.pickLine = line; v.mesh.add(line);
       if (pick.keys.length && pick.frame) { v.pickKeys = curvedKeyMarkers(pick.keys, pick.frame, pick.an); v.mesh.add(v.pickKeys); }
+      if (pick.plugs.length && pick.frame) { v.pickKeys = curvedPlugMarkers(pick.plugs, pick.frame, pick.an); v.mesh.add(v.pickKeys); }
     }
     renderPick();
     markDirty();
@@ -5375,6 +5656,24 @@ const KMCore = (() => {
     }
     return g;
   }
+  // A plug on a curved cut, drawn standing on the face that follows the line, as deep as it will be.
+  function curvedPlugMarkers(plugs, F, an) {
+    const g = new THREE.Group(), H = an.curved.heightAt;
+    for (const q of plugs) {
+      let lo = Infinity, hi = -Infinity; for (const [x, y] of q.mouth) { const z = H(x, y); lo = Math.min(lo, z); hi = Math.max(hi, z); }
+      const tip = (q.side > 0 ? hi : lo) + q.side * q.depth, z0 = q.side > 0 ? lo : hi;
+      const geom = prismGeometry(q.base, q.top, z0, tip);
+      for (const name of ['position', 'normal']) {
+        const att = geom.attributes[name]; if (!att) continue;
+        const a = att.array, o = name === 'position' ? F.o : [0, 0, 0];
+        for (let i = 0; i < a.length; i += 3) { const x = a[i], y = a[i + 1], z = a[i + 2]; for (let k = 0; k < 3; k++) a[i + k] = o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z; }
+      }
+      const body = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.5, transparent: true, opacity: 0.6, depthTest: false }));
+      body.renderOrder = 8;
+      g.add(body);
+    }
+    return g;
+  }
   function clearPick() {
     for (const v of views.values()) {
       if (v.pickLine) { v.mesh.remove(v.pickLine); v.pickLine.geometry.dispose(); v.pickLine.material.dispose(); v.pickLine = null; }
@@ -5390,7 +5689,7 @@ const KMCore = (() => {
     if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>`; return; }
     const cm3 = (v) => (v / 1000 >= 10 ? Math.round(v / 1000) : (v / 1000).toFixed(1));
     const nk = pick.keys.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
-    const keyLine = nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
+    const keyLine = pick.plugs && pick.plugs.length ? ` With a plug ${fmt(pick.plugs[0].depth)} mm deep.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
     el.innerHTML = `<p class="status ok">${ICONS.check}<span>A ${len} line all the way round. It splits the part into pieces of ${cm3(pick.result.parts[0].volume)} and ${cm3(pick.result.parts[1].volume)} cm³.${keyLine}</span></p>
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
       <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>Cut along this line</span></button>`;
