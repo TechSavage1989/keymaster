@@ -17,7 +17,7 @@ Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com*
 - **Checked before you cut.** Each key is tested for thin walls and for sockets that would break through the surface. Problem keys turn red and explain why.
 - **Every piece prints and goes together.** Keymaster won't make a cut that leaves a sliver thinner than your printer's wall (1.2 mm on filament, 0.8 mm on resin), and says which area is too thin, with a button to leave it joined. It also refuses cuts whose pieces would hook round each other or get caught inside one another, or that would only crack the part without separating it.
 - **Leave areas joined.** When a cut crosses several separate areas, each gets a label in the view. Click a label (or untick the area in the side panel) to keep that area attached, and click it again to cut it.
-- **Model tools.** Fill holes, fix inside-out models, turn the model a quarter turn, scale it (including inches to millimeters), and see which parts fit your printer bed.
+- **Model tools.** Repair a tangled surface (faces stored twice, parts welded along a seam, patches facing the wrong way, loose slivers, holes), fix inside-out models, turn the model a quarter turn, scale it (including inches to millimeters), and see which parts fit your printer bed.
 - **Export.** Every part is saved as its own STL, bundled in one ZIP.
 
 ## Using it

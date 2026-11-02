@@ -9,7 +9,7 @@ A browser app that cuts 3D-printable sculptures and figures into pieces and adds
 - `src/template.html`: markup and all CSS.
 - `tools/build.py`: inlines `core.js` and `app.js` into `template.html` to produce `index.html` (the shipped single file) and `tests/test.html`.
 - `tests/core.test.js`: geometry tests (Node). `tests/ui_test.py`: interface tests (Playwright, using `tests/mock-three.js` as a three.js stand-in).
-- `tools/sculpt_check.js`: sweeps hundreds of cuts through real model files and reports any part that isn't sealed.
+- `tools/sculpt_check.js`: sweeps hundreds of cuts through real model files and reports any part that isn't sealed (repairing an open model first, as the app's Repair surface would).
 
 ## Commands
 
@@ -53,6 +53,10 @@ The fifth joint type (`cfg.type: 'plug'`), from the owner's own technique and pr
 - **Rings**: the top is the base moved in by depth × tan(`plugSlope`, 5° by default) and the pocket is the plug grown by the gap held square to the slope, both by `offsetRing`; every ring is checked for crossings.
 - **Depth**: as deep as fits up to half the plug's narrower width (2 to 10 mm), or `plugDepth` when `plugDepthMode` is `set`, always capped by what the other piece can hold (checked along lines through the model: solid past the pocket's floor plus a floor, and round its walls). On rounded parts the other piece thins near the edge, so `planPlugs` also tries the plug pulled further in (1.5 to 6 walls) and keeps the deepest, up to the depth wanted.
 - **Building**: `cutMesh(..., { plugs })` and `cutAlongLoop(..., { plugs })`. On flat cuts the plug's piece gets a hole at the base ring, the pocket's piece one at the mouth, each with walls facing along their own edges and a flat end from `endCap`, so any outline works. `endCap` orients the whole end at once from the outline's direction, never triangle by triangle: earcut leaves slivers where points line up, and far from the origin on a tilted cut a sliver's own normal can point the wrong way (the tree-trunk outline in `plugOutlines` caught this). On curved cuts `curvedLoopCap` treats keys and plugs alike as four outlines on the face that follows the line. Plugs set the pull direction like keys.
+
+## Repair
+
+`repairMesh(P, I)` makes a tangled export cuttable and reports what it did, in up to three passes (filling a hole can expose the next flaw): `{ duplicates, untangled, pinched, flipped, slivers, filled, skipped, report }`. Each pass: faces stored twice go (a face and its mirror twin are a zero-thickness fin, so both go); an edge with three or more faces, or two running the same way, has its faces paired by which side their material lies on (sweeping round the edge, a face's material is behind its normal) and its vertices split so each pair is its own surface (two parts welded along a seam become two shells); every vertex whose faces form more than one fan is split too (a pinch, which the hole filler can't close); each connected surface is walked so faces agree with their neighbours, and a closed one facing in is turned out; open slivers under 0.5 mm go; then `fillHoles`. `edgeTable` groups half-edges by their smaller vertex in typed arrays, so the faces on an edge are a short scan; the whole repair of a 400k-triangle part takes a few seconds. Stitching coincident boundary vertices was tried and dropped: it rejoined what untangling had separated. Models it can't close (the guenve pair: 1,000 open edges, 16 shells) are a job for Blender or Meshmixer, and the app says so with the count. In the app, **Repair surface** in the model panel runs it on every part.
 
 ## Cuts that print and go together
 
