@@ -1686,10 +1686,14 @@ const KMCore = (() => {
      auto polygroups: neighbouring triangles join when the angle between them is under `angle` degrees. Specks
      smaller than `minFrac` of the total area (sculpted texture, noise) melt into the neighbour they share the
      longest border with. These borders are the lines a curved cut will follow. */
+  // Regions of the surface. Neighbouring triangles join unless the surface turns more than `angle` between them.
+  // With `fold` set, a concave turn (a valley: cloth meeting skin, a collar, a belt's edge, a shoe top) splits at
+  // that gentler angle, while a convex one (a ridge) still needs `angle`: on organic sculpts the parts meet in
+  // valleys, and ridges are mostly detail.
   function segmentSurface(P, I, opts = {}) {
-    const angle = opts.angle === undefined ? 35 : opts.angle, minFrac = opts.minFrac === undefined ? 0.003 : opts.minFrac;
+    const angle = opts.angle === undefined ? 35 : opts.angle, minFrac = opts.minFrac === undefined ? 0.003 : opts.minFrac, fold = opts.fold;
     const nt = I.length / 3, nv = P.length / 3;
-    const N = new Float64Array(nt * 3), A = new Float64Array(nt);
+    const N = new Float64Array(nt * 3), A = new Float64Array(nt), C = fold !== undefined ? new Float64Array(nt * 3) : null;
     let total = 0;
     for (let t = 0; t < nt; t++) {
       const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
@@ -1697,6 +1701,7 @@ const KMCore = (() => {
       const L = Math.hypot(n[0], n[1], n[2]);
       A[t] = L / 2; total += L / 2;
       if (L > 0) { N[3 * t] = n[0] / L; N[3 * t + 1] = n[1] / L; N[3 * t + 2] = n[2] / L; }
+      if (C) for (let k = 0; k < 3; k++) C[3 * t + k] = (P[a + k] + P[b + k] + P[c + k]) / 3;
     }
     // triangle neighbours across each edge, with the edge's length
     const first = new Map(), pairs = [];
@@ -1709,10 +1714,13 @@ const KMCore = (() => {
     const par = new Int32Array(nt);
     for (let t = 0; t < nt; t++) par[t] = t;
     const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
-    const cosA = Math.cos((angle * Math.PI) / 180);
+    const cosA = Math.cos((angle * Math.PI) / 180), cosF = fold !== undefined ? Math.cos((fold * Math.PI) / 180) : cosA;
     for (let i = 0; i < pairs.length; i += 4) {
       const s = pairs[i], q = pairs[i + 1];
-      if (N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2] >= cosA) { const x = find(s), y = find(q); if (x !== y) par[x] = y; }
+      const dot = N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2];
+      // a valley: the neighbour's centre lies on the outward side of this triangle's plane
+      const valley = C && (C[3 * q] - C[3 * s]) * N[3 * s] + (C[3 * q + 1] - C[3 * s + 1]) * N[3 * s + 1] + (C[3 * q + 2] - C[3 * s + 2]) * N[3 * s + 2] > 0;
+      if (dot >= (valley ? cosF : cosA)) { const x = find(s), y = find(q); if (x !== y) par[x] = y; }
     }
     // melt specks into the neighbour they share the most border with, smallest first, until none are left
     const minA = total * minFrac;
@@ -2073,12 +2081,23 @@ const KMCore = (() => {
     return out;
   }
   function cutAlongLoop(P, I, loop, opts = {}) {
-    loop = straightLoop(P, I, loop);
-    if (!loop.closed) throw new Error('This border doesn’t go all the way round, so it can’t split the part. Pick one that circles a limb or the edge of a sleeve.');
-    const nv = P.length / 3, nt = I.length / 3, ring = loop.verts, n = ring.length;
+    const r = cutAlongLoops(P, I, [loop], opts);
+    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0] };
+  }
+  /* Cut along several closed lines at once. Side 1 is whatever lies on the left of the lines as they run (the
+     triangles holding the lines' own directed edges); side 2 is the rest, and may come apart into several pieces.
+     A single line splits a part in two; a region's whole outline, all its loops together, splits the region off
+     even where the surface loops back on itself (an arm whose hand rests on the hip). Keys or a plug go on each
+     line, from opts.keys and opts.plugs for one line or opts.perLoop[i] for several. */
+  function cutAlongLoops(P, I, loopsIn, opts = {}) {
+    const loops = loopsIn.map(l => straightLoop(P, I, l));
+    if (loops.some(l => !l.closed)) throw new Error('This border doesn’t go all the way round, so it can’t split the part. Pick one that circles a limb or the edge of a sleeve.');
+    const nv = P.length / 3, nt = I.length / 3, rings = loops.map(l => l.verts), L = rings.length;
+    const offs = []; let nn = nv; for (const r of rings) { offs.push(nn); nn += r.length; }
+    const extra = nn, M = extra + 2 * L; // centre points for fans after the copies
     const cutEdge = new Set();
-    for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; cutEdge.add(a < b ? a * nv + b : b * nv + a); }
-    // neighbours across every edge that isn't on the border
+    for (const ring of rings) for (let i = 0; i < ring.length; i++) { const a = ring[i], b = ring[(i + 1) % ring.length]; cutEdge.add(a < b ? a * nv + b : b * nv + a); }
+    // neighbours across every edge that isn't on a line
     const first = new Map(), nb = new Int32Array(nt * 3).fill(-1);
     for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
       const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a;
@@ -2086,25 +2105,23 @@ const KMCore = (() => {
       const f = first.get(key);
       if (f === undefined) first.set(key, 3 * t + k); else { first.delete(key); nb[3 * t + k] = Math.floor(f / 3); nb[f] = t; }
     }
-    // which triangle on each side of the first border edge
-    let tA = -1, tB = -1;
-    const a0 = ring[0], b0 = ring[1];
-    for (let t = 0; t < nt && (tA < 0 || tB < 0); t++) for (let k = 0; k < 3; k++) {
-      const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3];
-      if (a === a0 && b === b0) tA = t; else if (a === b0 && b === a0) tB = t;
-    }
-    if (tA < 0 || tB < 0) throw new Error('This border runs along an edge of the surface that isn’t closed. Fill holes in the model panel first.');
+    // the triangle on each side of each line's first edge
+    const want = new Map(); // directed edge -> [loop, which side]
+    rings.forEach((ring, li) => { want.set(ring[0] * nv + ring[1], [li, 1]); want.set(ring[1] * nv + ring[0], [li, 2]); });
+    const seeds = rings.map(() => [-1, -1]);
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const w = want.get(I[3 * t + k] * nv + I[3 * t + (k + 1) % 3]); if (w) seeds[w[0]][w[1] - 1] = t; }
+    if (seeds.some(s => s[0] < 0 || s[1] < 0)) throw new Error('This border runs along an edge of the surface that isn’t closed. Fill holes in the model panel first.');
     const side = new Int8Array(nt);
     const flood = (start, s) => { const st = [start]; side[start] = s; while (st.length) { const t = st.pop(); for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && !side[q]) { side[q] = s; st.push(q); } } } };
-    flood(tA, 1);
-    if (side[tB]) throw new Error('Cutting along this border wouldn’t split the part in two (the surface joins up around it). Pick a border that goes right round a limb or a sleeve.');
-    flood(tB, 2);
-    // side 2 gets its own copy of the border's vertices
+    for (const [tA] of seeds) if (!side[tA]) flood(tA, 1);
+    if (seeds.some(([, tB]) => side[tB] === 1)) throw new Error(L > 1 ? 'Cutting along this region’s outline wouldn’t free it (the surface joins up around it).' : 'Cutting along this border wouldn’t split the part in two (the surface joins up around it). Pick a border that goes right round a limb or a sleeve.');
+    for (const [, tB] of seeds) if (!side[tB]) flood(tB, 2);
+    // side 2 gets its own copy of every line's vertices
     const copy = new Map();
-    ring.forEach((v, i) => copy.set(v, nv + i));
-    const pos = new Float32Array((nv + n + 2) * 3); // plus a centre point for each cap, should it need one
+    rings.forEach((ring, li) => ring.forEach((v, i) => copy.set(v, offs[li] + i)));
+    const pos = new Float32Array(M * 3);
     pos.set(P);
-    ring.forEach((v, i) => { pos[3 * (nv + i)] = P[3 * v]; pos[3 * (nv + i) + 1] = P[3 * v + 1]; pos[3 * (nv + i) + 2] = P[3 * v + 2]; });
+    for (const [v, c] of copy) { pos[3 * c] = P[3 * v]; pos[3 * c + 1] = P[3 * v + 1]; pos[3 * c + 2] = P[3 * v + 2]; }
     const tris = [[], [], []];
     for (let t = 0; t < nt; t++) {
       const s = side[t];
@@ -2112,63 +2129,72 @@ const KMCore = (() => {
       if (s === 2) { if (copy.has(a)) a = copy.get(a); if (copy.has(b)) b = copy.get(b); if (copy.has(c)) c = copy.get(c); }
       tris[s].push(a, b, c);
     }
-    // the cap: the border projected on its best-fit plane, triangulated with the same safeguards as flat cuts
-    const lf = loopFrame(P, ring), F = lf.F, xy = lf.xy, [cxn, cyn, czn] = lf.centre, cx = cxn * n, cy = cyn * n, cz = czn * n;
-    const ringXY = new Map(ring.map((v, i) => [v, [xy[2 * i], xy[2 * i + 1]]]));
-    const keep = untangledRing(xy), flat = [], ids = [];
-    for (const k of keep) { ids.push(ring[k]); flat.push(xy[2 * k], xy[2 * k + 1]); }
-    // side 1 holds the border in some direction; its cap must run the other way
-    const at = (t, a, b) => { for (let k = 0; k < 3; k++) if (I[3 * t + k] === a && I[3 * t + (k + 1) % 3] === b) return true; return false; };
-    const side1Along = at(tA, a0, b0) ? side[tA] === 1 : side[tB] === 1 && at(tB, a0, b0);
-    let area2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; area2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
-    const ccw = area2 > 0, capAlong = !side1Along, wantCCW = capAlong ? ccw : !ccw;
-    const loc = earcut(flat, []);
-    let sum = 0; for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
-    const flip = wantCCW ? sum < 0 : sum > 0, cap = [];
-    for (let i = 0; i < loc.length; i += 3) { if (flip) cap.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]); else cap.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]); }
-    fixTJunctions(cap, ring);
-    const xyOf = (id) => ringXY.get(id);
-    splitThroughPoints(cap, [ring], xyOf);
-    patchCap(cap, [ring], xyOf, wantCCW);
-    // Where the line passes close to itself, a cap edge between two of its points can double up an existing edge
-    // of the surface (straightening the line removes most of these). If one would, or the line crosses itself when
-    // flattened, the cap is fanned from a centre point instead: a fan only joins line points to the centre, so it
-    // can never repeat a surface edge.
-    const M = nv + n + 2, ek = (a, b) => (a < b ? a * M + b : b * M + a);
-    const surf = new Set(), along = new Set(); // the surface's edges, apart from the line's own (the cap meets those)
-    for (let i = 0; i < n; i++) along.add(ek(ring[i], ring[(i + 1) % n]));
+    const ek = (a, b) => (a < b ? a * M + b : b * M + a);
+    const surf = new Set(), along = new Set(); // the surface's edges, apart from the lines' own (the caps meet those)
+    for (const ring of rings) for (let i = 0; i < ring.length; i++) along.add(ek(ring[i], ring[(i + 1) % ring.length]));
     for (let i = 0; i < tris[1].length; i += 3) for (let k = 0; k < 3; k++) { const e = ek(tris[1][i + k], tris[1][i + (k + 1) % 3]); if (!along.has(e)) surf.add(e); }
-    let clash = keep.length < n;
-    for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) if (surf.has(ek(cap[i + k], cap[i + (k + 1) % 3]))) { clash = true; break; }
     const cfg = opts.cfg || { type: 'none' };
-    const keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (opts.keys || []).filter(k => regionAt({ loops: [makeLoop(ring, [], xy)], regions: buildRegions([makeLoop(ring, [], xy)]) }, k.x, k.y) === 0);
-    const plugs = cfg.type === 'plug' ? (opts.plugs || []).filter(q => q.ok) : [], joined = keys.length + plugs.length;
-    let V = null, pins = [];
-    const flatCap = cap.slice(), base1 = tris[1].length, base2 = tris[2].length;
+    // each line's cap: the line projected on its best-fit plane, triangulated with the same safeguards as flat cuts
+    const caps = rings.map((ring, li) => {
+      const n = ring.length, lf = loopFrame(P, ring), F = lf.F, xy = lf.xy;
+      const ringXY = new Map(ring.map((v, i) => [v, [xy[2 * i], xy[2 * i + 1]]]));
+      const keep = untangledRing(xy), flat = [], ids = [];
+      for (const k of keep) { ids.push(ring[k]); flat.push(xy[2 * k], xy[2 * k + 1]); }
+      // side 1 holds the line along its direction, so its cap must run the other way
+      let area2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; area2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
+      const wantCCW = !(area2 > 0);
+      const loc = earcut(flat, []);
+      let sum = 0; for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
+      const flip = wantCCW ? sum < 0 : sum > 0, cap = [];
+      for (let i = 0; i < loc.length; i += 3) { if (flip) cap.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]); else cap.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]); }
+      fixTJunctions(cap, ring);
+      const xyOf = (id) => ringXY.get(id);
+      splitThroughPoints(cap, [ring], xyOf);
+      patchCap(cap, [ring], xyOf, wantCCW);
+      // Where the line passes close to itself, a cap edge between two of its points can double up an existing
+      // edge of the surface (straightening removes most of these). If one would, or the line crosses itself when
+      // flattened, the cap is fanned from a centre point instead: a fan only joins line points to the centre.
+      let clash = keep.length < n;
+      for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) if (surf.has(ek(cap[i + k], cap[i + (k + 1) % 3]))) { clash = true; break; }
+      const per = opts.perLoop ? opts.perLoop[li] || {} : opts;
+      const sec = { loops: [makeLoop(ring, [], xy)] }; sec.regions = buildRegions(sec.loops);
+      const keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(sec, k.x, k.y) === 0);
+      const plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : [];
+      return { ring, n, lf, F, xy, wantCCW, cap, clash, keys, plugs, joined: keys.length + plugs.length, sec };
+    });
+    const joined = caps.some(c => c.joined), allKeys = caps.flatMap(c => c.keys), allPlugs = caps.flatMap(c => c.plugs);
+    const base1 = tris[1].length, base2 = tris[2].length;
+    let pins = [];
     const makeParts = (fan) => {
-      tris[1].length = base1; tris[2].length = base2;
-      if (keys.length || plugs.length) ({ V, pins } = curvedLoopCap(pos, tris, ring, copy, xy, lf.h, F, wantCCW, keys, cfg, surf, ek, plugs));
-      else if (fan) {
-        const c1 = nv + n, c2 = nv + n + 1, [fx, fy] = fanCentre(xy);
-        const fc = [0, 1, 2].map(k => F.o[k] + F.u[k] * fx + F.v[k] * fy);
-        for (const c of [c1, c2]) { pos[3 * c] = fc[0]; pos[3 * c + 1] = fc[1]; pos[3 * c + 2] = fc[2]; }
-        const fanTris = [];
-        for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; fanTris.push(c1, b, a); } // runs against side 1's border, like the flat cap
-        tris[1].push(...fanTris);
-        for (let i = 0; i < fanTris.length; i += 3) tris[2].push(c2, copy.get(fanTris[i + 2]), copy.get(fanTris[i + 1]));
-      } else {
-        tris[1].push(...flatCap);
-        for (let i = 0; i < flatCap.length; i += 3) tris[2].push(copy.get(flatCap[i]), copy.get(flatCap[i + 2]), copy.get(flatCap[i + 1])); // the same cap, facing the other piece
-      }
-      const src = V || pos;
+      tris[1].length = base1; tris[2].length = base2; pins = [];
+      let src = pos;
+      caps.forEach((c, li) => {
+        const { ring, n, F, xy, wantCCW, cap } = c;
+        if (c.joined) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys, cfg, surf, ek, c.plugs); src = r.V; pins.push(...r.pins); }
+        else if (fan[li]) {
+          const c1 = extra + 2 * li, c2 = c1 + 1, [fx, fy] = fanCentre(xy);
+          const fc = [0, 1, 2].map(k => F.o[k] + F.u[k] * fx + F.v[k] * fy);
+          for (const cc of [c1, c2]) { src[3 * cc] = fc[0]; src[3 * cc + 1] = fc[1]; src[3 * cc + 2] = fc[2]; }
+          const fanTris = [];
+          for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; fanTris.push(c1, b, a); } // runs against side 1's line, like the flat cap
+          tris[1].push(...fanTris);
+          for (let i = 0; i < fanTris.length; i += 3) tris[2].push(c2, copy.get(fanTris[i + 2]), copy.get(fanTris[i + 1]));
+        } else {
+          tris[1].push(...cap);
+          for (let i = 0; i < cap.length; i += 3) tris[2].push(copy.get(cap[i]), copy.get(cap[i + 2]), copy.get(cap[i + 1])); // the same cap, facing the other piece
+        }
+      });
       const build = (list) => {
         const map = new Map(), out = [], idx = new Uint32Array(list.length);
         for (let i = 0; i < list.length; i++) { const v = list[i]; let w = map.get(v); if (w === undefined) { w = out.length / 3; map.set(v, w); out.push(src[3 * v], src[3 * v + 1], src[3 * v + 2]); } idx[i] = w; }
         const positions = new Float32Array(out);
         return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions) };
       };
-      const parts = [build(tris[1]), build(tris[2])];
-      // other shells the border never touched (eyes, separate pieces) stay with the piece around them, or the bigger one
+      const one = build(tris[1]), two = build(tris[2]);
+      one.first = true;
+      const rest = L > 1 ? separateShells(two.positions, two.indices) : [];
+      const parts = [one, ...(rest.length ? rest : [two])];
+      // other shells the lines never touched (eyes, separate pieces) stay with the piece around them, or the bigger one
       if (tris[0].length) {
         const loose = separateShells(...(() => { const m = build(tris[0]); return [m.positions, m.indices]; })());
         const shells = loose.length ? loose : [build(tris[0])];
@@ -2182,30 +2208,37 @@ const KMCore = (() => {
       }
       return parts;
     };
-    let parts = makeParts(clash);
-    if (!joined && !clash && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(true); // the flat cap didn't seal: fan it instead
-    if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // the line rings a dip, so the "piece" would be empty air
+    let parts = makeParts(caps.map(c => c.clash));
+    if (!joined && caps.some(c => !c.clash) && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(() => true)); // a flat cap didn't seal: fan them instead
+    if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // a line rings a dip, so the "piece" would be empty air
       throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
     for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
     const tol = Math.max(1e-4, diag(bounds(P)) * 2e-6);
-    if (opts.minThickness > 0) { // neither piece may be too thin to print where they meet
-      const t = opts.minThickness, sec = { loops: [makeLoop(ring, [], xy)] };
-      sec.regions = buildRegions(sec.loops);
-      const pts = regionSamples(sec, 0, 300), th = jointThickness(parts[0], parts[1], F, pts, tol), area = sec.regions[0].area, cellArea = area / pts.length;
-      for (const s of ['a', 'b']) {
-        let n = 0, thin = 0, inner = 0;
-        th.forEach((q, i) => { if (!q) return; n++; if (q[s] < t) { thin++; if (pts[i].clear >= t) inner++; } });
-        if (n && (thin === n || inner * cellArea >= Math.max(Math.PI * t * t, 0.4 * area)))
-          throw guardError(`Cutting along this line would leave a piece thinner than ${+t.toFixed(2)} mm, too thin to print. Pick a line round something thicker, or a flat cut here.`, 'thin');
+    // the two pieces each line separates: side 1, and the piece of side 2 holding that line's copied vertices
+    const keyOf = (x, y, z) => `${x},${y},${z}`;
+    const sets = parts.map(q => { const s = new Set(); for (let i = 0; i < q.positions.length; i += 3) s.add(keyOf(q.positions[i], q.positions[i + 1], q.positions[i + 2])); return s; });
+    const pair = (c) => { const k = keyOf(P[3 * c.ring[0]], P[3 * c.ring[0] + 1], P[3 * c.ring[0] + 2]); const other = parts.find((q, i) => !q.first && sets[i].has(k)); return [parts.find(q => q.first), other || parts.find(q => !q.first)]; };
+    for (const c of caps) {
+      const [p1, p2] = pair(c), F = c.F;
+      if (opts.minThickness > 0) { // neither piece may be too thin to print where they meet
+        const th0 = opts.minThickness, pts = regionSamples(c.sec, 0, 300), th = jointThickness(p1, p2, F, pts, tol), area = c.sec.regions[0].area, cellArea = area / pts.length;
+        for (const s of ['a', 'b']) {
+          let n = 0, thin = 0, inner = 0;
+          th.forEach((q, i) => { if (!q) return; n++; if (q[s] < th0) { thin++; if (pts[i].clear >= th0) inner++; } });
+          if (n && (thin === n || inner * cellArea >= Math.max(Math.PI * th0 * th0, 0.4 * area)))
+            throw guardError(`Cutting along this line would leave a piece thinner than ${+th0.toFixed(2)} mm, too thin to print. Pick a line round something thicker, or a flat cut here.`, 'thin');
+        }
+      }
+      const mid = [p1, p2].map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
+      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(cfg, c.keys, c.plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
+        const wedged = L > 1 && caps.filter(d => pair(d)[1] === p2).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
+        throw guardError(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
+          : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
+          : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked');
       }
     }
-    const mid = parts.map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
-    if (lockedPairs(parts, F.n, tol, { anyDirection: !joined, distance: pullDistance(cfg, keys, plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
-      throw guardError(joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
-        : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked');
-    }
     parts.sort((x, y) => y.volume - x.volume);
-    return { parts, pins, length: loop.length, frame: F };
+    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs };
   }
   // The keyed cap for a curved cut: the face that follows the line (capHeight), with a hole per key, made once and
   // shared by both pieces so they meet exactly. Round each key's socket outline the face is the same on both sides;
@@ -2299,6 +2332,33 @@ const KMCore = (() => {
     }
     if (cfg.type === 'dowel') for (const k of keys) { const zc = (k.lo + k.hi) / 2; pins.push(makePin((x, y, z) => at(x, y, z + zc), k, k.spec, k.cfg.length)); }
     return { V, pins };
+  }
+
+  /* ---------- splitting off a region ----------
+     What ZBrush and Meshmixer do with a selected group: the region becomes its own piece, cut along its whole
+     outline. The outline may be several loops (an arm has a shoulder loop and a cuff loop), so the cuts go one
+     loop at a time, each on the piece that still holds the region, with that loop's own keys or plug. */
+  function regionLoops(P, I, seg, g) { return regionOutlines(P, I, seg).filter(l => l.region === g); }
+  function splitRegion(P, I, seg, g, opts = {}) {
+    const loops = regionLoops(P, I, seg, g);
+    if (!loops.length) throw new Error('This region covers the whole surface, so there is nothing to split it from.');
+    if (loops.some(l => !l.closed)) throw new Error('This region’s outline pinches to a point somewhere, so it can’t be cut along cleanly. Try a different fold angle.');
+    const r = cutAlongLoops(P, I, loops, opts);
+    const mine = r.parts.findIndex(q => q.first);
+    if (mine > 0) r.parts.unshift(...r.parts.splice(mine, 1)); // the region's own piece first
+    for (const q of r.parts) delete q.first;
+    return { ...r, loops: loops.length };
+  }
+  // The region under a point on the surface: the triangle nearest it, by its centre (none when the point is far
+  // from the surface).
+  function regionAtPoint(P, I, seg, point) {
+    let best = -1, bd = diag(bounds(P)) * 0.05;
+    for (let t = 0; t < I.length / 3; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const d = Math.hypot((P[a] + P[b] + P[c]) / 3 - point[0], (P[a + 1] + P[b + 1] + P[c + 1]) / 3 - point[1], (P[a + 2] + P[b + 2] + P[c + 2]) / 3 - point[2]);
+      if (d < bd) { bd = d; best = t; }
+    }
+    return best < 0 ? -1 : seg.groupOf[best];
   }
 
   // Border edges as line segments, nudged a hair off the surface so they draw on top of it.
@@ -3175,7 +3235,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, regionLoops, regionAtPoint, cutAlongLoops,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };

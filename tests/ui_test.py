@@ -578,10 +578,10 @@ with sync_playwright() as p:
     check('…and the plane is where it was, with its toolbar back', pg.is_visible('#planeBar') and a1 == a0, (a0, a1))
     pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000)
     check('the cut preview steps aside while regions show', not pg.is_visible('#areaTags [data-area-tag]') or pg.locator('#areaTags[hidden]').count() == 1)
-    pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 80; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
+    pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 45; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
     pg.wait_for_timeout(500)
     count80 = pg.inner_text('#regionsCount')
-    check('a higher threshold finds no more regions', int(count80.split()[0]) <= int(count.split()[0]) and '80°' in pg.inner_text('#regionsAngleOut'), (count, count80))
+    check('a higher fold threshold finds no more regions', int(count80.split()[0]) <= int(count.split()[0]) and '45°' in pg.inner_text('#regionsAngleOut'), (count, count80))
     n_parts = pg.locator('#partList li[data-id]').count()
     if pg.locator('[data-act=cut]').count() == 0:
         pg.locator('#partList li[data-id] [data-act=select]').first.click()
@@ -599,9 +599,9 @@ with sync_playwright() as p:
     pg.set_input_files('#fileInput', str(OUT / 'dumbbell.stl'))
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1", timeout=20000)
     pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000); pg.wait_for_timeout(300)
-    pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 35; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
+    pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 15; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
     pg.wait_for_timeout(400)
-    check('with regions on, the hint says to click a border line', 'border line' in pg.inner_text('#hint') and 'Click a dark border line' in pg.inner_text('#cutLineInfo'))
+    check('with regions on, the hint says to click a region or a border line', 'region' in pg.inner_text('#hint') and 'border line' in pg.inner_text('#hint') and 'Click a region to split it off' in pg.inner_text('#cutLineInfo'))
     ax = [0.55, 0.3, 0.78]; L = math.sqrt(sum(v * v for v in ax)); ax = [v / L for v in ax]
     u = [ax[1], -ax[0], 0]; L = math.sqrt(sum(v * v for v in u)); u = [v / L for v in u]
     z = 12 + math.sqrt(144 - 2.5 ** 2)  # where the 5 mm bar meets the first ball
@@ -620,10 +620,22 @@ with sync_playwright() as p:
     check('undo puts the dumbbell back together', pg.locator('#partList li[data-id]').count() == 1)
     res2 = pg.evaluate("KeymasterDebug.pickCutLineAt(0, [500, 500, 500])")
     pg.wait_for_timeout(200)
-    check('a click far from any line says where to click', res2 is None and 'border lines' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    check('a click far from the part says where to click', res2 is None and 'border line' in pg.inner_text('#toast'), pg.inner_text('#toast'))
     pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam})"); pg.wait_for_timeout(100)
     pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
     check('Esc drops the picked line', pg.locator('[data-act=cut-line]').count() == 0)
+    # clicking the bar itself (a region with a seam at each end) splits it off along both seams at once
+    mid = [ax[k] * 30 + u[k] * 2.5 for k in range(3)]
+    res3 = pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {mid})"); pg.wait_for_timeout(200)
+    info3 = pg.inner_text('#cutLineInfo')
+    print('    bar region:', res3, info3.replace('\n', ' ')[:150])
+    check('clicking a region offers to split it off along its whole outline', bool(res3) and res3['ok'] and res3['region'] is not None and res3['loops'] == 2 and res3['pieces'] == 3 and 'Split off this region' in info3, (res3, info3))
+    pg.click('[data-act=cut-line]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 3", timeout=15000)
+    names3 = pg.locator('#partList .part-name').all_inner_texts()
+    check('splitting off the bar gives three pieces, A, B and C', len(names3) == 3 and all(n.endswith((' A', ' B', ' C')) for n in names3) and 'Split off the region' in pg.inner_text('#toast'), names3)
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    check('undo puts the dumbbell back together again', pg.locator('#partList li[data-id]').count() == 1)
     # keys on a curved cut: an arm in a sleeve, cut at the hem, gets pegs sized to fit
     import math as _m
     def arm_r(z):
