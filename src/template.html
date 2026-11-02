@@ -452,8 +452,8 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
       <div class="suggest-pins" id="suggestPins" aria-label="Suggested cut spots"></div>
       <div class="regions-panel" id="regionsPanel" hidden>
         <div class="rp-head"><strong>Surface regions</strong><output id="regionsCount"></output></div>
-        <label class="slider"><span class="lbl">Split at turns over</span><input type="range" id="regionsAngle" min="10" max="80" step="5" value="35" aria-label="Split the surface where it turns more sharply than this"><output id="regionsAngleOut">35°</output></label>
-        <p class="muted small">Colours show where the surface turns sharply, like ZBrush polygroups.</p>
+        <label class="slider"><span class="lbl">Split at folds over</span><input type="range" id="regionsAngle" min="5" max="45" step="5" value="15" aria-label="Split the surface where it folds inward more sharply than this"><output id="regionsAngleOut">15°</output></label>
+        <p class="muted small">Colours show the surface’s parts, split where it folds inward, like ZBrush polygroups.</p>
         <div id="cutLineInfo" class="cut-line-info"></div>
       </div>
       <p class="hint" id="hint" hidden></p>

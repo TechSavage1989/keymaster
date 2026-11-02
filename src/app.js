@@ -29,7 +29,7 @@
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5 },
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
-  state.regions = { on: false, angle: 35 };
+  state.regions = { on: false, angle: 60, fold: 15 };
   const history = { past: [], future: [] };
   let uid = 1;
   let downloads = null;
@@ -1217,7 +1217,7 @@
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { pickCutLineAt(partIndex, point) { pickCutLine(state.parts[partIndex], point); return state.regions.pick ? { closed: state.regions.pick.loop.closed, ok: !!state.regions.pick.result, error: state.regions.pick.error || '' } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { pickCutLineAt(partIndex, point) { pickCutLine(state.parts[partIndex], point); return state.regions.pick ? { closed: state.regions.pick.loop.closed, ok: !!state.regions.pick.result, error: state.regions.pick.error || '', region: state.regions.pick.region, loops: state.regions.pick.loops.length, pieces: state.regions.pick.result ? state.regions.pick.result.parts.length : 0 } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -1439,7 +1439,7 @@
     let t = '';
     const p = selectedPart();
     if (!state.parts.length) t = '';
-    else if (state.regions.on) t = 'Click a dark border line to cut along it. Press Enter to cut, Esc to pick again.';
+    else if (state.regions.on) t = 'Click a region to split it off, or a dark border line to cut along it. Enter cuts, Esc picks again.';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
     else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
     else if (state.cfg.type === 'plug') t = coarse ? 'Drag the arrow to slide the cut, the plane or a ring to tilt it. Each area gets a plug of its own shape.' : 'Drag the arrow to slide the cut, the plane or a ring to tilt it (Shift for fine steps). Each area gets a plug of its own shape. Alt-drag to orbit.';
@@ -1908,14 +1908,14 @@
     return [f(0), f(8), f(4)];
   }
   function regionsFor(p) {
-    const key = `${p.id}:${state.regions.angle}`;
-    if (!regionCache.has(key)) regionCache.set(key, K.segmentSurface(p.positions, p.indices, { angle: state.regions.angle }));
+    const key = `${p.id}:${state.regions.angle}:${state.regions.fold}`;
+    if (!regionCache.has(key)) regionCache.set(key, K.segmentSurface(p.positions, p.indices, { angle: state.regions.angle, fold: state.regions.fold }));
     return regionCache.get(key);
   }
   // Cut lines: each part's closed region borders and outlines, worked out with its regions.
   const lineCache = new Map();
   function linesFor(p) {
-    const key = `${p.id}:${state.regions.angle}`;
+    const key = `${p.id}:${state.regions.angle}:${state.regions.fold}`;
     if (!lineCache.has(key)) lineCache.set(key, K.cutLines(p.positions, p.indices, regionsFor(p)));
     return lineCache.get(key);
   }
@@ -1923,33 +1923,48 @@
   // show the line and what the cut would do.
   function pickCutLine(p, point) {
     clearPick();
-    const near = K.borderLoopNear(p.positions, regionsFor(p), linesFor(p), point);
-    if (!near || near.distance > K.diag(p.bbox) * 0.03) { toast('Click on or next to one of the dark border lines to cut along it.'); renderPick(); return; }
-    const pick = { partId: p.id, loop: near.loop, keys: [], plugs: [] };
-    // keys: placed and checked like a flat cut's, on the flat face at the line's best-fit plane
-    const cfg = coreCfg();
-    if (near.loop.closed && cfg.type !== 'none') {
-      try {
-        const an = K.analyzeLoop(p.positions, p.indices, near.loop, cfg, K.diag(p.bbox));
-        pick.frame = an.frame; pick.an = an;
-        if (cfg.type === 'plug') {
-          pick.plugs = K.planPlugs(an, cfg).filter(q => q.ok);
-          if (!pick.plugs.length) { const why = (K.planPlugs(an, cfg)[0] || {}).reason || 'no room'; pick.noKeys = `No plug inside this line (${why.charAt(0).toLowerCase() + why.slice(1)}), so it will be cut without one.`; }
-        } else {
-        const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, cfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, cfg, state.cfg.perArea, new Set());
-        const ok = K.evaluateKeys(an, keys, cfg, new Set());
-        pick.keys = keys.filter((k, i) => ok[i].ok);
-        if (!pick.keys.length) pick.noKeys = 'No room for keys inside this line at these settings, so it will be cut without them.';
-        }
-      } catch (err) { pick.noKeys = 'Keys couldn’t be placed on this line, so it will be cut without them.'; }
-    }
-    const minThickness = minWall();
-    try { pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { cfg, keys: pick.keys, plugs: pick.plugs, minThickness }); }
+    const seg = regionsFor(p), near = K.borderLoopNear(p.positions, seg, linesFor(p), point);
+    if (near && near.distance <= K.diag(p.bbox) * 0.015) { pickLoops(p, [near.loop], { loop: near.loop }); return; }
+    const g = K.regionAtPoint(p.positions, p.indices, seg, point);
+    if (g < 0) { toast('Click a region to split it off, or a dark border line to cut along it.'); renderPick(); return; }
+    pickLoops(p, K.regionLoops(p.positions, p.indices, seg, g), { region: g, seg });
+  }
+  // Try the cut along one line, or round a whole region (all its outline loops at once), with keys or a plug on
+  // each line from the key settings, and show the lines and what the cut would do.
+  function pickLoops(p, loops, info) {
+    const pick = { partId: p.id, loops, loop: info.loop || loops[0], region: info.region, keys: [], plugs: [], perLoop: [], frames: [], ans: [] };
+    const cfg = coreCfg(), minThickness = minWall(), D = K.diag(p.bbox);
+    const closed = loops.length > 0 && loops.every(l => l.closed);
+    if (closed && cfg.type !== 'none') {
+      for (const loop of loops) {
+        const per = { keys: [], plugs: [] };
+        try {
+          const an = K.analyzeLoop(p.positions, p.indices, loop, cfg, D);
+          pick.frames.push(an.frame); pick.ans.push(an);
+          if (cfg.type === 'plug') {
+            const pl = K.planPlugs(an, cfg);
+            per.plugs = pl.filter(q => q.ok);
+            if (!per.plugs.length && !pick.noKeys) { const why = (pl[0] || {}).reason || 'no room'; pick.noKeys = `No plug inside ${loops.length > 1 ? 'one of its lines' : 'this line'} (${why.charAt(0).toLowerCase() + why.slice(1)}), so that line will be cut without one.`; }
+          } else {
+            const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, cfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, cfg, state.cfg.perArea, new Set());
+            const ok = K.evaluateKeys(an, keys, cfg, new Set());
+            per.keys = keys.filter((k, i) => ok[i].ok);
+            if (!per.keys.length && !pick.noKeys) pick.noKeys = `No room for keys inside ${loops.length > 1 ? 'one of its lines' : 'this line'} at these settings, so that line will be cut without them.`;
+          }
+        } catch (err) { pick.frames.push(null); pick.ans.push(null); if (!pick.noKeys) pick.noKeys = 'Keys couldn’t be placed on this line, so it will be cut without them.'; }
+        pick.perLoop.push(per); pick.keys.push(...per.keys); pick.plugs.push(...per.plugs);
+      }
+    } else pick.perLoop = loops.map(() => ({ keys: [], plugs: [] }));
+    const run = (withJoints) => {
+      const o = { cfg, minThickness, perLoop: withJoints ? pick.perLoop : loops.map(() => ({ keys: [], plugs: [] })) };
+      return info.region !== undefined ? K.splitRegion(p.positions, p.indices, info.seg, info.region, o) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
+    };
+    try { pick.result = run(true); }
     catch (err) {
       if ((pick.keys.length || pick.plugs.length) && err.code !== 'thin') { // still offer the cut, without keys
         const what = pick.plugs.length ? 'A plug' : 'Keys', it = pick.plugs.length ? 'one' : 'them';
         try {
-          pick.result = K.cutAlongLoop(p.positions, p.indices, near.loop, { minThickness }); pick.keys = []; pick.plugs = [];
+          pick.result = run(false); pick.keys = []; pick.plugs = []; pick.perLoop = loops.map(() => ({ keys: [], plugs: [] }));
           pick.noKeys = err.code === 'locked' ? `${what} would make the pieces slide straight apart, and here they’d catch on each other, so it will be cut without ${it}.` : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`;
         } catch (e2) { pick.error = e2.message; }
       } else pick.error = err.message;
@@ -1957,13 +1972,19 @@
     state.regions.pick = pick;
     const v = views.get(p.id);
     if (v) {
-      const pts = near.loop.verts.map(i => new THREE.Vector3(p.positions[3 * i], p.positions[3 * i + 1], p.positions[3 * i + 2]));
-      const line = near.loop.closed ? new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: pick.error ? 0xe5484d : 0x2f6fe0, depthTest: false }))
-        : new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xe5484d, depthTest: false }));
-      line.renderOrder = 9;
-      v.pickLine = line; v.mesh.add(line);
-      if (pick.keys.length && pick.frame) { v.pickKeys = curvedKeyMarkers(pick.keys, pick.frame, pick.an); v.mesh.add(v.pickKeys); }
-      if (pick.plugs.length && pick.frame) { v.pickKeys = curvedPlugMarkers(pick.plugs, pick.frame, pick.an); v.mesh.add(v.pickKeys); }
+      const g = new THREE.Group(), markers = new THREE.Group();
+      loops.forEach((loop, li) => {
+        const pts = loop.verts.map(i => new THREE.Vector3(p.positions[3 * i], p.positions[3 * i + 1], p.positions[3 * i + 2]));
+        const line = loop.closed ? new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: pick.error ? 0xe5484d : 0x2f6fe0, depthTest: false }))
+          : new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xe5484d, depthTest: false }));
+        line.renderOrder = 9;
+        g.add(line);
+        const per = pick.perLoop[li], F = pick.frames[li], an = pick.ans[li];
+        if (per && F && an && per.keys.length) markers.add(curvedKeyMarkers(per.keys, F, an));
+        if (per && F && an && per.plugs.length) markers.add(curvedPlugMarkers(per.plugs, F, an));
+      });
+      v.pickLine = g; v.mesh.add(g);
+      if (markers.children.length) { v.pickKeys = markers; v.mesh.add(markers); }
     }
     renderPick();
     markDirty();
@@ -2018,7 +2039,7 @@
   }
   function clearPick() {
     for (const v of views.values()) {
-      if (v.pickLine) { v.mesh.remove(v.pickLine); v.pickLine.geometry.dispose(); v.pickLine.material.dispose(); v.pickLine = null; }
+      if (v.pickLine) { v.mesh.remove(v.pickLine); clearGroup(v.pickLine); v.pickLine = null; }
       if (v.pickKeys) { v.mesh.remove(v.pickKeys); clearGroup(v.pickKeys); v.pickKeys = null; }
     }
     state.regions.pick = null;
@@ -2026,20 +2047,24 @@
   function renderPick() {
     const el = $('#cutLineInfo'), pick = state.regions.pick;
     if (!el) return;
-    if (!pick) { el.innerHTML = `<p class="muted small">Click a dark border line to cut along it. Keys use your key settings.</p>`; return; }
-    const len = `${fmt(pick.loop.length)} mm`;
+    if (!pick) { el.innerHTML = `<p class="muted small">Click a region to split it off, or a dark border line to cut along it. Keys use your key settings.</p>`; return; }
+    const region = pick.region !== undefined, nl = pick.loops.length;
+    const len = `${fmt(pick.loops.reduce((s, l) => s + l.length, 0))} mm`;
     if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>`; return; }
     const cm3 = (v) => (v / 1000 >= 10 ? Math.round(v / 1000) : (v / 1000).toFixed(1));
-    const nk = pick.keys.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
-    const keyLine = pick.plugs && pick.plugs.length ? ` With a plug ${fmt(pick.plugs[0].depth)} mm deep.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
-    el.innerHTML = `<p class="status ok">${ICONS.check}<span>A ${len} line all the way round. It splits the part into pieces of ${cm3(pick.result.parts[0].volume)} and ${cm3(pick.result.parts[1].volume)} cm³.${keyLine}</span></p>
+    const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
+    const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
+    const vols = pick.result.parts.map(q => cm3(q.volume));
+    const what = region ? `This region’s outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting it off gives a piece of ${vols[0]} cm³ and leaves ${vols.length === 2 ? `${vols[1]} cm³` : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')} cm³`}.`
+      : `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]} cm³.`;
+    el.innerHTML = `<p class="status ok">${ICONS.check}<span>${what}${keyLine}</span></p>
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
-      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>Cut along this line</span></button>`;
+      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>${region ? 'Split off this region' : 'Cut along this line'}</span></button>`;
   }
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);
     if (!p || !pick.result) return;
-    const made = pick.result.parts.map((c, i) => makePart({ name: `${p.name} ${i ? 'B' : 'A'}`, color: i ? nextColor() : p.color, positions: c.positions, indices: c.indices }));
+    const made = pick.result.parts.map((c, i) => makePart({ name: `${p.name} ${String.fromCharCode(65 + i)}`, color: i ? nextColor() : p.color, positions: c.positions, indices: c.indices }));
     (pick.result.pins || []).forEach((pin, i) => made.push(makePart({ name: `${p.name} pin ${i + 1}`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' })));
     const idx = state.parts.indexOf(p);
     clearPick();
@@ -2048,7 +2073,8 @@
     syncScene();
     renderPick();
     const pinsMade = (pick.result.pins || []).length;
-    toast(`Cut along the line into 2 pieces${pinsMade ? ` and ${pinsMade} dowel pins` : ''}. Click another line to keep cutting.`);
+    const n = pick.result.parts.length;
+    toast(`${pick.region !== undefined ? `Split off the region: ${n} pieces` : 'Cut along the line into 2 pieces'}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}. Click another region or line to keep cutting.`);
   }
   regionsPanel.addEventListener('click', (e) => { if (e.target.closest('[data-act=cut-line]')) cutAlongPick(); });
   function applyRegions() {
@@ -2093,7 +2119,7 @@
   });
   $('#regionsAngle').addEventListener('input', (e) => { $('#regionsAngleOut').textContent = `${e.target.value}°`; });
   $('#regionsAngle').addEventListener('change', (e) => {
-    state.regions.angle = +e.target.value;
+    state.regions.fold = +e.target.value;
     clearPick();
     busy('Finding surface regions'); setTimeout(() => { applyRegions(); busy(null); }, 30);
   });

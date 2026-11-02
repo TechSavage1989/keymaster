@@ -896,6 +896,63 @@ console.log('cuts that can be printed and put together');
   check('a fanned cap is fanned from a point the whole line can be seen from', fc.folded < 1e-9 && Math.hypot(fc[0] + avgX, fc[1] + avgY) < 2, [fc, fc.folded, avgX, avgY]);
 }
 
+console.log('regions by folds, and splitting off a region');
+{
+  const lathe = (radius, len, seg = 64, rings = 200) => {
+    const pos = [0, 0, 0];
+    for (let i = 1; i < rings; i++) { const z = (i / rings) * len, r = radius(z); for (let j = 0; j < seg; j++) { const a = (j / seg) * 2 * Math.PI; pos.push(Math.cos(a) * r, Math.sin(a) * r, z); } }
+    pos.push(0, 0, len);
+    const S = pos.length / 3 - 1, idx = [];
+    for (let j = 0; j < seg; j++) idx.push(0, 1 + (j + 1) % seg, 1 + j);
+    for (let i = 0; i < rings - 2; i++) for (let j = 0; j < seg; j++) { const p0 = 1 + i * seg + j, p1 = 1 + i * seg + (j + 1) % seg; idx.push(p0, p1, p1 + seg, p0, p1 + seg, p0 + seg); }
+    const base = 1 + (rings - 2) * seg;
+    for (let j = 0; j < seg; j++) idx.push(S, base + j, base + (j + 1) % seg);
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  };
+  // a post with a gentle 25° inward fold at a third of its height and a gentle 25° outward ridge at two thirds:
+  // splitting at folds finds the fold and ignores the ridge; splitting at any turn needs a sharper angle than either
+  const k = Math.tan(25 * Math.PI / 180);
+  const post = lathe(z => (z < 2 ? Math.max(0.3, z * 5) : z < 20 ? 10 : z < 24 ? 10 - (z - 20) * k : z < 40 ? 10 - 4 * k : z < 44 ? 10 - 4 * k + (z - 40) * k : z < 58 ? 10 : Math.max(0.3, 10 * Math.sqrt(Math.max(0, 1 - ((z - 58) / 2) ** 2)))), 60);
+  const byFold = K.segmentSurface(post.positions, post.indices, { angle: 60, fold: 15 }), byTurn = K.segmentSurface(post.positions, post.indices, { angle: 35 });
+  const zOfGroup = (seg) => { const zs = new Map(); for (let t = 0; t < post.indices.length / 3; t++) { const g = seg.groupOf[t]; if (!zs.has(g)) zs.set(g, [Infinity, -Infinity]); const z = post.positions[3 * post.indices[3 * t] + 2]; zs.get(g)[0] = Math.min(zs.get(g)[0], z); zs.get(g)[1] = Math.max(zs.get(g)[1], z); } return [...zs.values()].sort((a, b) => a[0] - b[0]); };
+  const fz = zOfGroup(byFold);
+  // the inward folds are where the taper ends (24) and where the flare starts (40); the ridges at 20 and 44 don't split
+  check('splitting at folds finds the two inward folds and not the two outward ridges', byFold.count === byTurn.count + 2 && fz.some(([lo]) => Math.abs(lo - 24) < 0.5) && fz.some(([lo]) => Math.abs(lo - 40) < 0.5) && !fz.some(([lo]) => Math.abs(lo - 20) < 0.5 || Math.abs(lo - 44) < 0.5), [byFold.count, byTurn.count, fz]);
+  // a dumbbell: ball, bar, ball. The bar region has two loops; splitting it off gives three sealed pieces
+  const bell = lathe(z => { const ball = (c) => (Math.abs(z - c) < 12 ? Math.sqrt(144 - (z - c) ** 2) : 0); return Math.max(ball(12), ball(48), z > 6 && z < 54 ? 2.5 : 0, 0.05); }, 60, 48, 160);
+  const segB = K.segmentSurface(bell.positions, bell.indices, { angle: 60, fold: 15 });
+  const bar = (() => { let best = -1, bl = -Infinity; for (let g = 0; g < segB.count; g++) { const l = K.regionLoops(bell.positions, bell.indices, segB, g); if (l.length === 2 && segB.areas[g] > bl) { bl = segB.areas[g]; best = g; } } return best; })();
+  check('the dumbbell’s bar is a region with two loops', bar >= 0, segB.count);
+  const rB = K.splitRegion(bell.positions, bell.indices, segB, bar, { minThickness: 1.2 });
+  check('splitting off the bar gives three sealed pieces, the bar first, volume kept', rB.parts.length === 3 && rB.loops === 2 && allClosed(rB.parts) && rB.parts[0].volume < rB.parts[1].volume && Math.abs(sumVol(rB.parts) - bell.report.volume) / bell.report.volume < 1e-6, [rB.parts.map(q => q.volume.toFixed(0)), bell.report.volume]);
+  // with pegs on each loop
+  const pc = cfgOf({ type: 'peg', diameter: 2, length: 3, clearance: 0, margin: 0.8 }), loopsB = K.regionLoops(bell.positions, bell.indices, segB, bar);
+  const perLoop = loopsB.map(l => { const an = K.analyzeLoop(bell.positions, bell.indices, l, pc, 60); return { keys: K.autoPlaceKeys(an, pc, 1, new Set()), plugs: [] }; });
+  const rK = K.splitRegion(bell.positions, bell.indices, segB, bar, { cfg: pc, perLoop, minThickness: 1.2 });
+  check('…and with a peg on each loop: sealed, two pegs', perLoop.every(p => p.keys.length === 1) && rK.keys.length === 2 && allClosed(rK.parts), [perLoop.map(p => p.keys.length), rK.keys.length]);
+  // a band round a ring: no single line of its outline splits the ring, but the two together free the band
+  const tor = (() => { const pos = [], idx = [], A = 48, B = 20; for (let i = 0; i < A; i++) for (let j = 0; j < B; j++) { const u = i / A * 2 * Math.PI, v = j / B * 2 * Math.PI; pos.push((20 + 6 * Math.cos(v)) * Math.cos(u), (20 + 6 * Math.cos(v)) * Math.sin(u), 6 * Math.sin(v)); } for (let i = 0; i < A; i++) for (let j = 0; j < B; j++) { const a = i * B + j, b = ((i + 1) % A) * B + j, c = ((i + 1) % A) * B + (j + 1) % B, d = i * B + (j + 1) % B; idx.push(a, b, c, a, c, d); } return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) }); })();
+  const ntT = tor.indices.length / 3, ang = (t) => { let x = 0, y = 0; for (let k = 0; k < 3; k++) { x += tor.positions[3 * tor.indices[3 * t + k]]; y += tor.positions[3 * tor.indices[3 * t + k] + 1]; } return Math.atan2(y, x); };
+  const gHalf = new Int32Array(ntT); for (let t = 0; t < ntT; t++) gHalf[t] = Math.cos(ang(t)) > 0 ? 1 : 0;
+  const segH = K.bordersFromGroups(tor.positions, tor.indices, gHalf), lH = K.regionLoops(tor.positions, tor.indices, segH, 1);
+  let one = ''; try { K.cutAlongLoop(tor.positions, tor.indices, lH[0]); } catch (e) { one = e.message; }
+  const rH = K.splitRegion(tor.positions, tor.indices, segH, 1);
+  check('half a ring: one loop alone can’t split it, but the region split frees it', lH.length === 2 && /wouldn’t split/.test(one) && rH.parts.length === 2 && allClosed(rH.parts) && Math.abs(sumVol(rH.parts) - tor.report.volume) / tor.report.volume < 1e-6, [lH.length, one, rH.parts.length]);
+  // a third of the ring is held at both ends by the other two thirds, but a wedge-shaped slice always pulls out
+  const gThird = new Int32Array(ntT); for (let t = 0; t < ntT; t++) { const a = ang(t); gThird[t] = a > Math.PI / 3 && a < Math.PI ? 1 : 0; }
+  const rT = K.splitRegion(tor.positions, tor.indices, K.bordersFromGroups(tor.positions, tor.indices, gThird), 1);
+  check('a slice of a ring, held at both ends, still comes out (sideways)', rT.parts.length === 2 && allClosed(rT.parts));
+  // but a straight bar bridging two walls of one piece, cut with wavy faces, can't move any way: refused, and told why
+  const vox = (fill, nx, ny, nz, h = 0.5) => { const pos = [], idx = [], vid = new Map(); const v = (i, j, k) => { const key = (i * (ny + 1) + j) * (nz + 1) + k; let id = vid.get(key); if (id === undefined) { id = pos.length / 3; vid.set(key, id); pos.push(i * h, j * h, k * h); } return id; }; const f = (i, j, k) => i >= 0 && j >= 0 && k >= 0 && i < nx && j < ny && k < nz && fill((i + 0.5) * h, (j + 0.5) * h, (k + 0.5) * h); const quad = (a, b, c, d) => idx.push(a, b, c, a, c, d); for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) { if (!f(i, j, k)) continue; if (!f(i - 1, j, k)) quad(v(i, j, k), v(i, j, k + 1), v(i, j + 1, k + 1), v(i, j + 1, k)); if (!f(i + 1, j, k)) quad(v(i + 1, j, k), v(i + 1, j + 1, k), v(i + 1, j + 1, k + 1), v(i + 1, j, k + 1)); if (!f(i, j - 1, k)) quad(v(i, j, k), v(i + 1, j, k), v(i + 1, j, k + 1), v(i, j, k + 1)); if (!f(i, j + 1, k)) quad(v(i, j + 1, k), v(i, j + 1, k + 1), v(i + 1, j + 1, k + 1), v(i + 1, j + 1, k)); if (!f(i, j, k - 1)) quad(v(i, j, k), v(i, j + 1, k), v(i + 1, j + 1, k), v(i + 1, j, k)); if (!f(i, j, k + 1)) quad(v(i, j, k + 1), v(i + 1, j, k + 1), v(i + 1, j + 1, k + 1), v(i, j + 1, k + 1)); } return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) }); };
+  const frame = vox((x, y, z) => !(x >= 4 && x < 16 && z >= 4 && z < 16), 40, 12, 40); // a square frame, 20 mm, with a 12 mm hole
+  const ntF = frame.indices.length / 3, gBar = new Int32Array(ntF);
+  for (let t = 0; t < ntF; t++) { let x = 0, y = 0, z = 0; for (let k = 0; k < 3; k++) { const v = 3 * frame.indices[3 * t + k]; x += frame.positions[v] / 3; y += frame.positions[v + 1] / 3; z += frame.positions[v + 2] / 3; } const w = 1.2 * (Math.sin(2 * y) + Math.sin(2 * z)); gBar[t] = z > 15.5 && x > 7 + w && x < 13 + w ? 1 : 0; }
+  const segF = K.bordersFromGroups(frame.positions, frame.indices, gBar), lF = K.regionLoops(frame.positions, frame.indices, segF, 1);
+  let wedged = ''; try { K.splitRegion(frame.positions, frame.indices, segF, 1); } catch (e) { wedged = e.message; }
+  check('a bar bridging two walls of one piece, with wavy cut faces, is refused and told to split a neighbour first', lF.length === 2 && /held at more than one end/.test(wedged) && /neighbours first/.test(wedged), [lF.length, wedged]);
+  check('the region under a point, and none far from the surface', K.regionAtPoint(bell.positions, bell.indices, segB, [2.5, 0, 30]) === bar && K.regionAtPoint(bell.positions, bell.indices, segB, [500, 0, 0]) === -1);
+}
+
 console.log('plugs');
 {
   const block = (pts, z0, z1) => { // a prism over an outline (anticlockwise), closed with fans: fine for the shapes used here
