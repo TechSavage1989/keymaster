@@ -10,10 +10,11 @@ errors = []
 results = []
 
 def lathe_stl(path, radius, length, seg=48, rings=160):
-    # a solid of revolution along z, radius(z), closed at both ends, as a binary STL
-    import math, struct
+    # a solid of revolution along z, radius(z) or radius(z, angle), closed at both ends, as a binary STL
+    import math, struct, inspect
     pt = lambda z, a, r: [math.cos(a) * r, math.sin(a) * r, z]
-    grid = [[pt(length * i / rings, 2 * math.pi * j / seg, radius(length * i / rings)) for j in range(seg)] for i in range(1, rings)]
+    rad = radius if len(inspect.signature(radius).parameters) == 2 else (lambda z, a: radius(z))
+    grid = [[pt(length * i / rings, 2 * math.pi * j / seg, rad(length * i / rings, 2 * math.pi * j / seg)) for j in range(seg)] for i in range(1, rings)]
     a0, a1 = [0, 0, 0], [0, 0, length]
     tris = []
     for j in range(seg):
@@ -661,6 +662,29 @@ with sync_playwright() as p:
     pg.click('[data-act=keytype][data-value=peg]'); pg.wait_for_timeout(200)
     pg.screenshot(path=str(OUT / 'shot_curved.png'))
     pg.keyboard.press('Escape')
+    # a sleeve whose hem waves 3 mm up and down: the line is far from flat, and still gets pegs
+    def wavy_r(z, a):
+        hem = 40 + 3 * _m.sin(2 * a)
+        if z < 2: return max(0.3, z * 4)
+        if z < hem: return 8
+        if z < 78: return 5.5
+        return max(0.3, 5.5 * _m.sqrt(max(0, 1 - ((z - 78) / 2) ** 2)))
+    lathe_stl(str(OUT / 'wavysleeve.stl'), wavy_r, 80, seg=64, rings=200)
+    pg.set_input_files('#fileInput', str(OUT / 'wavysleeve.stl'))
+    pg.wait_for_function("document.querySelector('#partList .part-name') && document.querySelector('#partList .part-name').innerText.includes('wavysleeve')", timeout=20000)
+    if pg.get_attribute('#regionsBtn', 'aria-pressed') != 'true':
+        pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000)
+    pg.wait_for_timeout(300)
+    res = pg.evaluate("KeymasterDebug.pickCutLineAt(0, [5.6, 0, 40.2])")
+    pg.wait_for_timeout(200)
+    info = pg.inner_text('#cutLineInfo')
+    print('    wavy hem:', res, info.replace('\n', ' ')[:170])
+    check('a hem that waves up and down still gets pegs', bool(res) and res['ok'] and ' peg' in info and 'bends too far' not in info, info)
+    pg.click('[data-act=cut-line]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
+    check('cutting along the wavy hem with pegs gives two pieces', pg.locator('#partList li[data-id]').count() == 2)
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.click('#regionsBtn'); pg.wait_for_timeout(200)
     # a cut that would leave a sliver too thin to print is held back, and says which area and how to fix it
     boxes_stl(str(OUT / 'towers.stl'), [(0, 0, 0, 10, 10, 20), (20, 0, 0, 28, 10, 10.5)])
     pg.set_input_files('#fileInput', str(OUT / 'towers.stl'))

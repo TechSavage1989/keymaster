@@ -1887,14 +1887,11 @@
     if (near.loop.closed && cfg.type !== 'none') {
       try {
         const an = K.analyzeLoop(p.positions, p.indices, near.loop, cfg, K.diag(p.bbox));
-        pick.frame = an.frame;
-        if (!an.curved.flatEnough) pick.noKeys = 'This line bends too far out of flat for keys, so it will be cut without them.';
-        else {
-          const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, cfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, cfg, state.cfg.perArea, new Set());
-          const ok = K.evaluateKeys(an, keys, cfg, new Set());
-          pick.keys = keys.filter((k, i) => ok[i].ok);
-          if (!pick.keys.length) pick.noKeys = 'No room for keys inside this line at these settings, so it will be cut without them.';
-        }
+        pick.frame = an.frame; pick.an = an;
+        const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, cfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, cfg, state.cfg.perArea, new Set());
+        const ok = K.evaluateKeys(an, keys, cfg, new Set());
+        pick.keys = keys.filter((k, i) => ok[i].ok);
+        if (!pick.keys.length) pick.noKeys = 'No room for keys inside this line at these settings, so it will be cut without them.';
       } catch (err) { pick.noKeys = 'Keys couldn’t be placed on this line, so it will be cut without them.'; }
     }
     const minThickness = minWall();
@@ -1915,12 +1912,13 @@
         : new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xe5484d, depthTest: false }));
       line.renderOrder = 9;
       v.pickLine = line; v.mesh.add(line);
-      if (pick.keys.length && pick.frame) { v.pickKeys = curvedKeyMarkers(pick.keys, pick.frame); v.mesh.add(v.pickKeys); }
+      if (pick.keys.length && pick.frame) { v.pickKeys = curvedKeyMarkers(pick.keys, pick.frame, pick.an); v.mesh.add(v.pickKeys); }
     }
     renderPick();
     markDirty();
   }
-  function curvedKeyMarkers(keys, F) {
+  // Keys on a curved cut, drawn where they'll be: based on the face that follows the line, and as long as they'll be.
+  function curvedKeyMarkers(keys, F, an) {
     const g = new THREE.Group(), cfg = state.cfg;
     const world = (geom) => { // plane coordinates (u, v, n) to the part's coordinates
       for (const name of ['position', 'normal']) {
@@ -1933,13 +1931,16 @@
     };
     const sec = { regions: [] };
     for (const k of keys) {
-      const kc = K.keyCfg(cfg, k), ks = K.keyGeometrySpec(kc), ang = K.keyAngle(sec, -1, kc) + 0;
+      const kc = K.keyCfg(cfg, k), ks = K.keyGeometrySpec(kc), ang = an ? K.keyAngle(an.base, 0, kc) : K.keyAngle(sec, -1, kc);
       const prof = (rr, dd) => K.keyProfile(ks.shape, rr, dd, k.angle !== undefined ? k.angle : ang, ks.res).map(([x, y]) => [x + k.x, y + k.y]);
+      const lv = an ? K.keyLevels(an, cfg, k) : { lo: 0, hi: 0, mid: 0, tip: (cfg.pegSide === 'above' ? -1 : 1) * kc.length, pin: [-kc.length / 2, kc.length / 2] };
       let z0, z1, tipR = ks.r;
-      if (cfg.type === 'peg') { z0 = 0; z1 = (cfg.pegSide === 'above' ? -1 : 1) * kc.length; tipR = ks.r * ks.taper; }
-      else if (cfg.type === 'dowel') { z0 = -kc.length / 2; z1 = kc.length / 2; }
-      else { z0 = -kc.length; z1 = kc.length; }
-      const disc = new THREE.Mesh(world(fanGeometry(prof(ks.r, ks.cs), 0.02)), new THREE.MeshBasicMaterial({ color: 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: 0.8, depthTest: false }));
+      if (cfg.type === 'peg') { z0 = lv.mid; z1 = lv.tip; tipR = ks.r * ks.taper; }
+      else if (cfg.type === 'dowel') { [z0, z1] = lv.pin; }
+      else { z0 = lv.lo - kc.length; z1 = lv.hi + kc.length; }
+      const dg = fanGeometry(prof(ks.r, ks.cs), lv.mid + 0.02);
+      dg.attributes.position.array[0] = k.x; dg.attributes.position.array[1] = k.y; // the fan's middle is the key's
+      const disc = new THREE.Mesh(world(dg), new THREE.MeshBasicMaterial({ color: 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: 0.8, depthTest: false }));
       const body = new THREE.Mesh(world(prismGeometry(prof(ks.r, 0), prof(tipR, 0), z0, z1)), new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.4 }));
       disc.renderOrder = 8; body.renderOrder = 8;
       g.add(disc, body);

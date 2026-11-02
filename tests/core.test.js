@@ -661,22 +661,52 @@ console.log('curved cuts along a border');
     const r = K.cutAlongLoop(arm.positions, arm.indices, hem.loop, { cfg: c, keys: ks });
     const total = sumVol(r.parts) + sumVol(r.pins);
     const expect = arm.report.volume + keyVol(anL, c, ks) + sumVol(r.pins);
-    check(`curved cut at the hem with ${name}: keys fit, sealed, volume adds up`, anL.curved.flatEnough && ks.length >= 1 && ev.every(e => e.ok) && allClosed(r.parts) && allClosed(r.pins) && Math.abs(total - expect) / arm.report.volume < 1e-4, [ks.length, ev.filter(e => !e.ok), r.parts.map(q => K.edgeReport(q.indices)), total, expect]);
+    check(`curved cut at the hem with ${name}: keys fit, sealed, volume adds up`, ks.length >= 1 && ev.every(e => e.ok) && allClosed(r.parts) && allClosed(r.pins) && Math.abs(total - expect) / arm.report.volume < 1e-4, [ks.length, ev.filter(e => !e.ok), r.parts.map(q => K.edgeReport(q.indices)), total, expect]);
     if (name === 'dowels') check('dowel pins come with a curved cut', r.pins.length === ks.length);
   }
-  // the wavy border bends 4 mm either way, little for a 40 mm sphere: keys go on, and both pieces are sealed
-  const anW = K.analyzeLoop(sp.positions, sp.indices, loopsW[0], cfgOf({ type: 'peg' }), 40);
-  const kW = K.autoPlaceKeys(anW, cfgOf({ type: 'peg' }), 3, new Set());
-  const rW = K.cutAlongLoop(sp.positions, sp.indices, loopsW[0], { cfg: cfgOf({ type: 'peg' }), keys: kW });
-  check('pegs on a wavy curved cut: sealed, volume adds up', anW.curved.flatEnough && kW.length >= 2 && allClosed(rW.parts) && Math.abs(sumVol(rW.parts) - (sp.report.volume + keyVol(anW, cfgOf({ type: 'peg' }), kW))) / sp.report.volume < 1e-4, [kW.length, sumVol(rW.parts)]);
-  // a line that swoops 14 mm up and down on a 20 mm sphere is too bent for keys: refused with a reason, but it still cuts without them
+  // Keys on curved faces that follow the line. With no fit gap and straight pegs, each peg fills its socket except
+  // the 0.1 mm left under its tip, so the pieces' volume is the model's less exactly that.
+  const tight = cfgOf({ type: 'peg', clearance: 0, taper: 0 });
+  const underTips = (keys) => keys.reduce((s, k) => { const sp_ = K.keyGeometrySpec(K.keyCfg(tight, k)); return s + K.profileArea(K.keyProfile(sp_.shape, sp_.r, 0, 0, sp_.res)) * sp_.ca; }, 0);
+  // the wavy border bends 4 mm either way: keys go on, and both pieces are sealed
+  const anW = K.analyzeLoop(sp.positions, sp.indices, loopsW[0], tight, 40);
+  const kW = K.autoPlaceKeys(anW, tight, 3, new Set());
+  const rW = K.cutAlongLoop(sp.positions, sp.indices, loopsW[0], { cfg: tight, keys: kW });
+  check('pegs on a wavy curved cut: sealed, volume adds up', kW.length >= 2 && allClosed(rW.parts) && Math.abs(sumVol(rW.parts) - (sp.report.volume - underTips(kW))) / sp.report.volume < 1e-6, [kW.length, sumVol(rW.parts), sp.report.volume - underTips(kW)]);
+  const rW2 = K.cutAlongLoop(sp.positions, sp.indices, loopsW[0], { cfg: cfgOf({ type: 'peg', taper: 40 }), keys: K.autoPlaceKeys(K.analyzeLoop(sp.positions, sp.indices, loopsW[0], cfgOf({ type: 'peg', taper: 40 }), 40), cfgOf({ type: 'peg', taper: 40 }), 3, new Set()) });
+  check('tapered pegs with a fit gap on the wavy cut are sealed too', allClosed(rW2.parts), rW2.parts.map(q => K.edgeReport(q.indices)));
+  // a line that swoops 14 mm up and down on a 20 mm sphere: keys still go on, straight, with their bases on the face
   const gB = new Int32Array(ntS);
   for (let q = 0; q < ntS; q++) { let x = 0, y = 0, z = 0; for (let k = 0; k < 3; k++) { const v = 3 * sp.indices[3 * q + k]; x += sp.positions[v]; y += sp.positions[v + 1]; z += sp.positions[v + 2]; } gB[q] = z / 3 > 14 * Math.sin(2 * Math.atan2(y, x)) ? 1 : 0; }
   const lB = K.borderLoops(sp.positions, K.bordersFromGroups(sp.positions, sp.indices, gB)).filter(l => l.closed)[0];
-  const anB = K.analyzeLoop(sp.positions, sp.indices, lB, cfgOf({ type: 'peg' }), 40);
-  let msgB = ''; try { K.cutAlongLoop(sp.positions, sp.indices, lB, { cfg: cfgOf({ type: 'peg' }), keys: [{ x: 0, y: 0 }] }); } catch (e) { msgB = e.message; }
-  check('a strongly bent line is too bent for keys, and says so', !anB.curved.flatEnough && /bends too far/.test(msgB), [anB.curved, msgB]);
-  check('…but it still cuts without keys', allClosed(K.cutAlongLoop(sp.positions, sp.indices, lB).parts));
+  const anB = K.analyzeLoop(sp.positions, sp.indices, lB, tight, 40);
+  check('the swooping line really is bent (14 mm out of flat)', anB.curved.deviation > 12, anB.curved.deviation);
+  const kB = K.autoPlaceKeys(anB, tight, 3, new Set());
+  const rB = K.cutAlongLoop(sp.positions, sp.indices, lB, { cfg: tight, keys: kB });
+  check('keys go on a strongly bent line: sealed, volume adds up', kB.length >= 2 && allClosed(rB.parts) && Math.abs(sumVol(rB.parts) - (sp.report.volume - underTips(kB))) / sp.report.volume < 1e-6, [kB.length, sumVol(rB.parts), sp.report.volume - underTips(kB)]);
+  // a peg's length counts from the highest point of its base, so it reaches its full length into the other piece
+  const onSlope = kB.find(k => { const lv = K.keyLevels(anB, tight, k); return lv.hi - lv.lo > 1; }) || kB[0], lvB = K.keyLevels(anB, tight, onSlope);
+  const FB = anB.frame, heightOf = (q, i) => (q.positions[i] - FB.o[0]) * FB.n[0] + (q.positions[i + 1] - FB.o[1]) * FB.n[1] + (q.positions[i + 2] - FB.o[2]) * FB.n[2];
+  let tipFound = false;
+  for (const q of rB.parts) for (let i = 0; i < q.positions.length; i += 3) {
+    const lx = (q.positions[i] - FB.o[0]) * FB.u[0] + (q.positions[i + 1] - FB.o[1]) * FB.u[1] + (q.positions[i + 2] - FB.o[2]) * FB.u[2], ly = (q.positions[i] - FB.o[0]) * FB.v[0] + (q.positions[i + 1] - FB.o[1]) * FB.v[1] + (q.positions[i + 2] - FB.o[2]) * FB.v[2];
+    if (Math.hypot(lx - onSlope.x, ly - onSlope.y) < 0.01 && Math.abs(heightOf(q, i) - lvB.tip) < 0.02) tipFound = true;
+  }
+  check('a peg on a sloping face sticks out its full length past the highest point of its base', lvB.hi - lvB.lo > 1 && Math.abs(Math.abs(lvB.tip - (lvB.tip > 0 ? lvB.hi : lvB.lo)) - 6) < 1e-6 && tipFound, [lvB, tipFound]);
+  const steep = K.evaluateKeys(anB, [{ x: 13, y: 0 }], tight, new Set())[0];
+  check('where the face slopes more than 45° a key is refused, with the reason', !steep.ok && /too steep/.test(steep.reason), steep);
+  check('…and the line still cuts without keys', allClosed(K.cutAlongLoop(sp.positions, sp.indices, lB).parts));
+  // a peg needs solid under it in its own piece: on a lens 1 mm thick there isn't enough to hold one
+  const gL = new Int32Array(ntS);
+  for (let q = 0; q < ntS; q++) { let z = 0; for (let k = 0; k < 3; k++) z += sp.positions[3 * sp.indices[3 * q + k] + 2]; gL[q] = z / 3 > 19 ? 1 : 0; }
+  const lL = K.borderLoops(sp.positions, K.bordersFromGroups(sp.positions, sp.indices, gL)).find(l => l.closed);
+  const anL0 = K.analyzeLoop(sp.positions, sp.indices, lL, tight, 40), lensUp = anL0.frame.n[2] > 0;
+  const onLens = cfgOf({ type: 'peg', clearance: 0, diameter: 3, length: 2, margin: 1.2, pegSide: lensUp ? 'above' : 'below' });
+  const evLens = K.evaluateKeys(K.analyzeLoop(sp.positions, sp.indices, lL, onLens, 40), [{ x: 0, y: 0 }], onLens, new Set())[0];
+  check('a peg on a piece too thin to hold it is refused, with the reason', !evLens.ok && /Not enough solid under the key/.test(evLens.reason), evLens);
+  const intoLens = { ...onLens, pegSide: lensUp ? 'below' : 'above' };
+  const evInto = K.evaluateKeys(K.analyzeLoop(sp.positions, sp.indices, lL, intoLens, 40), [{ x: 0, y: 0 }], intoLens, new Set())[0];
+  check('…and a socket into it can’t fit either', !evInto.ok && /break through|too thin/.test(evInto.reason), evInto);
   // borders that can't split the part are refused with a reason
   const tower = (() => {
     const pos = [], idx = [];

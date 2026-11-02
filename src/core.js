@@ -1279,7 +1279,7 @@ const KMCore = (() => {
   // sectioned once and cached on the analysis.
   function depthFor(an, kcfg) {
     const src = an._src, plan = depthPlan(kcfg);
-    if (!src || an.base.error || kcfg.type === 'none') return an.depth;
+    if (!src || an.base.error || kcfg.type === 'none' || an.curved) return an.depth;
     const sig = plan.map(d => `${d.side}:${d.depth.toFixed(4)}:${d.need}`).join('|');
     if (sig === depthPlan(src.cfg).map(d => `${d.side}:${d.depth.toFixed(4)}:${d.need}`).join('|')) return an.depth;
     if (!src.cache.has(sig)) src.cache.set(sig, plan.map(d => ({ ...d, sec: section(src.P, src.I, shiftFrame(src.F, d.side * d.depth), src.scale) })));
@@ -1297,6 +1297,11 @@ const KMCore = (() => {
     let score = footprintClear(an.base, an.base.regions[ri], x, y, fp, m, exact);
     if (score < m) return { ok: false, reason: 'Too close to the edge', region: ri, score, slack: score - m };
     let slack = score - m;
+    if (an.curved) {
+      const c = curvedKeyCheck(an, cfg, spec, x, y, keyAngle(an.base, ri, cfg));
+      if (!c.ok) return { ok: false, reason: c.reason, region: ri, score: -Infinity, slack: c.slack };
+      return { ok: true, reason: '', region: ri, score: Math.min(score, m + c.slack), slack: Math.min(slack, c.slack) };
+    }
     for (const d of depth) {
       if (d.sec.error) continue;
       const rj = regionAt(d.sec, x, y);
@@ -1873,14 +1878,15 @@ const KMCore = (() => {
       cx += P[p]; cy += P[p + 1]; cz += P[p + 2];
     }
     const F = frameFromNormal(norm3([nx, ny, nz]), [cx / n, cy / n, cz / n]);
-    const xy = new Float64Array(2 * n);
+    const xy = new Float64Array(2 * n), h = new Float64Array(n);
     let dev = 0;
     for (let i = 0; i < n; i++) {
       const p = 3 * ring[i], d = [P[p] - F.o[0], P[p + 1] - F.o[1], P[p + 2] - F.o[2]];
       xy[2 * i] = d[0] * F.u[0] + d[1] * F.u[1] + d[2] * F.u[2]; xy[2 * i + 1] = d[0] * F.v[0] + d[1] * F.v[1] + d[2] * F.v[2];
-      dev = Math.max(dev, Math.abs(d[0] * F.n[0] + d[1] * F.n[1] + d[2] * F.n[2]));
+      h[i] = d[0] * F.n[0] + d[1] * F.n[1] + d[2] * F.n[2];
+      dev = Math.max(dev, Math.abs(h[i]));
     }
-    return { F, xy, dev, centre: [cx / n, cy / n, cz / n] };
+    return { F, xy, h, dev, centre: [cx / n, cy / n, cz / n] };
   }
   // Where to fan a curved cut's cap from: a point the flattened line can be seen from all the way round, if there
   // is one. Fanned from anywhere else, the cap folds over itself where the line doubles back, and the fold is a
@@ -1910,22 +1916,112 @@ const KMCore = (() => {
     pick.folded = pf;
     return pick;
   }
-  /* Keys on a curved cut sit on a flat face on the line's best-fit plane, joined to the line by a thin band, so
-     they're placed and checked like keys on a flat cut. The analysis looks like analyzePlane's, with the area
-     inside the line as the cut face. A line that strays from its plane by more than about a third of the area's
-     width would need too tall a band, so it is marked not flat enough for keys. */
+  /* The face of a curved cut follows the line: a smooth surface spanning it, with each point's height off the
+     line's best-fit plane blended from the heights of the line around it (mean value coordinates, which match the
+     line exactly at its edge and bend smoothly in between). */
+  function capHeight(xy, h) {
+    const n = xy.length / 2, dx = new Float64Array(n), dy = new Float64Array(n), r = new Float64Array(n), t = new Float64Array(n);
+    return (x, y) => {
+      for (let i = 0; i < n; i++) { dx[i] = xy[2 * i] - x; dy[i] = xy[2 * i + 1] - y; r[i] = Math.hypot(dx[i], dy[i]); if (r[i] < 1e-9) return h[i]; }
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n, cr = dx[i] * dy[j] - dx[j] * dy[i], dt = dx[i] * dx[j] + dy[i] * dy[j], den = r[i] * r[j] + dt;
+        if (Math.abs(den) < 1e-12 * r[i] * r[j]) { const s = r[i] / (r[i] + r[j]); return h[i] + (h[j] - h[i]) * s; } // on the line itself
+        t[i] = cr / den; // tan of half the angle the edge subtends
+      }
+      let sw = 0, sh = 0;
+      for (let i = 0; i < n; i++) { const w = (t[(i + n - 1) % n] + t[i]) / r[i]; sw += w; sh += w * h[i]; }
+      return Math.abs(sw) > 1e-15 ? sh / sw : 0;
+    };
+  }
+  // The same, looked up from a grid worked out once, for the many checks key placement makes.
+  function capHeightGrid(xy, h, cells = 96) {
+    const exact = capHeight(xy, h);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < xy.length; i += 2) { x0 = Math.min(x0, xy[i]); x1 = Math.max(x1, xy[i]); y0 = Math.min(y0, xy[i + 1]); y1 = Math.max(y1, xy[i + 1]); }
+    const sx = (x1 - x0) / cells || 1, sy = (y1 - y0) / cells || 1, g = new Float64Array((cells + 1) * (cells + 1));
+    for (let i = 0; i <= cells; i++) for (let j = 0; j <= cells; j++) g[i * (cells + 1) + j] = exact(x0 + i * sx, y0 + j * sy);
+    return (x, y) => {
+      const fx = Math.min(cells - 1e-9, Math.max(0, (x - x0) / sx)), fy = Math.min(cells - 1e-9, Math.max(0, (y - y0) / sy)), i = Math.floor(fx), j = Math.floor(fy), a = fx - i, b = fy - j, k = i * (cells + 1) + j;
+      return (g[k] * (1 - a) + g[k + cells + 1] * a) * (1 - b) + (g[k + 1] * (1 - a) + g[k + cells + 2] * a) * b;
+    };
+  }
+  /* Keys on a curved cut sit on that face. The analysis looks like analyzePlane's, with the area inside the line as
+     the cut face, so keys are placed and sized the same way; their depth checks run along lines through the model
+     instead of on flat sections (curvedKeyCheck). */
   function analyzeLoop(P, I, loop, cfg, scale) {
     loop = straightLoop(P, I, loop);
-    const { F, xy, dev } = loopFrame(P, loop.verts);
+    const { F, xy, h, dev } = loopFrame(P, loop.verts);
     const L = makeLoop(loop.verts, [], xy);
     const base = { error: null, loops: [L], regions: buildRegions([L]) };
-    let room = 0;
-    for (const s of regionSamples(base, 0)) room = Math.max(room, s.clear);
-    const depth = [];
-    if (cfg.type !== 'none') for (const d of depthPlan(cfg)) depth.push({ ...d, sec: section(P, I, shiftFrame(F, d.side * d.depth), scale) });
-    const an = { frame: F, base, depth, curved: { deviation: dev, flatEnough: dev <= Math.max(0.35 * room, 0.5) } };
+    const an = { frame: F, base, depth: [], curved: { deviation: dev, heightAt: capHeightGrid(xy, h) } };
     Object.defineProperty(an, '_src', { value: { P, I, F, scale, cfg, cache: new Map() } });
+    Object.defineProperty(an.curved, 'rays', { get() { return raysFor(P, I, F); } });
     return an;
+  }
+  // Where a key sits on a curved face: the face's heights round its socket outline, lowest and highest.
+  function keyBase(an, spec, x, y, angle) {
+    const H = an.curved.heightAt;
+    let lo = H(x, y), hi = lo;
+    for (const [px, py] of keyProfile(spec.shape, spec.r, spec.cs, angle, spec.res)) { const z = H(x + px, y + py); if (z < lo) lo = z; if (z > hi) hi = z; }
+    return { lo, hi, mid: H(x, y) };
+  }
+  // How far a key goes on a curved face. Each key is straight, along the line's best-fit direction, with its base
+  // on the face. A peg sticks its full length past the highest point of its base on the socket's side, so it
+  // always reaches that far into the other piece; its socket is that deep plus the gap. The same goes for each
+  // dowel or magnet socket, measured from the base's furthest point on its own side.
+  function keyLevels(an, cfg, key) {
+    const kc = keyCfg(cfg, key), spec = keyGeometrySpec(kc), b = keyBase(an, spec, key.x, key.y, keyAngle(an.base, 0, kc));
+    const out = { lo: b.lo, hi: b.hi, mid: b.mid, sockets: spec.sockets.map(s => ({ side: s.side, floor: (s.side > 0 ? b.hi : b.lo) + s.side * s.depth })) };
+    if (cfg.type === 'peg') { const s = spec.sockets[0].side; out.tip = (s > 0 ? b.hi : b.lo) + s * kc.length; }
+    if (cfg.type === 'dowel') { out.pin = [(b.lo + b.hi) / 2 - kc.length / 2, (b.lo + b.hi) / 2 + kc.length / 2]; }
+    return out;
+  }
+  // A key on a curved face, checked along lines through the model: the face mustn't slope more than 45° under it,
+  // the walls round each socket must be solid to its floor, the floor must hold, and (for pegs) there must be
+  // solid at least a wall's depth under the peg in its own piece, so it's anchored and can't snap off.
+  function curvedKeyCheck(an, cfg, spec, x, y, angle) {
+    const m = cfg.margin, H = an.curved.heightAt, g = an.curved.rays, F = an.frame;
+    const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2], oz = F.o[0] * F.n[0] + F.o[1] * F.n[1] + F.o[2] * F.n[2];
+    const b = keyBase(an, spec, x, y, angle), width = 2 * (spec.r + spec.cs);
+    if (b.hi - b.lo > width) return { ok: false, reason: 'Cut face too steep here', slack: (width - (b.hi - b.lo)) / 2 };
+    const few = (prof, k) => { const step = Math.max(1, Math.floor(prof.length / k)); return prof.filter((_, i) => i % step === 0); };
+    // how far solid material runs from the face at (px, py) into side s, past the level `to` (negative: short of it).
+    // Where the face there isn't inside the model at all, the socket would break out: that counts as -Infinity for
+    // the reason, with how far off it is kept for ranking near misses.
+    const past = (px, py, s, to) => {
+      const r = solidRuns(g, px + ox + 1.3e-7, py + oy + 0.7e-7), c = H(px, py) + oz + s * 1e-4;
+      let gap = m;
+      for (let i = 0; i < r.length; i += 2) {
+        if (r[i] <= c && c <= r[i + 1]) return s > 0 ? r[i + 1] - oz - to : to - (r[i] - oz);
+        gap = Math.min(gap, c < r[i] ? r[i] - c : c - r[i + 1]);
+      }
+      return { out: -(gap + 0.05) };
+    };
+    const floorT = Math.max(0.8, m * 0.75);
+    let slack = Infinity;
+    for (const sk of spec.sockets) {
+      const s = sk.side, floor = (s > 0 ? b.hi : b.lo) + s * sk.depth;
+      for (const [px, py] of few(keyProfile(spec.shape, spec.r, spec.cs + 0.75 * m, angle, spec.res), 16)) {
+        const v = past(x + px, y + py, s, floor);
+        if (v.out !== undefined) return { ok: false, reason: 'Socket would break through the side', slack: Math.max(v.out, -m) };
+        if (v < 0) return { ok: false, reason: 'Wall around the socket is too thin', slack: Math.max(v, -m) };
+        slack = Math.min(slack, v);
+      }
+      for (const [px, py] of [[0, 0], ...few(keyProfile(spec.shape, spec.r * 0.6, 0, angle, spec.res), 6)]) {
+        const v = past(x + px, y + py, s, floor + s * floorT);
+        if (v.out !== undefined || v < 0) return { ok: false, reason: 'Socket would break through the surface', slack: Math.max(v.out !== undefined ? v.out : v, -m) };
+        slack = Math.min(slack, v);
+      }
+    }
+    if (cfg.type === 'peg') { // the peg's own piece is on the other side from its socket
+      const s = -spec.sockets[0].side, from = s > 0 ? b.hi : b.lo;
+      for (const [px, py] of [[0, 0], ...few(keyProfile(spec.shape, spec.r * 0.6, 0, angle, spec.res), 6)]) {
+        const v = past(x + px, y + py, s, from + s * m);
+        if (v.out !== undefined || v < 0) return { ok: false, reason: 'Not enough solid under the key to hold it', slack: Math.max(v.out !== undefined ? v.out : v, -m) };
+        slack = Math.min(slack, v);
+      }
+    }
+    return { ok: true, slack };
   }
   // A cut line with its zig-zags straightened. Where the line runs along two sides of one triangle and the third
   // side would do, it takes the third side (the triangle moves to the other piece, and the line moves by less than
@@ -2047,14 +2143,10 @@ const KMCore = (() => {
     const cfg = opts.cfg || { type: 'none' };
     const keys = cfg.type === 'none' ? [] : (opts.keys || []).filter(k => regionAt({ loops: [makeLoop(ring, [], xy)], regions: buildRegions([makeLoop(ring, [], xy)]) }, k.x, k.y) === 0);
     let V = null, pins = [];
-    if (keys.length) {
-      const a = analyzeLoop(P, I, loop, { type: 'none' }, 1);
-      if (!a.curved.flatEnough) throw new Error('This line bends too far out of flat for keys. Cut it without keys (set Keys to None), or use a flat cut here.');
-    }
     const flatCap = cap.slice(), base1 = tris[1].length, base2 = tris[2].length;
     const makeParts = (fan) => {
       tris[1].length = base1; tris[2].length = base2;
-      if (keys.length) ({ V, pins } = keyedLoopCap(pos, tris, ring, copy, xy, F, wantCCW, keys, cfg));
+      if (keys.length) ({ V, pins } = curvedLoopCap(pos, tris, ring, copy, xy, lf.h, F, wantCCW, keys, cfg, surf, ek));
       else if (fan) {
         const c1 = nv + n, c2 = nv + n + 1, [fx, fy] = fanCentre(xy);
         const fc = [0, 1, 2].map(k => F.o[k] + F.u[k] * fx + F.v[k] * fy);
@@ -2114,85 +2206,99 @@ const KMCore = (() => {
     parts.sort((x, y) => y.volume - x.volume);
     return { parts, pins, length: loop.length, frame: F };
   }
-  // The keyed cap for a curved cut. For each side: a band from the cut line to its copy flattened on the plane,
-  // then the flat face with holes for the keys, then each key's peg or socket, built as on a flat cut.
-  function keyedLoopCap(pos, tris, ring, copy, xy, F, wantCCW1, keys, cfg) {
+  // The keyed cap for a curved cut: the face that follows the line (capHeight), with a hole per key, made once and
+  // shared by both pieces so they meet exactly. Round each key's socket outline the face is the same on both sides;
+  // inside it, the peg's piece has a narrow ring of face out to the peg (the fit gap) and then the peg, and the
+  // socket's piece has the socket. Keys are straight, along the plane's normal, sized as keyLevels describes.
+  function curvedLoopCap(pos, tris, ring, copy, xy, hts, F, wantCCW1, keys, cfg, surf, ek) {
     const V = Array.from(pos), n = ring.length;
     const addV = (q) => { V.push(q[0], q[1], q[2]); return V.length / 3 - 1; };
     const at = (x, y, z) => [F.o[0] + F.u[0] * x + F.v[0] * y + F.n[0] * z, F.o[1] + F.u[1] * x + F.v[1] * y + F.n[1] * z, F.o[2] + F.u[2] * x + F.v[2] * y + F.n[2] * z];
     const posOf = (i) => [V[3 * i], V[3 * i + 1], V[3 * i + 2]];
+    const H = capHeight(xy, hts);
     const sec = { loops: [makeLoop(ring, [], xy)] }; sec.regions = buildRegions(sec.loops);
-    const pins = [];
-    for (const k of keys) { k.cfg = keyCfg(cfg, k); k.spec = keyGeometrySpec(k.cfg); k.angle = keyAngle(sec, 0, k.cfg); }
+    const sgOf = (s) => ((s === 1 ? wantCCW1 : !wantCCW1) ? -1 : 1); // which way each piece's material lies
+    const pegSide = cfg.pegSide === 'above' ? +1 : -1, pins = [];
+    // microscopic folds in the flattened line are snipped out (and stitched back in after), as on flat cuts; a line
+    // that really crosses over itself can't carry keys
+    const keep = untangledRing(xy);
+    if (keep.length < n) {
+      const area = (idx) => { let s = 0; for (let i = 0; i < idx.length; i++) { const a = idx[i], b = idx[(i + 1) % idx.length]; s += xy[2 * a] * xy[2 * b + 1] - xy[2 * b] * xy[2 * a + 1]; } return Math.abs(s) / 2; };
+      const kept = area(keep), full = area([...Array(n).keys()]);
+      if (Math.abs(full - kept) > Math.max(0.01 * kept, 0.05)) throw new Error('This line crosses over itself when flattened, so keys can’t sit on it.');
+    }
+    // the shared face: the line, with each key's socket outline as a hole
+    const flat = [], ids = [], holes = [], rings = [ring], ringXY = new Map(), other = new Map();
+    for (let i = 0; i < n; i++) { ringXY.set(ring[i], [xy[2 * i], xy[2 * i + 1]]); other.set(ring[i], copy.get(ring[i])); }
+    for (const q of keep) { ids.push(ring[q]); flat.push(xy[2 * q], xy[2 * q + 1]); }
+    for (const k of keys) {
+      k.cfg = keyCfg(cfg, k); k.spec = keyGeometrySpec(k.cfg); k.angle = keyAngle(sec, 0, k.cfg);
+      const ks = k.spec, out = keyProfile(ks.shape, ks.r, ks.cs, k.angle, ks.res), inn = keyProfile(ks.shape, ks.r, 0, k.angle, ks.res);
+      const z = (px, py) => H(k.x + px, k.y + py);
+      k.sock = out.map(([px, py]) => ({ x: k.x + px, y: k.y + py, z: z(px, py) }));
+      k.peg = inn.map(([px, py]) => ({ x: k.x + px, y: k.y + py, z: z(px, py) }));
+      let lo = H(k.x, k.y), hi = lo;
+      for (const q of k.sock.concat(k.peg)) { lo = Math.min(lo, q.z); hi = Math.max(hi, q.z); }
+      k.lo = lo; k.hi = hi;
+      k.ids = { 1: k.sock.map(q => addV(at(q.x, q.y, q.z))), 2: k.sock.map(q => addV(at(q.x, q.y, q.z))) };
+      k.ids[1].forEach((v, i) => { ringXY.set(v, [k.sock[i].x, k.sock[i].y]); other.set(v, k.ids[2][i]); });
+      rings.push(k.ids[1]); holes.push(ids.length);
+      k.ids[1].forEach((v, i) => { ids.push(v); flat.push(k.sock[i].x, k.sock[i].y); });
+    }
+    const loc = earcut(flat, holes);
+    let sum = 0; for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
+    const flip = wantCCW1 ? sum < 0 : sum > 0, cap = [];
+    for (let i = 0; i < loc.length; i += 3) { if (flip) cap.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]); else cap.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]); }
+    for (const r of rings) fixTJunctions(cap, r);
+    const xyOf = (v) => ringXY.get(v);
+    splitThroughPoints(cap, rings, xyOf);
+    patchCap(cap, rings, xyOf, wantCCW1);
+    for (let i = 0; i < cap.length; i += 3) for (let k = 0; k < 3; k++) {
+      const a = cap[i + k], b = cap[i + (k + 1) % 3];
+      if (a < pos.length / 3 && b < pos.length / 3 && surf.has(ek(a, b))) throw new Error('The face across this line would run along the surface, so keys can’t sit on it.');
+    }
+    tris[1].push(...cap);
+    for (let i = 0; i < cap.length; i += 3) tris[2].push(other.get(cap[i]), other.get(cap[i + 2]), other.get(cap[i + 1])); // the same face, facing the other piece
     for (const s of [1, 2]) {
-      const T = tris[s], id = (v) => (s === 1 ? v : copy.get(v)), wantCCW = s === 1 ? wantCCW1 : !wantCCW1;
-      const push3 = (a, b, c) => T.push(a, b, c);
+      const T = tris[s], sg = sgOf(s), nrm = F.n;
       const pushOriented = (a, b, c, e) => {
         const A = posOf(a), B = posOf(b), C = posOf(c);
         const nn = cross3([B[0] - A[0], B[1] - A[1], B[2] - A[2]], [C[0] - A[0], C[1] - A[1], C[2] - A[2]]);
-        if (nn[0] * e[0] + nn[1] * e[1] + nn[2] * e[2] < 0) push3(a, c, b); else push3(a, b, c);
+        if (nn[0] * e[0] + nn[1] * e[1] + nn[2] * e[2] < 0) T.push(a, c, b); else T.push(a, b, c);
       };
-      // the band: side 1 runs along the line (a to b), so its band and face run the other way; side 2 mirrors it
-      const proj = ring.map((v, i) => addV(at(xy[2 * i], xy[2 * i + 1], 0)));
-      for (let i = 0; i < n; i++) {
-        const j = (i + 1) % n, a = id(ring[i]), b = id(ring[j]);
-        if (s === 1) { push3(b, a, proj[i]); push3(b, proj[i], proj[j]); } else { push3(b, proj[i], a); push3(b, proj[j], proj[i]); }
-      }
-      // the flat face, with a hole per key
-      const flat = [], ids = [], holes = [], rings = [], ringXY = new Map();
-      const pushRing = (ringIds, rxy, outer) => {
-        rings.push(ringIds);
-        for (let q = 0; q < ringIds.length; q++) ringXY.set(ringIds[q], [rxy[2 * q], rxy[2 * q + 1]]);
-        if (!outer) holes.push(ids.length);
-        for (const q of outer ? untangledRing(rxy) : rxy.map((_, i) => i).filter(i => i % 2 === 0).map(i => i / 2)) { ids.push(ringIds[q]); flat.push(rxy[2 * q], rxy[2 * q + 1]); }
-      };
-      pushRing(proj, Array.from(xy), true);
-      const sg = wantCCW ? -1 : +1; // the side whose face points along the plane's normal is "below", as on flat cuts
-      const tubes = [];
+      const face = [-sg * nrm[0], -sg * nrm[1], -sg * nrm[2]]; // the face looks away from this piece's material
       for (const k of keys) {
-        const ks = k.spec, kc = k.cfg;
-        let role, grow, depth, dir, tipR = ks.r;
-        if (cfg.type === 'peg') {
-          const pegSide = cfg.pegSide === 'above' ? +1 : -1;
-          if (sg === pegSide) { role = 'peg'; grow = 0; depth = kc.length; dir = -sg; tipR = ks.r * ks.taper; }
-          else { role = 'socket'; grow = ks.cs; depth = kc.length + ks.ca; dir = sg; tipR = ks.r * ks.sockTip; }
-        } else { role = 'socket'; grow = ks.cs; dir = sg; depth = cfg.type === 'dowel' ? kc.length / 2 + ks.ca : kc.length + ks.ca; }
-        const prof = keyProfile(ks.shape, ks.r, grow, k.angle, ks.res), prof1 = keyProfile(ks.shape, tipR, grow, k.angle, ks.res);
-        const kr = [], kxy = [];
-        for (const [px, py] of prof) { kr.push(addV(at(k.x + px, k.y + py, 0))); kxy.push(k.x + px, k.y + py); }
-        pushRing(kr, kxy, false);
-        tubes.push({ k, role, prof1, depth, dir, ring: kr });
-      }
-      const loc = earcut(flat, holes);
-      let sum = 0; for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
-      const flip = wantCCW ? sum < 0 : sum > 0, cap = [];
-      for (let i = 0; i < loc.length; i += 3) { if (flip) cap.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]); else cap.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]); }
-      for (const r of rings) fixTJunctions(cap, r);
-      const xyOf = (v) => ringXY.get(v);
-      splitThroughPoints(cap, rings, xyOf);
-      patchCap(cap, rings, xyOf, wantCCW);
-      T.push(...cap);
-      const nrm = F.n;
-      for (const tb of tubes) {
-        const z = tb.dir * tb.depth;
-        const ring1 = tb.prof1.map(([px, py]) => addV(at(tb.k.x + px, tb.k.y + py, z)));
-        const center = addV(at(tb.k.x, tb.k.y, z)), axis0 = at(tb.k.x, tb.k.y, 0), m = tb.ring.length;
-        for (let i = 0; i < m; i++) {
-          const a = tb.ring[i], b = tb.ring[(i + 1) % m], c = ring1[(i + 1) % m], d = ring1[i];
-          const A = posOf(a), C = posOf(c), mid = [(A[0] + C[0]) / 2, (A[1] + C[1]) / 2, (A[2] + C[2]) / 2];
-          const along = (mid[0] - axis0[0]) * nrm[0] + (mid[1] - axis0[1]) * nrm[1] + (mid[2] - axis0[2]) * nrm[2];
-          let rx = mid[0] - axis0[0] - nrm[0] * along, ry = mid[1] - axis0[1] - nrm[1] * along, rz = mid[2] - axis0[2] - nrm[2] * along;
-          if (tb.role === 'socket') { rx = -rx; ry = -ry; rz = -rz; }
-          pushOriented(a, b, c, [rx, ry, rz]); pushOriented(a, c, d, [rx, ry, rz]);
-          const e = tb.role === 'peg' ? [nrm[0] * tb.dir, nrm[1] * tb.dir, nrm[2] * tb.dir] : [-nrm[0] * tb.dir, -nrm[1] * tb.dir, -nrm[2] * tb.dir];
-          pushOriented(center, ring1[i], ring1[(i + 1) % m], e);
+        const ks = k.spec, kc = k.cfg, sock = k.ids[s];
+        // a tube from a rim on the face to a flat end at height z, pointing along dir
+        const tube = (rim, endProf, z, dir, role) => {
+          const end = endProf.map(([px, py]) => addV(at(k.x + px, k.y + py, z))), centre = addV(at(k.x, k.y, z)), axis0 = at(k.x, k.y, 0), m = rim.length;
+          for (let i = 0; i < m; i++) {
+            const a = rim[i], b = rim[(i + 1) % m], c = end[(i + 1) % m], d = end[i];
+            const A = posOf(a), C = posOf(c), mid = [(A[0] + C[0]) / 2, (A[1] + C[1]) / 2, (A[2] + C[2]) / 2];
+            const along = (mid[0] - axis0[0]) * nrm[0] + (mid[1] - axis0[1]) * nrm[1] + (mid[2] - axis0[2]) * nrm[2];
+            let rx = mid[0] - axis0[0] - nrm[0] * along, ry = mid[1] - axis0[1] - nrm[1] * along, rz = mid[2] - axis0[2] - nrm[2] * along;
+            if (role === 'socket') { rx = -rx; ry = -ry; rz = -rz; }
+            pushOriented(a, b, c, [rx, ry, rz]); pushOriented(a, c, d, [rx, ry, rz]);
+            const e = role === 'peg' ? [nrm[0] * dir, nrm[1] * dir, nrm[2] * dir] : [-nrm[0] * dir, -nrm[1] * dir, -nrm[2] * dir];
+            pushOriented(centre, end[i], end[(i + 1) % m], e);
+          }
+        };
+        if (cfg.type === 'peg' && sg === pegSide) {
+          // the fit gap: a ring of face from the socket outline in to the peg (none with no gap), then the peg itself
+          const peg = ks.cs > 1e-9 ? k.peg.map(q => addV(at(q.x, q.y, q.z))) : sock, m = peg.length;
+          if (peg !== sock) for (let i = 0; i < m; i++) { const j = (i + 1) % m; pushOriented(sock[i], sock[j], peg[j], face); pushOriented(sock[i], peg[j], peg[i], face); }
+          const S = -sg, tip = (S > 0 ? k.hi : k.lo) + S * kc.length;
+          tube(peg, keyProfile(ks.shape, ks.r * ks.taper, 0, k.angle, ks.res), tip, S, 'peg');
+        } else {
+          const sk = ks.sockets.find(q => q.side === sg) || { depth: kc.length + ks.ca };
+          const floor = (sg > 0 ? k.hi : k.lo) + sg * sk.depth;
+          tube(sock, keyProfile(ks.shape, ks.r * ks.sockTip, ks.cs, k.angle, ks.res), floor, sg, 'socket');
         }
       }
     }
-    if (cfg.type === 'dowel') for (const k of keys) pins.push(makePin(at, k, k.spec, k.cfg.length));
+    if (cfg.type === 'dowel') for (const k of keys) { const zc = (k.lo + k.hi) / 2; pins.push(makePin((x, y, z) => at(x, y, z + zc), k, k.spec, k.cfg.length)); }
     return { V, pins };
   }
-
 
   // Border edges as line segments, nudged a hair off the surface so they draw on top of it.
   function regionBorderLines(P, I, seg, lift) {
@@ -2839,7 +2945,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
