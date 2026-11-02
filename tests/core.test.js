@@ -643,6 +643,27 @@ console.log('curved cuts along a border');
   const cw = K.cutAlongLoop(sp.positions, sp.indices, loopsW[0]);
   check('cutting along a wavy border gives two sealed pieces', cw.parts.length === 2 && allClosed(cw.parts), cw.parts.map(q => K.edgeReport(q.indices)));
   check('wavy cut keeps the volume', Math.abs(sumVol(cw.parts) - sp.report.volume) / sp.report.volume < 1e-6, [sumVol(cw.parts), sp.report.volume]);
+  // the cut face is drawn as a fine grid inside the line, so it bends smoothly instead of a few big facets: the
+  // typical bend between neighbouring face triangles is a few degrees (it was over 40°), and the face has many
+  // points of its own, not just the line's
+  const faceBends = (part, isFace) => { // bends (degrees) between neighbouring triangles of the face, and the face's vertex count
+    const Q = part.positions, J = part.indices, N = [], edges = new Map(), bends = [], verts = new Set();
+    for (let t = 0; t < J.length / 3; t++) {
+      const a = J[3 * t], b = J[3 * t + 1], c = J[3 * t + 2], A = [Q[3 * a], Q[3 * a + 1], Q[3 * a + 2]];
+      const u = [Q[3 * b] - A[0], Q[3 * b + 1] - A[1], Q[3 * b + 2] - A[2]], v = [Q[3 * c] - A[0], Q[3 * c + 1] - A[1], Q[3 * c + 2] - A[2]];
+      const nn = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], L = Math.hypot(...nn) || 1;
+      N[t] = nn.map(x => x / L);
+      if (!isFace([(A[0] + Q[3 * b] + Q[3 * c]) / 3, (A[1] + Q[3 * b + 1] + Q[3 * c + 1]) / 3, (A[2] + Q[3 * b + 2] + Q[3 * c + 2]) / 3]) || L < 1e-4) continue;
+      for (const w of [a, b, c]) verts.add(w);
+      for (const [p, q] of [[a, b], [b, c], [c, a]]) { const k = Math.min(p, q) + ':' + Math.max(p, q), o = edges.get(k); if (o !== undefined) bends.push(Math.acos(Math.max(-1, Math.min(1, N[t][0] * N[o][0] + N[t][1] * N[o][1] + N[t][2] * N[o][2]))) * 180 / Math.PI); else edges.set(k, t); }
+    }
+    bends.sort((a, b) => a - b);
+    return { median: bends[bends.length >> 1] || 0, verts: verts.size };
+  };
+  const insideSphere = (c) => Math.hypot(c[0], c[1], c[2]) < 19.5;
+  const smoothW = cw.parts.map(q => faceBends(q, insideSphere));
+  check('the wavy cut face is smooth: neighbouring triangles typically bend under 10°', smoothW.every(s => s.median < 10), smoothW);
+  check('…and is drawn from hundreds of points of its own, shared exactly by both pieces', smoothW.every(s => s.verts > 300) && smoothW[0].verts === smoothW[1].verts, smoothW);
   // keys on curved cuts: on a flat face on the line's best-fit plane, joined to the line by a thin band
   const prismK = (A0, A1, h) => { const mid = A0.map((q, i) => [(q[0] + A1[i][0]) / 2, (q[1] + A1[i][1]) / 2]); return h / 6 * (K.profileArea(A0) + 4 * K.profileArea(mid) + K.profileArea(A1)); };
   const keyVol = (an, cfg, keys) => { // pegs added minus sockets removed, key by key
@@ -673,6 +694,8 @@ console.log('curved cuts along a border');
   const kW = K.autoPlaceKeys(anW, tight, 3, new Set());
   const rW = K.cutAlongLoop(sp.positions, sp.indices, loopsW[0], { cfg: tight, keys: kW });
   check('pegs on a wavy curved cut: sealed, volume adds up', kW.length >= 2 && allClosed(rW.parts) && Math.abs(sumVol(rW.parts) - (sp.report.volume - underTips(kW))) / sp.report.volume < 1e-6, [kW.length, sumVol(rW.parts), sp.report.volume - underTips(kW)]);
+  const smoothK = faceBends(rW.parts.find(q => q.indices.length > rW.parts[0].indices.length / 3), (c) => insideSphere(c) && Math.abs(c[2]) < 1.5 && kW.every(k => Math.hypot(c[0] - (anW.frame.o[0] + anW.frame.u[0] * k.x + anW.frame.v[0] * k.y), c[1] - (anW.frame.o[1] + anW.frame.u[1] * k.x + anW.frame.v[1] * k.y)) > 4));
+  check('the face round the pegs is drawn finely too', smoothK.verts > 100 && smoothK.median < 10, smoothK);
   const rW2 = K.cutAlongLoop(sp.positions, sp.indices, loopsW[0], { cfg: cfgOf({ type: 'peg', taper: 40 }), keys: K.autoPlaceKeys(K.analyzeLoop(sp.positions, sp.indices, loopsW[0], cfgOf({ type: 'peg', taper: 40 }), 40), cfgOf({ type: 'peg', taper: 40 }), 3, new Set()) });
   check('tapered pegs with a fit gap on the wavy cut are sealed too', allClosed(rW2.parts), rW2.parts.map(q => K.edgeReport(q.indices)));
   // a line that swoops 14 mm up and down on a 20 mm sphere: keys still go on, straight, with their bases on the face

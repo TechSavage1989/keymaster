@@ -2107,6 +2107,96 @@ const KMCore = (() => {
       return Math.abs(sw) > 1e-15 ? sh / sw : 0;
     };
   }
+  /* A cap drawn as a regular grid inside the line, so a bumpy line gives a smooth face: grid points at least
+     three-quarters of a step in from every ring get the face's height (`H`), the cells with all four corners in
+     are two triangles each, the outline of those cells is traced, and the band between each ring and the grid is
+     triangulated with the flat-cut safeguards. rings[0] is the outer line, the rest are holes (key sockets).
+     Returns triangles over vertex ids (new grid ids from addVertex, with their flat coordinates put in xyMap),
+     or null when the shape is too small or awkward for a grid, so the caller can draw the cap the plain way. */
+  function gridCap(rings, xyOf, H, step, addVertex, xyMap, wantCCW) {
+    const pts = rings.map(r => r.map(xyOf)), flats = pts.map(flatOf), outer = flats[0];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < outer.length; i += 2) { x0 = Math.min(x0, outer[i]); x1 = Math.max(x1, outer[i]); y0 = Math.min(y0, outer[i + 1]); y1 = Math.max(y1, outer[i + 1]); }
+    const nx = Math.floor((x1 - x0) / step) + 1, ny = Math.floor((y1 - y0) / step) + 1;
+    if (nx < 4 || ny < 4) return null;
+    const gx = x0 + ((x1 - x0) - (nx - 1) * step) / 2, gy = y0 + ((y1 - y0) - (ny - 1) * step) / 2;
+    // points inside, clear of every ring
+    const ok = new Uint8Array(nx * ny), clear = 0.75 * step;
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+      const x = gx + i * step, y = gy + j * step;
+      if (!pointInRing(outer, x, y)) continue;
+      let good = distToRing(outer, x, y) >= clear;
+      for (let r = 1; r < flats.length && good; r++) if (pointInRing(flats[r], x, y) || distToRing(flats[r], x, y) < clear) good = false;
+      if (good) ok[i * ny + j] = 1;
+    }
+    // cells with all four corners in; cells that touch only at a corner would tangle the outline, so drop one
+    const cell = new Uint8Array((nx - 1) * (ny - 1)), C = (i, j) => (i >= 0 && j >= 0 && i < nx - 1 && j < ny - 1 ? cell[i * (ny - 1) + j] : 0);
+    for (let i = 0; i + 1 < nx; i++) for (let j = 0; j + 1 < ny; j++) if (ok[i * ny + j] && ok[(i + 1) * ny + j] && ok[i * ny + j + 1] && ok[(i + 1) * ny + j + 1]) cell[i * (ny - 1) + j] = 1;
+    for (let pass = 0; pass < 8; pass++) {
+      let changed = false;
+      for (let i = 0; i + 1 < nx; i++) for (let j = 0; j + 1 < ny; j++) {
+        if (!C(i, j)) continue;
+        if ((C(i + 1, j + 1) && !C(i + 1, j) && !C(i, j + 1)) || (C(i - 1, j + 1) && !C(i - 1, j) && !C(i, j + 1))) { cell[i * (ny - 1) + j] = 0; changed = true; }
+      }
+      if (!changed) break;
+    }
+    let any = 0; for (let i = 0; i < cell.length; i++) any += cell[i];
+    if (any < 4) return null;
+    // vertex ids for the corners in use
+    const id = new Int32Array(nx * ny).fill(-1), vid = (i, j) => { const k = i * ny + j; if (id[k] < 0) { const x = gx + i * step, y = gy + j * step; id[k] = addVertex(x, y); xyMap.set(id[k], [x, y]); } return id[k]; };
+    const cap = [];
+    for (let i = 0; i + 1 < nx; i++) for (let j = 0; j + 1 < ny; j++) if (C(i, j)) { const a = vid(i, j), b = vid(i + 1, j), c = vid(i + 1, j + 1), d = vid(i, j + 1); cap.push(a, b, c, a, c, d); }
+    // the grid's outline: boundary edges with the grid on their left, chained into loops
+    const next = new Map();
+    for (let i = 0; i + 1 < nx; i++) for (let j = 0; j + 1 < ny; j++) {
+      if (!C(i, j)) continue;
+      if (!C(i, j - 1)) next.set(vid(i, j), vid(i + 1, j));
+      if (!C(i + 1, j)) next.set(vid(i + 1, j), vid(i + 1, j + 1));
+      if (!C(i, j + 1)) next.set(vid(i + 1, j + 1), vid(i, j + 1));
+      if (!C(i - 1, j)) next.set(vid(i, j + 1), vid(i, j));
+    }
+    const loops = [], used = new Set();
+    for (const s of next.keys()) {
+      if (used.has(s)) continue;
+      const loop = []; let v = s;
+      while (v !== undefined && !used.has(v)) { used.add(v); loop.push(v); v = next.get(v); }
+      if (v !== s || loop.length < 4) return null;
+      loops.push(loop);
+    }
+    const at = (v) => xyMap.get(v) || xyOf(v), area = (ids) => { let s = 0; for (let i = 0; i < ids.length; i++) { const a = at(ids[i]), b = at(ids[(i + 1) % ids.length]); s += a[0] * b[1] - b[0] * a[1]; } return s / 2; };
+    const outerLoops = loops.filter(l => area(l) > 0), innerLoops = loops.filter(l => area(l) < 0);
+    // which hole rings sit inside a grid component (inside one of its inner outlines)
+    const holeHome = rings.slice(1).map(r => { const [x, y] = xyOf(r[0]); return innerLoops.findIndex(l => pointInRing(flatOf(l.map(at)), x, y)); });
+    // earcut over a polygon with holes, back to ids, then the safeguards
+    const tri = (polyIds, holeIds) => {
+      const flat = [], ids = [], holes = [];
+      for (const v of polyIds) { ids.push(v); const q = at(v); flat.push(q[0], q[1]); }
+      for (const h of holeIds) { holes.push(ids.length); for (const v of h) { ids.push(v); const q = at(v); flat.push(q[0], q[1]); } }
+      const loc = earcut(flat, holes), out = [];
+      let sum = 0; for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
+      const flip = sum < 0;
+      for (let i = 0; i < loc.length; i += 3) { if (flip) out.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]); else out.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]); }
+      for (const r of [polyIds, ...holeIds]) fixTJunctions(out, r);
+      splitThroughPoints(out, [polyIds, ...holeIds], at);
+      return out;
+    };
+    const append = (list) => { for (const v of list) cap.push(v); }; // never a spread: a fine cap can be too many for one call
+    append(tri(rings[0], [...outerLoops, ...rings.slice(1).filter((_, k) => holeHome[k] < 0)]));
+    innerLoops.forEach((l, k) => append(tri(l, rings.slice(1).filter((_, h) => holeHome[h] === k))));
+    if (!wantCCW) for (let i = 0; i < cap.length; i += 3) { const x = cap[i + 1]; cap[i + 1] = cap[i + 2]; cap[i + 2] = x; }
+    patchCap(cap, rings, at, wantCCW);
+    return cap;
+  }
+  // How finely to draw a cap: three-quarters of the line's own edge length (finer than the line, so the face follows
+  // the smooth heights between its points and the band to the line has no long slivers), and never more than a few
+  // thousand cells.
+  function capStep(xy) {
+    const n = xy.length / 2, lens = [];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n; lens.push(Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1])); x0 = Math.min(x0, xy[2 * i]); x1 = Math.max(x1, xy[2 * i]); y0 = Math.min(y0, xy[2 * i + 1]); y1 = Math.max(y1, xy[2 * i + 1]); }
+    lens.sort((a, b) => a - b);
+    return Math.max(lens[n >> 1] * 0.75, Math.sqrt(((x1 - x0) * (y1 - y0)) / 4000), 1e-3);
+  }
   // The same, looked up from a grid worked out once, for the many checks key placement makes.
   function capHeightGrid(xy, h, cells = 96) {
     const exact = capHeight(xy, h);
@@ -2285,8 +2375,8 @@ const KMCore = (() => {
     // side 2 gets its own copy of every line's vertices
     const copy = new Map();
     rings.forEach((ring, li) => ring.forEach((v, i) => copy.set(v, offs[li] + i)));
-    const pos = new Float32Array(M * 3);
-    pos.set(P);
+    const pos = new Array(M * 3).fill(0);
+    for (let i = 0; i < P.length; i++) pos[i] = P[i];
     for (const [v, c] of copy) { pos[3 * c] = P[3 * v]; pos[3 * c + 1] = P[3 * v + 1]; pos[3 * c + 2] = P[3 * v + 2]; }
     const tris = [[], [], []];
     for (let t = 0; t < nt; t++) {
@@ -2296,9 +2386,11 @@ const KMCore = (() => {
       tris[s].push(a, b, c);
     }
     const ek = (a, b) => (a < b ? a * M + b : b * M + a);
-    const surf = new Set(), along = new Set(); // the surface's edges, apart from the lines' own (the caps meet those)
+    const surf = new Set(), along = new Set(); // the surface's edges on both sides, apart from the lines' own (the caps meet those)
     for (const ring of rings) for (let i = 0; i < ring.length; i++) along.add(ek(ring[i], ring[(i + 1) % ring.length]));
-    for (let i = 0; i < tris[1].length; i += 3) for (let k = 0; k < 3; k++) { const e = ek(tris[1][i + k], tris[1][i + (k + 1) % 3]); if (!along.has(e)) surf.add(e); }
+    const uncopy = new Map(); for (const [v, c] of copy) uncopy.set(c, v);
+    const orig = (v) => (uncopy.has(v) ? uncopy.get(v) : v); // side 2's copies of the line points, by their original ids
+    for (const s of [1, 2]) for (let i = 0; i < tris[s].length; i += 3) for (let k = 0; k < 3; k++) { const e = ek(orig(tris[s][i + k]), orig(tris[s][i + (k + 1) % 3])); if (!along.has(e)) surf.add(e); }
     const cfg = opts.cfg || { type: 'none' };
     // each line's cap: the line projected on its best-fit plane, triangulated with the same safeguards as flat cuts
     const caps = rings.map((ring, li) => {
@@ -2326,28 +2418,37 @@ const KMCore = (() => {
       const sec = { loops: [makeLoop(ring, [], xy)] }; sec.regions = buildRegions(sec.loops);
       const keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(sec, k.x, k.y) === 0);
       const plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : [];
-      return { ring, n, lf, F, xy, wantCCW, cap, clash, keys, plugs, joined: keys.length + plugs.length, sec };
+      return { ring, n, lf, F, xy, wantCCW, cap, clash, keys, plugs, joined: keys.length + plugs.length, sec, xyOf, step: capStep(xy), H: capHeight(xy, lf.h) };
     });
     const joined = caps.some(c => c.joined), allKeys = caps.flatMap(c => c.keys), allPlugs = caps.flatMap(c => c.plugs);
     const base1 = tris[1].length, base2 = tris[2].length;
     let pins = [];
-    const makeParts = (fan) => {
+    const makeParts = (fan, fine = true) => { // fan: per loop, fan the cap from a centre point; fine: draw caps as grids
       tris[1].length = base1; tris[2].length = base2; pins = [];
       let src = pos;
       caps.forEach((c, li) => {
         const { ring, n, F, xy, wantCCW, cap } = c;
         if (c.joined) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys, cfg, surf, ek, c.plugs); src = r.V; pins.push(...r.pins); }
-        else if (fan[li]) {
-          const c1 = extra + 2 * li, c2 = c1 + 1, [fx, fy] = fanCentre(xy);
-          const fc = [0, 1, 2].map(k => F.o[k] + F.u[k] * fx + F.v[k] * fy);
-          for (const cc of [c1, c2]) { src[3 * cc] = fc[0]; src[3 * cc + 1] = fc[1]; src[3 * cc + 2] = fc[2]; }
-          const fanTris = [];
-          for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; fanTris.push(c1, b, a); } // runs against side 1's line, like the flat cap
-          tris[1].push(...fanTris);
-          for (let i = 0; i < fanTris.length; i += 3) tris[2].push(c2, copy.get(fanTris[i + 2]), copy.get(fanTris[i + 1]));
-        } else {
-          tris[1].push(...cap);
-          for (let i = 0; i < cap.length; i += 3) tris[2].push(copy.get(cap[i]), copy.get(cap[i + 2]), copy.get(cap[i + 1])); // the same cap, facing the other piece
+        else {
+          let flatTris = cap;
+          const xyMap = new Map([[extra + 2 * li, null]]);
+          if (fan[li]) {
+            const c1 = extra + 2 * li, c2 = c1 + 1, [fx, fy] = fanCentre(xy);
+            const fc = [0, 1, 2].map(k => F.o[k] + F.u[k] * fx + F.v[k] * fy);
+            for (const cc of [c1, c2]) { src[3 * cc] = fc[0]; src[3 * cc + 1] = fc[1]; src[3 * cc + 2] = fc[2]; }
+            xyMap.set(c1, [fx, fy]); copy.set(c1, c2);
+            flatTris = [];
+            for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; flatTris.push(c1, b, a); } // runs against side 1's line, like the flat cap
+          }
+          // the new points on the face that follows the line, each with a copy for the other piece
+          const addVertex = (x, y) => { const z = c.H(x, y), q = [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z), v1 = src.length / 3; src.push(q[0], q[1], q[2], q[0], q[1], q[2]); copy.set(v1, v1 + 1); return v1; };
+          // the grid cap is tried even where the plain cap would be fanned (its band may avoid the surface edge the
+          // flat cap doubled); a band edge between two line points that still doubles a surface edge means the plain cap
+          let grid = fine ? gridCap([ring], c.xyOf, c.H, c.step, addVertex, xyMap, wantCCW) : null;
+          if (grid) for (let i = 0; grid && i < grid.length; i += 3) for (let k = 0; k < 3; k++) { const a = grid[i + k], b = grid[i + (k + 1) % 3]; if (a < M && b < M && surf.has(ek(a, b))) { grid = null; break; } }
+          const capTris = grid || flatTris;
+          for (const v of capTris) tris[1].push(v);
+          for (let i = 0; i < capTris.length; i += 3) tris[2].push(copy.get(capTris[i]), copy.get(capTris[i + 2]), copy.get(capTris[i + 1])); // the same cap, facing the other piece
         }
       });
       const build = (list) => {
@@ -2375,7 +2476,8 @@ const KMCore = (() => {
       return parts;
     };
     let parts = makeParts(caps.map(c => c.clash));
-    if (!joined && caps.some(c => !c.clash) && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(() => true)); // a flat cap didn't seal: fan them instead
+    if (!joined && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(c => c.clash), false); // a grid cap didn't seal: plain caps
+    if (!joined && caps.some(c => !c.clash) && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(() => true), false); // a flat cap didn't seal: fan them instead
     if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // a line rings a dip, so the "piece" would be empty air
       throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
     for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
@@ -2461,8 +2563,13 @@ const KMCore = (() => {
       const a = cap[i + k], b = cap[i + (k + 1) % 3];
       if (a < pos.length / 3 && b < pos.length / 3 && surf.has(ek(a, b))) throw new Error('The face across this line would run along the surface, so keys can’t sit on it.');
     }
-    tris[1].push(...cap);
-    for (let i = 0; i < cap.length; i += 3) tris[2].push(other.get(cap[i]), other.get(cap[i + 2]), other.get(cap[i + 1])); // the same face, facing the other piece
+    // the face drawn finely, so it follows the line smoothly between the rims
+    const xyMap = new Map(), addVertex = (x, y) => { const z = H(x, y), v1 = addV(at(x, y, z)), v2 = addV(at(x, y, z)); other.set(v1, v2); return v1; };
+    let fine = gridCap(rings, xyOf, H, capStep(xy), addVertex, xyMap, wantCCW1);
+    if (fine) for (let i = 0; fine && i < fine.length; i += 3) for (let k = 0; k < 3; k++) { const a = fine[i + k], b = fine[i + (k + 1) % 3]; if (a < pos.length / 3 && b < pos.length / 3 && surf.has(ek(a, b))) { fine = null; break; } }
+    if (!fine) fine = cap;
+    for (const v of fine) tris[1].push(v);
+    for (let i = 0; i < fine.length; i += 3) tris[2].push(other.get(fine[i]), other.get(fine[i + 2]), other.get(fine[i + 1])); // the same face, facing the other piece
     for (const s of [1, 2]) {
       const T = tris[s], sg = sgOf(s), nrm = F.n;
       const pushOriented = (a, b, c, e) => {
