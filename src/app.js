@@ -945,7 +945,7 @@
   }
 
   /* ---------------- cutting ---------------- */
-  async function doCut() {
+  async function doCut(force = false) { // force: the owner's "cut anyway", past the printability warnings
     const p = selectedPart();
     if (!p) return;
     if (state.regions.on) setRegions(false);
@@ -961,8 +961,8 @@
       return;
     }
     const thin = thinShown();
-    if (thin.length) {
-      toast(K.thinMessage(an.base.regions, thin, minWall()), 'error', shownNow.length > 1 ? { label: 'Leave joined', fn: joinThin } : undefined);
+    if (thin.length && !force) {
+      toast(K.thinMessage(an.base.regions, thin, minWall()), 'error', { label: 'Cut anyway', fn: () => doCut(true) });
       return;
     }
     const bad = state.cut.evals.filter(e => !e.ok).length;
@@ -974,10 +974,10 @@
     await nextFrame();
     let res;
     try {
-      res = K.cutMesh(p.positions, p.indices, currentFrame(), { scale: K.diag(p.bbox), cfg: coreCfg(), keys: pointKeys() ? state.cut.keys : [], plugs: state.cfg.type === 'plug' ? state.cut.plugs.filter(q => q.ok && !state.cut.skip.has(q.region)) : [], skip: state.cut.skip, minThickness: minWall() });
+      res = K.cutMesh(p.positions, p.indices, currentFrame(), { scale: K.diag(p.bbox), cfg: coreCfg(), keys: pointKeys() ? state.cut.keys : [], plugs: state.cfg.type === 'plug' ? state.cut.plugs.filter(q => q.ok && !state.cut.skip.has(q.region)) : [], skip: state.cut.skip, minThickness: minWall(), force });
     } catch (err) {
       busy(null);
-      toast(err.message, 'error');
+      toast(err.message, 'error', err.code === 'locked' ? { label: 'Cut anyway', fn: () => doCut(true) } : undefined);
       return;
     }
     const groups = { below: [], above: [], both: [] };
@@ -1011,7 +1011,8 @@
       animate(900, (k) => { const w = Math.sin(k * Math.PI) * (1 - k * 0.3); v.offset.copy(dir).multiplyScalar(w); applyExplode(); });
     });
     const pieces = made.filter(m => m.kind !== 'pin').length;
-    toast(`Cut into ${pieces} pieces${res.pins.length ? ` and ${res.pins.length} dowel pins` : ''}. Click a part to keep cutting.`);
+    if (res.warnings && res.warnings.length) toast(`Cut made anyway, into ${pieces} pieces. ${res.warnings.map(w => w.message).join(' ')}`, 'warn');
+    else toast(`Cut into ${pieces} pieces${res.pins.length ? ` and ${res.pins.length} dowel pins` : ''}. Click a part to keep cutting.`);
   }
   function removeBadKeys() {
     state.cut.keys = state.cut.keys.filter((k, i) => state.cut.evals[i] && state.cut.evals[i].ok);
@@ -1722,7 +1723,7 @@
     const thin = thinShown();
     if (thin.length) { // ahead of everything else: this cut can't be made as it stands
       const many = shown.length > 1;
-      keyStatus = `<p class="status warn thin">${ICONS.alert}<span>${esc(K.thinMessage(regions, thin, minWall()))}</span></p>${many ? `<button class="btn small" data-act="join-thin">Leave ${new Set(thin.map(q => q.region)).size === 1 ? 'it' : 'them'} joined</button>` : ''}`;
+      keyStatus = `<p class="status warn thin">${ICONS.alert}<span>${esc(K.thinMessage(regions, thin, minWall()))}</span></p><div class="btn-row">${many ? `<button class="btn small" data-act="join-thin">Leave ${new Set(thin.map(q => q.region)).size === 1 ? 'it' : 'them'} joined</button>` : ''}<button class="btn small" data-act="cut-anyway" title="Make the cut against the warning">Cut anyway</button></div>`;
     }
     const lenLabel = c.type === 'magnet' ? 'Thickness' : 'Length';
     const shownShape = K.keyGeometrySpec(c).shape;
@@ -1818,6 +1819,7 @@
       case 'auto-keys': state.cut.auto = true; state.cut.active = -1; scheduleAnalysis(0); renderInspector(); break;
       case 'remove-bad': removeBadKeys(); break;
       case 'join-thin': joinThin(); break;
+      case 'cut-anyway': doCut(true); break;
       case 'remove-key': if (state.cut.active >= 0) removeKey(state.cut.active); break;
       case 'cut': doCut(); break;
       case 'export-one': exportParts(state.selectedId); break;
@@ -1975,19 +1977,24 @@
         pick.perLoop.push(per); pick.keys.push(...per.keys); pick.plugs.push(...per.plugs);
       }
     } else pick.perLoop = loops.map(() => ({ keys: [], plugs: [] }));
-    const run = (withJoints) => {
-      const o = { cfg, minThickness, perLoop: withJoints ? pick.perLoop : loops.map(() => ({ keys: [], plugs: [] })) };
+    const run = (withJoints, force) => {
+      const o = { cfg, minThickness, force, perLoop: withJoints ? pick.perLoop : loops.map(() => ({ keys: [], plugs: [] })) };
       return info.region !== undefined ? K.splitRegion(p.positions, p.indices, info.seg, info.region, o) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
     };
     try { pick.result = run(true); }
     catch (err) {
+      let failed = err, joints = true;
+      const what = pick.plugs.length ? 'A plug' : 'Keys', it = pick.plugs.length ? 'one' : 'them';
+      const dropJoints = () => { pick.keys = []; pick.plugs = []; pick.perLoop = loops.map(() => ({ keys: [], plugs: [] })); pick.noKeys = err.code === 'locked' ? `${what} would make the pieces slide straight apart, and here they’d catch on each other, so it will be cut without ${it}.` : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`; };
       if ((pick.keys.length || pick.plugs.length) && err.code !== 'thin') { // still offer the cut, without keys
-        const what = pick.plugs.length ? 'A plug' : 'Keys', it = pick.plugs.length ? 'one' : 'them';
-        try {
-          pick.result = run(false); pick.keys = []; pick.plugs = []; pick.perLoop = loops.map(() => ({ keys: [], plugs: [] }));
-          pick.noKeys = err.code === 'locked' ? `${what} would make the pieces slide straight apart, and here they’d catch on each other, so it will be cut without ${it}.` : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`;
-        } catch (e2) { pick.error = e2.message; }
-      } else pick.error = err.message;
+        joints = false;
+        try { pick.result = run(false); dropJoints(); failed = null; } catch (e2) { failed = e2; }
+      }
+      // a printability refusal (too thin, or pieces that hook) can be overridden: the cut is offered anyway, with the warning
+      if (failed && (failed.code === 'thin' || failed.code === 'locked')) {
+        try { pick.result = run(joints, true); if (!joints) dropJoints(); pick.forced = failed.message; } catch (e3) { failed = e3; }
+      }
+      if (failed && !pick.result) pick.error = failed.message;
     }
     state.regions.pick = pick;
     const v = views.get(p.id);
@@ -2077,9 +2084,9 @@
     const vols = pick.result.parts.map(q => cm3(q.volume));
     const what = region ? `This region’s outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting it off gives a piece of ${vols[0]} cm³ and leaves ${vols.length === 2 ? `${vols[1]} cm³` : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')} cm³`}.`
       : `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]} cm³.`;
-    el.innerHTML = `<p class="status ok">${ICONS.check}<span>${what}${keyLine}</span></p>
+    el.innerHTML = `${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}</span></p>`}
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
-      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>${region ? 'Split off this region' : 'Cut along this line'}</span></button>`;
+      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>${pick.forced ? (region ? 'Split it off anyway' : 'Cut along it anyway') : region ? 'Split off this region' : 'Cut along this line'}</span></button>`;
   }
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);
@@ -2094,7 +2101,7 @@
     renderPick();
     const pinsMade = (pick.result.pins || []).length;
     const n = pick.result.parts.length;
-    toast(`${pick.region !== undefined ? `Split off the region: ${n} pieces` : 'Cut along the line into 2 pieces'}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}. Click another region or line to keep cutting.`);
+    toast(`${pick.region !== undefined ? `Split off the region: ${n} pieces` : 'Cut along the line into 2 pieces'}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}. Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
   }
   regionsPanel.addEventListener('click', (e) => { if (e.target.closest('[data-act=cut-line]')) cutAlongPick(); });
   function applyRegions() {
