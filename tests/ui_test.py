@@ -677,6 +677,7 @@ with sync_playwright() as p:
     # paint an area with the brush, like a face selection in Meshmixer: two dabs on a ball, grow, then split it off
     pg.click('#paintBtn'); pg.wait_for_timeout(200)
     check('the paint button turns painting on, with the brush tools', pg.get_attribute('#paintBtn', 'aria-pressed') == 'true' and pg.is_visible('#paintTools') and 'paint' in pg.inner_text('#hint').lower(), pg.inner_text('#hint'))
+    check('the brush starts at a size to suit the model, faces show while painting, and the hint gives the size', 1 <= float(pg.input_value('#brushSize')) <= 4 and pg.get_attribute('#flatBtn', 'aria-pressed') == 'true' and 'mm wide' in pg.inner_text('#hint'), (pg.input_value('#brushSize'), pg.inner_text('#hint')))
     pg.fill('#brushSize', '4'); pg.press('#brushSize', 'Tab'); pg.wait_for_timeout(100)
     top = [ax[k] * 12 + u[k] * 12 for k in range(3)]; top2 = [ax[k] * 15.5 + u[k] * 11.5 for k in range(3)]  # on the side of a ball
     n1 = pg.evaluate(f"KeymasterDebug.paintAt(0, {top})"); n2 = pg.evaluate(f"KeymasterDebug.paintAt(0, {top2})")
@@ -696,7 +697,18 @@ with sync_playwright() as p:
     pg.evaluate(f"KeymasterDebug.paintAt(0, {top})"); nE = pg.evaluate(f"KeymasterDebug.paintAt(0, {top}, true)")
     check('erasing takes the paint off again', nE == 0, nE)
     pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
-    check('Esc stops painting', pg.get_attribute('#paintBtn', 'aria-pressed') == 'false' and not pg.is_visible('#paintTools'))
+    check('Esc stops painting, and faces go back to smooth', pg.get_attribute('#paintBtn', 'aria-pressed') == 'false' and not pg.is_visible('#paintTools') and pg.get_attribute('#flatBtn', 'aria-pressed') == 'false')
+    pg.click('#flatBtn'); pg.wait_for_timeout(100)
+    check('Show faces can be turned on by hand', pg.get_attribute('#flatBtn', 'aria-pressed') == 'true')
+    pg.click('#flatBtn'); pg.wait_for_timeout(100)
+    # the model's size and orientation tools stay on screen with a part chosen
+    check('the scale and turn tools show over the view with a part chosen', pg.is_visible('#modelTools') and pg.locator('#modelTools [data-act=scale]').count() == 2, pg.is_visible('#modelTools'))
+    size0 = pg.inner_text('#partList li[data-id] .part-size') if pg.locator('#partList li[data-id] .part-size').count() else pg.inner_text('#partList')
+    pg.click('#modelTools [data-act=scale][data-value="10"]'); pg.wait_for_timeout(500)
+    size1 = pg.inner_text('#partList li[data-id] .part-size') if pg.locator('#partList li[data-id] .part-size').count() else pg.inner_text('#partList')
+    check('x 10 from the view tools scales the model', size0 != size1 and '438' in size1, (size0, size1))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
     # a cut line drawn by hand: four points round a ball, closed with Enter, cut like any line
     pg.click('#drawLineBtn'); pg.wait_for_timeout(200)
     check('the draw button turns drawing on and the hint explains', pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'true' and 'Click points' in pg.inner_text('#hint'), pg.inner_text('#hint'))

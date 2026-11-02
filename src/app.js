@@ -24,6 +24,7 @@
     hidden: new Set(),
     explode: 0,
     wire: false,
+    flat: false, // show faces: flat shading, so every face of the mesh shows (painting turns it on)
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1 },
@@ -31,7 +32,7 @@
   };
   state.regions = { on: false, angle: 60, fold: 15 };
   state.draw = { on: false, points: [] }; // a cut line drawn by hand: points clicked on the chosen part
-  state.paint = { on: false, partId: null, sel: null, erase: false, size: 3 }; // a painted selection to split off, like a face selection in Meshmixer
+  state.paint = { on: false, partId: null, sel: null, erase: false, size: 3, sized: false }; // a painted selection to split off, like a face selection in Meshmixer
   const history = { past: [], future: [] };
   let uid = 1;
   let downloads = null;
@@ -240,7 +241,7 @@
     geom.setAttribute('position', new THREE.BufferAttribute(arr.pos, 3));
     geom.setAttribute('normal', new THREE.BufferAttribute(arr.nor, 3));
     geom.computeBoundingSphere(); geom.computeBoundingBox();
-    const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.66, metalness: 0, wireframe: state.wire });
+    const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.66, metalness: 0, wireframe: state.wire, flatShading: state.flat });
     const mesh = new THREE.Mesh(geom, mat);
     mesh.userData.partId = p.id;
     v = { geom, mesh, mat, offset: new THREE.Vector3() };
@@ -258,6 +259,7 @@
       v.mesh.visible = !state.hidden.has(p.id);
       v.mat.color.set(p.color);
       v.mat.wireframe = state.wire;
+      if (v.mat.flatShading !== state.flat) { v.mat.flatShading = state.flat; v.mat.needsUpdate = true; }
     }
     applyExplode();
     if (state.regions.on) applyRegions();
@@ -1321,7 +1323,7 @@
       return;
     }
     if (ptr.paint) { paintAt(e, e.shiftKey); return; }
-    if (state.regions.on) { if (!ptr.down) canvas.style.cursor = state.paint.on ? 'crosshair' : ''; return; } // nothing on the hidden plane to grab
+    if (state.regions.on) { if (!ptr.down) { canvas.style.cursor = state.paint.on ? 'crosshair' : ''; if (state.paint.on) hoverBrush(e); } return; } // nothing on the hidden plane to grab
     if (!ptr.down && selectedPart() && !tc.dragging) {
       const ring = tc.axis ? null : pickRing(e);
       setRingHover(ring ? ring.ax : null);
@@ -1443,7 +1445,11 @@
     if (on) { clearPick(); state.regions.last = null; if (state.draw.on) setDrawing(false); }
     const p = selectedPart();
     if (on && p && state.paint.partId !== p.id) { state.paint.partId = p.id; state.paint.sel = new Uint8Array(p.indices.length / 3); }
+    if (on && p && !state.paint.sized) { state.paint.size = Math.max(0.5, Math.round(K.diag(p.bbox) * 0.03 * 2) / 2); const inp = $('#brushSize'); if (inp) inp.value = state.paint.size; } // a brush to suit the model's size until it's set by hand
     if (!on) { state.paint.sel = null; state.paint.partId = null; }
+    // faces show while painting, so the brush is seen to pick faces
+    if (on && !state.flat) { state.flatAuto = true; setFlat(true); } else if (!on && state.flatAuto) { state.flatAuto = false; setFlat(false); }
+    brushRing.visible = false;
     renderPaint(); renderPick(); updateHint();
     const b = $('#paintBtn'); if (b) { b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.textContent = on ? 'Stop painting' : 'Paint an area'; }
     const tools = $('#paintTools'); if (tools) tools.hidden = !on;
@@ -1452,13 +1458,33 @@
   }
   function paintAt(e, erase) {
     const p = selectedPart(), v = p && views.get(p.id);
-    if (!v || !state.paint.sel) return false;
+    if (!v) return false;
+    if (state.paint.partId !== p.id || !state.paint.sel || state.paint.sel.length !== p.indices.length / 3) { state.paint.partId = p.id; state.paint.sel = new Uint8Array(p.indices.length / 3); } // the part changed under the brush (scaled, or another chosen)
     setNdc(e);
     const hit = raycaster.intersectObjects([v.mesh], false)[0];
+    moveBrushRing(hit);
     if (!hit) return false;
     const local = hit.point.clone().sub(v.mesh.position);
     paintDab(p, [local.x, local.y, local.z], hit.faceIndex, erase || state.paint.erase);
     return true;
+  }
+  // The brush shown on the surface: a circle the brush's size, lying on the face under the pointer
+  const brushRing = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([...Array(48).keys()].map(i => new THREE.Vector3(Math.cos(i / 48 * 2 * Math.PI), Math.sin(i / 48 * 2 * Math.PI), 0))), new THREE.LineBasicMaterial({ color: 0x2f6fe0, depthTest: false, transparent: true, opacity: 0.9 }));
+  brushRing.renderOrder = 10; brushRing.visible = false; scene.add(brushRing);
+  function moveBrushRing(hit) {
+    if (!hit || !state.paint.on) { if (brushRing.visible) { brushRing.visible = false; markDirty(); } return; }
+    brushRing.position.copy(hit.point);
+    const nrm = hit.face && hit.face.normal ? hit.face.normal.clone().normalize() : new THREE.Vector3(0, 0, 1);
+    brushRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), nrm);
+    brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size);
+    brushRing.visible = true;
+    markDirty();
+  }
+  function hoverBrush(e) {
+    const p = selectedPart(), v = p && views.get(p.id);
+    if (!v) { moveBrushRing(null); return; }
+    setNdc(e);
+    moveBrushRing(raycaster.intersectObjects([v.mesh], false)[0]);
   }
   function paintDab(p, point, face, erase) {
     const start = face !== undefined && face !== null && face >= 0 ? face : K.nearestTriangle(p.positions, p.indices, point, K.diag(p.bbox) * 0.05);
@@ -1588,6 +1614,8 @@
     $('#redoBtn').disabled = !history.future.length;
     $('#exportBtn').disabled = !state.parts.length;
     $('#viewTools').hidden = !state.parts.length;
+    $('#modelTools').hidden = !state.parts.length;
+    $('#flatBtn').setAttribute('aria-pressed', state.flat ? 'true' : 'false');
     $('#wireBtn').setAttribute('aria-pressed', state.wire ? 'true' : 'false');
     updateHint();
   }
@@ -1596,7 +1624,7 @@
     let t = '';
     const p = selectedPart();
     if (!state.parts.length) t = '';
-    else if (state.regions.on && state.paint.on) t = 'Drag over the part to paint the area to split off (Shift-drag erases). Let go to see the split. Esc stops painting.';
+    else if (state.regions.on && state.paint.on) t = `Drag over the part to paint the area to split off (Shift-drag erases). The circle is the brush, ${fmt(state.paint.size)} mm wide. Let go to see the split. Esc stops painting.`;
     else if (state.regions.on && state.draw.on) t = `Click points on the part to draw the cut line${state.draw.points.length >= 3 ? '. Enter or a click by the first point closes it' : ' (at least three)'}. Backspace takes the last point back, Esc stops drawing.`;
     else if (state.regions.on) t = !p ? 'Click a part to choose it. Its key settings appear on the right.' : 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds to the pick. Enter cuts, Esc picks again.';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
@@ -2279,7 +2307,7 @@
     else if (e.target.closest('#paintBtn')) { if (!selectedPart()) { toast('Click a part to choose it first.'); return; } setPainting(!state.paint.on); }
     else if (e.target.closest('#eraseBtn')) { state.paint.erase = !state.paint.erase; $('#eraseBtn').setAttribute('aria-pressed', state.paint.erase ? 'true' : 'false'); }
   });
-  $('#brushSize').addEventListener('change', (e) => { state.paint.size = Math.max(0.2, +e.target.value || 3); e.target.value = state.paint.size; });
+  $('#brushSize').addEventListener('change', (e) => { state.paint.size = Math.max(0.2, +e.target.value || 3); e.target.value = state.paint.size; state.paint.sized = true; brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); markDirty(); });
   function applyRegions() {
     const on = state.regions.on;
     let count = 0;
@@ -2334,6 +2362,18 @@
     busy('Finding surface regions'); setTimeout(() => { applyRegions(); busy(null); }, 30);
   });
 
+  function setFlat(on) {
+    state.flat = on;
+    for (const v of views.values()) if (v.mat.flatShading !== on) { v.mat.flatShading = on; v.mat.needsUpdate = true; }
+    updateChrome(); markDirty();
+  }
+  $('#flatBtn').addEventListener('click', () => { state.flatAuto = false; setFlat(!state.flat); });
+  $('#modelTools').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    if (b.dataset.act === 'rotate') rotateAll(b.dataset.value);
+    else if (b.dataset.act === 'scale') scaleAll(+b.dataset.value);
+    else if (b.dataset.act === 'scale-quick') { scaleAll((+$('#quickScale').value || 100) / 100); $('#quickScale').value = 100; }
+  });
   $('#wireBtn').addEventListener('click', () => {
     state.wire = !state.wire;
     for (const v of views.values()) v.mat.wireframe = state.wire;

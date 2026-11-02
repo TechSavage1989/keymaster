@@ -143,6 +143,9 @@ h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 .empty-card h1 { font-size: 26px; font-weight: 600; line-height: 1.15; margin-bottom: 8px; letter-spacing: -.005em; }
 .empty-card p { font-size: 15px; margin-bottom: 20px; opacity: .8; }
 .empty-card .row { justify-content: center; }
+.model-tools { position: absolute; top: 12px; left: 12px; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 10px; background: var(--chip); backdrop-filter: blur(8px); font-size: 12px; }
+.model-tools .lbl { color: var(--muted); margin: 0 2px 0 4px; }
+.model-tools .inline-num input { width: 56px; }
 .view-tools { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--chip); backdrop-filter: blur(8px); }
 .view-tools .icon-btn[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
 .hint {
@@ -411,7 +414,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.26, build ff083e. After an update, refresh the page and check this changes.">v1.26 · ff083e</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.27, build 6d3921. After an update, refresh the page and check this changes.">v1.27 · 6d3921</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -447,9 +450,14 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
           </div>
         </div>
       </div>
+      <div class="model-tools" id="modelTools" aria-label="Model size and orientation" hidden>
+        <span class="lbl">Turn</span><button class="btn small" data-act="rotate" data-value="x" title="Turn the whole model a quarter turn about X">X</button><button class="btn small" data-act="rotate" data-value="y" title="Turn the whole model a quarter turn about Y">Y</button><button class="btn small" data-act="rotate" data-value="z" title="Turn the whole model a quarter turn about Z">Z</button>
+        <span class="lbl">Scale</span><button class="btn small" data-act="scale" data-value="0.1" title="Scale the whole model down ten times">× 0.1</button><button class="btn small" data-act="scale" data-value="10" title="Scale the whole model up ten times">× 10</button><label class="inline-num"><input type="number" id="quickScale" value="100" min="1" step="1" aria-label="Scale the whole model to this percentage"><span class="unit">%</span></label><button class="btn small" data-act="scale-quick" title="Scale the whole model by the percentage">Apply</button>
+      </div>
       <div class="view-tools" id="viewTools" hidden>
         <button class="icon-btn" id="frameBtn" aria-label="Frame the model" title="Frame the model (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="10" cy="10" r="2.5" fill="currentColor"/></svg></button>
         <button class="icon-btn" id="regionsBtn" aria-label="Show surface regions" aria-pressed="false" title="Show surface regions: where the surface turns sharply, like polygroups"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h6.5v5H3zM10.5 4.5H17v8h-6.5zM3 10.5h6.5v5H3zM10.5 13.5H17v2h-6.5z" fill="currentColor" opacity=".35"/><path d="M3 4.5h14v11H3zM9.5 4.5v11M3 10h6.5M10.5 13h6.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+        <button class="icon-btn" id="flatBtn" aria-label="Show faces" aria-pressed="false" title="Show faces: flat shading, so every face of the mesh shows"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7z" fill="currentColor" opacity=".25"/><path d="M10 2.5l7 4-7 4-7-4zM10 10.5v7M3 6.5v7l7 4M17 6.5v7l-7 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
         <button class="icon-btn" id="wireBtn" aria-label="Show wireframe" aria-pressed="false" title="Show wireframe"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7zM10 2.5v15M3 6.5l14 7M17 6.5l-14 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
       </div>
       <div class="area-tags" id="areaTags" aria-label="Areas on the cut face"></div>
@@ -4350,6 +4358,7 @@ const KMCore = (() => {
     hidden: new Set(),
     explode: 0,
     wire: false,
+    flat: false, // show faces: flat shading, so every face of the mesh shows (painting turns it on)
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1 },
@@ -4357,7 +4366,7 @@ const KMCore = (() => {
   };
   state.regions = { on: false, angle: 60, fold: 15 };
   state.draw = { on: false, points: [] }; // a cut line drawn by hand: points clicked on the chosen part
-  state.paint = { on: false, partId: null, sel: null, erase: false, size: 3 }; // a painted selection to split off, like a face selection in Meshmixer
+  state.paint = { on: false, partId: null, sel: null, erase: false, size: 3, sized: false }; // a painted selection to split off, like a face selection in Meshmixer
   const history = { past: [], future: [] };
   let uid = 1;
   let downloads = null;
@@ -4566,7 +4575,7 @@ const KMCore = (() => {
     geom.setAttribute('position', new THREE.BufferAttribute(arr.pos, 3));
     geom.setAttribute('normal', new THREE.BufferAttribute(arr.nor, 3));
     geom.computeBoundingSphere(); geom.computeBoundingBox();
-    const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.66, metalness: 0, wireframe: state.wire });
+    const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.66, metalness: 0, wireframe: state.wire, flatShading: state.flat });
     const mesh = new THREE.Mesh(geom, mat);
     mesh.userData.partId = p.id;
     v = { geom, mesh, mat, offset: new THREE.Vector3() };
@@ -4584,6 +4593,7 @@ const KMCore = (() => {
       v.mesh.visible = !state.hidden.has(p.id);
       v.mat.color.set(p.color);
       v.mat.wireframe = state.wire;
+      if (v.mat.flatShading !== state.flat) { v.mat.flatShading = state.flat; v.mat.needsUpdate = true; }
     }
     applyExplode();
     if (state.regions.on) applyRegions();
@@ -5647,7 +5657,7 @@ const KMCore = (() => {
       return;
     }
     if (ptr.paint) { paintAt(e, e.shiftKey); return; }
-    if (state.regions.on) { if (!ptr.down) canvas.style.cursor = state.paint.on ? 'crosshair' : ''; return; } // nothing on the hidden plane to grab
+    if (state.regions.on) { if (!ptr.down) { canvas.style.cursor = state.paint.on ? 'crosshair' : ''; if (state.paint.on) hoverBrush(e); } return; } // nothing on the hidden plane to grab
     if (!ptr.down && selectedPart() && !tc.dragging) {
       const ring = tc.axis ? null : pickRing(e);
       setRingHover(ring ? ring.ax : null);
@@ -5769,7 +5779,11 @@ const KMCore = (() => {
     if (on) { clearPick(); state.regions.last = null; if (state.draw.on) setDrawing(false); }
     const p = selectedPart();
     if (on && p && state.paint.partId !== p.id) { state.paint.partId = p.id; state.paint.sel = new Uint8Array(p.indices.length / 3); }
+    if (on && p && !state.paint.sized) { state.paint.size = Math.max(0.5, Math.round(K.diag(p.bbox) * 0.03 * 2) / 2); const inp = $('#brushSize'); if (inp) inp.value = state.paint.size; } // a brush to suit the model's size until it's set by hand
     if (!on) { state.paint.sel = null; state.paint.partId = null; }
+    // faces show while painting, so the brush is seen to pick faces
+    if (on && !state.flat) { state.flatAuto = true; setFlat(true); } else if (!on && state.flatAuto) { state.flatAuto = false; setFlat(false); }
+    brushRing.visible = false;
     renderPaint(); renderPick(); updateHint();
     const b = $('#paintBtn'); if (b) { b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.textContent = on ? 'Stop painting' : 'Paint an area'; }
     const tools = $('#paintTools'); if (tools) tools.hidden = !on;
@@ -5778,13 +5792,33 @@ const KMCore = (() => {
   }
   function paintAt(e, erase) {
     const p = selectedPart(), v = p && views.get(p.id);
-    if (!v || !state.paint.sel) return false;
+    if (!v) return false;
+    if (state.paint.partId !== p.id || !state.paint.sel || state.paint.sel.length !== p.indices.length / 3) { state.paint.partId = p.id; state.paint.sel = new Uint8Array(p.indices.length / 3); } // the part changed under the brush (scaled, or another chosen)
     setNdc(e);
     const hit = raycaster.intersectObjects([v.mesh], false)[0];
+    moveBrushRing(hit);
     if (!hit) return false;
     const local = hit.point.clone().sub(v.mesh.position);
     paintDab(p, [local.x, local.y, local.z], hit.faceIndex, erase || state.paint.erase);
     return true;
+  }
+  // The brush shown on the surface: a circle the brush's size, lying on the face under the pointer
+  const brushRing = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([...Array(48).keys()].map(i => new THREE.Vector3(Math.cos(i / 48 * 2 * Math.PI), Math.sin(i / 48 * 2 * Math.PI), 0))), new THREE.LineBasicMaterial({ color: 0x2f6fe0, depthTest: false, transparent: true, opacity: 0.9 }));
+  brushRing.renderOrder = 10; brushRing.visible = false; scene.add(brushRing);
+  function moveBrushRing(hit) {
+    if (!hit || !state.paint.on) { if (brushRing.visible) { brushRing.visible = false; markDirty(); } return; }
+    brushRing.position.copy(hit.point);
+    const nrm = hit.face && hit.face.normal ? hit.face.normal.clone().normalize() : new THREE.Vector3(0, 0, 1);
+    brushRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), nrm);
+    brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size);
+    brushRing.visible = true;
+    markDirty();
+  }
+  function hoverBrush(e) {
+    const p = selectedPart(), v = p && views.get(p.id);
+    if (!v) { moveBrushRing(null); return; }
+    setNdc(e);
+    moveBrushRing(raycaster.intersectObjects([v.mesh], false)[0]);
   }
   function paintDab(p, point, face, erase) {
     const start = face !== undefined && face !== null && face >= 0 ? face : K.nearestTriangle(p.positions, p.indices, point, K.diag(p.bbox) * 0.05);
@@ -5914,6 +5948,8 @@ const KMCore = (() => {
     $('#redoBtn').disabled = !history.future.length;
     $('#exportBtn').disabled = !state.parts.length;
     $('#viewTools').hidden = !state.parts.length;
+    $('#modelTools').hidden = !state.parts.length;
+    $('#flatBtn').setAttribute('aria-pressed', state.flat ? 'true' : 'false');
     $('#wireBtn').setAttribute('aria-pressed', state.wire ? 'true' : 'false');
     updateHint();
   }
@@ -5922,7 +5958,7 @@ const KMCore = (() => {
     let t = '';
     const p = selectedPart();
     if (!state.parts.length) t = '';
-    else if (state.regions.on && state.paint.on) t = 'Drag over the part to paint the area to split off (Shift-drag erases). Let go to see the split. Esc stops painting.';
+    else if (state.regions.on && state.paint.on) t = `Drag over the part to paint the area to split off (Shift-drag erases). The circle is the brush, ${fmt(state.paint.size)} mm wide. Let go to see the split. Esc stops painting.`;
     else if (state.regions.on && state.draw.on) t = `Click points on the part to draw the cut line${state.draw.points.length >= 3 ? '. Enter or a click by the first point closes it' : ' (at least three)'}. Backspace takes the last point back, Esc stops drawing.`;
     else if (state.regions.on) t = !p ? 'Click a part to choose it. Its key settings appear on the right.' : 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds to the pick. Enter cuts, Esc picks again.';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
@@ -6605,7 +6641,7 @@ const KMCore = (() => {
     else if (e.target.closest('#paintBtn')) { if (!selectedPart()) { toast('Click a part to choose it first.'); return; } setPainting(!state.paint.on); }
     else if (e.target.closest('#eraseBtn')) { state.paint.erase = !state.paint.erase; $('#eraseBtn').setAttribute('aria-pressed', state.paint.erase ? 'true' : 'false'); }
   });
-  $('#brushSize').addEventListener('change', (e) => { state.paint.size = Math.max(0.2, +e.target.value || 3); e.target.value = state.paint.size; });
+  $('#brushSize').addEventListener('change', (e) => { state.paint.size = Math.max(0.2, +e.target.value || 3); e.target.value = state.paint.size; state.paint.sized = true; brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); markDirty(); });
   function applyRegions() {
     const on = state.regions.on;
     let count = 0;
@@ -6660,6 +6696,18 @@ const KMCore = (() => {
     busy('Finding surface regions'); setTimeout(() => { applyRegions(); busy(null); }, 30);
   });
 
+  function setFlat(on) {
+    state.flat = on;
+    for (const v of views.values()) if (v.mat.flatShading !== on) { v.mat.flatShading = on; v.mat.needsUpdate = true; }
+    updateChrome(); markDirty();
+  }
+  $('#flatBtn').addEventListener('click', () => { state.flatAuto = false; setFlat(!state.flat); });
+  $('#modelTools').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    if (b.dataset.act === 'rotate') rotateAll(b.dataset.value);
+    else if (b.dataset.act === 'scale') scaleAll(+b.dataset.value);
+    else if (b.dataset.act === 'scale-quick') { scaleAll((+$('#quickScale').value || 100) / 100); $('#quickScale').value = 100; }
+  });
   $('#wireBtn').addEventListener('click', () => {
     state.wire = !state.wire;
     for (const v of views.values()) v.mat.wireframe = state.wire;
