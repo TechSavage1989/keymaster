@@ -651,6 +651,23 @@ console.log('curved cuts along a border');
   const back = K.drawnLoop(sp.positions, sp.indices, [drawnPts[0], drawnPts[1], drawnPts[0], drawnPts[2], drawnPts[3]]);
   check('a line that doubles back on itself is made simple', back && back.closed && new Set(back.verts).size === back.verts.length && Math.abs(back.length - drawn.length) / drawn.length < 0.15, back && [back.verts.length, back.length]);
   check('fewer than three points make no line', K.drawnLoop(sp.positions, sp.indices, drawnPts.slice(0, 2)) === null);
+  // A painted selection, like a face selection in Meshmixer: brush dabs reach across the surface within the brush,
+  // grow, shrink and tidy work in millimetres, and the painted area splits off like a region, sealed
+  const ntS2 = sp.indices.length / 3, painted = new Uint8Array(ntS2), dabs = [[0, 0, 20], [4, 0, 19.6]];
+  for (const c of dabs) { const s = K.nearestTriangle(sp.positions, sp.indices, c); for (const t of K.brushTriangles(sp.positions, sp.indices, s, c, 6)) painted[t] = 1; }
+  const cnt = (a) => { let n = 0; for (const v of a) n += v; return n; };
+  const farSide = (a) => { let n = 0; for (let t = 0; t < a.length; t++) if (a[t] && sp.positions[3 * sp.indices[3 * t] + 2] < 0) n++; return n; };
+  check('two brush dabs paint a patch round the top, nothing on the far side', cnt(painted) > 500 && cnt(painted) < 3000 && farSide(painted) === 0, [cnt(painted), farSide(painted)]);
+  const grown = K.growSelection(sp.positions, sp.indices, painted, 2), shrunk = K.shrinkSelection(sp.positions, sp.indices, painted, 2);
+  check('grow adds a 2 mm band and shrink takes one away', cnt(grown) > cnt(painted) * 1.2 && cnt(shrunk) < cnt(painted) * 0.8 && cnt(K.shrinkSelection(sp.positions, sp.indices, grown, 2)) <= cnt(painted) * 1.05, [cnt(painted), cnt(grown), cnt(shrunk)]);
+  const spiky = new Uint8Array(painted); { const sq = [0, 12, 16]; const s = K.nearestTriangle(sp.positions, sp.indices, sq); for (const t of K.brushTriangles(sp.positions, sp.indices, s, sq, 0.6)) spiky[t] = 1; }
+  const tidied = K.tidySelection(sp.positions, sp.indices, spiky, 1);
+  check('tidy drops a speck painted away from the patch', cnt(spiky) > cnt(painted) && cnt(tidied) <= cnt(painted) * 1.02 && cnt(tidied) >= cnt(painted) * 0.9, [cnt(painted), cnt(spiky), cnt(tidied)]);
+  const segPaint = K.selectionSeg(sp.positions, sp.indices, painted), loopsPaint = K.groupLoops(sp.positions, sp.indices, segPaint, [1]);
+  const rPaint = K.splitRegions(sp.positions, sp.indices, segPaint, [1], { minThickness: 1, sink: 1 });
+  check('the painted area has one closed outline and splits off sealed, sunk, volume kept', loopsPaint.length === 1 && loopsPaint[0].closed && rPaint.parts.length === 2 && allClosed(rPaint.parts) && rPaint.sinks[0] > 0.5 && Math.abs(sumVol(rPaint.parts) - sp.report.volume) / sp.report.volume < 1e-6, [loopsPaint.length, rPaint.parts.map(q => q.volume), rPaint.sinks]);
+  const msgOf = (fn) => { try { fn(); return ''; } catch (e) { return e.message; } };
+  check('nothing painted, or everything, says so', msgOf(() => K.selectionSeg(sp.positions, sp.indices, new Uint8Array(ntS2))).includes('Nothing is painted') && msgOf(() => K.selectionSeg(sp.positions, sp.indices, new Uint8Array(ntS2).fill(1))).includes('whole part'));
   // A sunk face: the face across the wavy cut pushed 1 mm into the bigger piece, with a wall down from the line, so
   // the cap piece keeps a millimetre of thickness right to its edge. The cap piece gains about the face's area times
   // the depth; the pieces still seal and the volume is kept.
