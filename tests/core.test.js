@@ -690,7 +690,7 @@ console.log('curved cuts along a border');
   let tipFound = false;
   for (const q of rB.parts) for (let i = 0; i < q.positions.length; i += 3) {
     const lx = (q.positions[i] - FB.o[0]) * FB.u[0] + (q.positions[i + 1] - FB.o[1]) * FB.u[1] + (q.positions[i + 2] - FB.o[2]) * FB.u[2], ly = (q.positions[i] - FB.o[0]) * FB.v[0] + (q.positions[i + 1] - FB.o[1]) * FB.v[1] + (q.positions[i + 2] - FB.o[2]) * FB.v[2];
-    if (Math.hypot(lx - onSlope.x, ly - onSlope.y) < 0.01 && Math.abs(heightOf(q, i) - lvB.tip) < 0.02) tipFound = true;
+    if (Math.hypot(lx - onSlope.x, ly - onSlope.y) < K.keyGeometrySpec(K.keyCfg(tight, onSlope)).r + 0.01 && Math.abs(heightOf(q, i) - lvB.tip) < 0.02) tipFound = true; // a point of the peg's flat end
   }
   check('a peg on a sloping face sticks out its full length past the highest point of its base', lvB.hi - lvB.lo > 1 && Math.abs(Math.abs(lvB.tip - (lvB.tip > 0 ? lvB.hi : lvB.lo)) - 6) < 1e-6 && tipFound, [lvB, tipFound]);
   const steep = K.evaluateKeys(anB, [{ x: 13, y: 0 }], tight, new Set())[0];
@@ -894,6 +894,88 @@ console.log('cuts that can be printed and put together');
   const shifted = new Float64Array(star.map((v, i) => v - (i % 2 ? avgY : avgX))); // as loopFrame gives it: the average point at (0, 0)
   const fc = K.fanCentre(shifted);
   check('a fanned cap is fanned from a point the whole line can be seen from', fc.folded < 1e-9 && Math.hypot(fc[0] + avgX, fc[1] + avgY) < 2, [fc, fc.folded, avgX, avgY]);
+}
+
+console.log('plugs');
+{
+  const block = (pts, z0, z1) => { // a prism over an outline (anticlockwise), closed with fans: fine for the shapes used here
+    const pos = [], idx = [], n = pts.length;
+    for (const z of [z0, z1]) for (const [x, y] of pts) pos.push(x, y, z);
+    const c0 = pos.length / 3; pos.push(pts.reduce((s, p) => s + p[0], 0) / n, pts.reduce((s, p) => s + p[1], 0) / n, z0);
+    const c1 = pos.length / 3; pos.push(pos[3 * c0], pos[3 * c0 + 1], z1);
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n; idx.push(i, j, n + j, i, n + j, n + i, c0, j, i, c1, n + i, n + j); }
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  };
+  const area = (r) => Math.abs(r.reduce((s, a, i) => { const b = r[(i + 1) % r.length]; return s + a[0] * b[1] - b[0] * a[1]; }, 0) / 2);
+  const plugCfg = (o) => ({ type: 'plug', margin: 1.2, clearance: 0, plugSlope: 0, pegSide: 'below', ...o });
+  const cutWith = (m, F, c, scale = 40) => { const an = K.analyzePlane(m.positions, m.indices, F, c, scale), pl = K.planPlugs(an, c); return { an, pl, r: K.cutMesh(m.positions, m.indices, F, { scale, cfg: c, plugs: pl, minThickness: 1.2 }) }; };
+  // a plain block, cut across: one plug, pulled in from the edge by the wall, as deep as half its narrower width
+  const box = block([[0, 0], [20, 0], [20, 14], [0, 14]], 0, 30), Fz = K.frameFromNormal([0, 0, 1], [10, 7, 15]);
+  const A = cutWith(box, Fz, plugCfg({}));
+  const pA = A.pl[0];
+  check('a block gets one plug', A.pl.length === 1 && pA.ok, A.pl.map(q => q.reason));
+  const edge = A.an.base.loops[A.an.base.regions[0].outer].xy;
+  const wall = Math.min(...pA.mouth.map(([x, y]) => (function () { let b = Infinity; for (let i = 0, j = edge.length / 2 - 1; i < edge.length / 2; j = i++) { const ax = edge[2 * j], ay = edge[2 * j + 1], bx = edge[2 * i], by = edge[2 * i + 1], dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l)); b = Math.min(b, Math.hypot(ax + t * dx - x, ay + t * dy - y)); } return b; })()));
+  check('the pocket keeps at least a wall’s width from the edge', wall >= 1.2 - 1e-6 && wall < 1.6, wall);
+  check('automatic depth: half the plug’s narrower width', Math.abs(pA.depth - (7 - 1.2 - pA.ca * 0)) < 0.4 || Math.abs(pA.depth - (7 - wall)) < 0.4, [pA.depth, wall]);
+  check('cut with a plug: two sealed pieces', A.r.parts.length === 2 && allClosed(A.r.parts), A.r.parts.map(q => K.edgeReport(q.indices)));
+  check('with no gap and straight sides, the volume is the block’s less the 0.1 mm over the plug’s top', Math.abs(sumVol(A.r.parts) - (box.report.volume - area(pA.base) * pA.ca)) < 1e-3, [sumVol(A.r.parts), box.report.volume - area(pA.base) * pA.ca]);
+  // with a gap and sloping sides
+  const B = cutWith(box, Fz, plugCfg({ clearance: 0.2, plugSlope: 5 }));
+  const pB = B.pl[0], shrink = (Math.sqrt(area(pB.base)) - Math.sqrt(area(pB.top))) / 2;
+  check('sloping sides: the top is pulled in by depth × tan 5°', Math.abs(shrink - pB.depth * Math.tan(5 * Math.PI / 180)) < 0.05, [shrink, pB.depth]);
+  check('…with a fit gap, both pieces are sealed', allClosed(B.r.parts) && B.r.parts.length === 2);
+  check('…and the pocket is bigger than the plug by the gap', area(pB.mouth) > area(pB.base) && Math.abs((Math.sqrt(area(pB.mouth)) - Math.sqrt(area(pB.base))) / 2 - 0.2 * Math.sqrt(1 + Math.tan(5 * Math.PI / 180) ** 2)) < 0.03, [area(pB.mouth), area(pB.base)]);
+  // a set depth
+  const C = cutWith(box, Fz, plugCfg({ plugDepthMode: 'set', plugDepth: 3 }));
+  check('a depth set by hand is used', Math.abs(C.pl[0].depth - 3) < 1e-9 && allClosed(C.r.parts), C.pl[0].depth);
+  // an L-shaped part: the plug follows the L
+  const ell = block([[0, 0], [24, 0], [24, 8], [8, 8], [8, 24], [0, 24]], 0, 30);
+  const L = cutWith(ell, K.frameFromNormal([0, 0, 1], [6, 6, 15]), plugCfg({}));
+  check('an L-shaped area gets an L-shaped plug', L.pl[0].ok && area(L.pl[0].base) > 0.5 * (24 * 8 + 16 * 8) && allClosed(L.r.parts) && Math.abs(sumVol(L.r.parts) - (ell.report.volume - area(L.pl[0].base) * L.pl[0].ca)) < 1e-3, [L.pl[0].ok && area(L.pl[0].base), L.pl[0].reason]);
+  // where the other piece is thin, the plug is shallower; where there's no room at all, it says why
+  const thinTop = cutWith(box, K.frameFromNormal([0, 0, 1], [10, 7, 26]), plugCfg({ clearance: 0.2 }));
+  const pT = thinTop.pl[0];
+  check('a plug into a 4 mm piece is kept shallow enough to leave a floor', pT.ok && pT.short && pT.depth <= 4 - 0.3 - 0.8 + 1e-6 && allClosed(thinTop.r.parts), pT);
+  const tiny = block([[0, 0], [3, 0], [3, 3], [0, 3]], 0, 20), small = K.planPlugs(K.analyzePlane(tiny.positions, tiny.indices, K.frameFromNormal([0, 0, 1], [1.5, 1.5, 10]), plugCfg({}), 20), plugCfg({}));
+  check('an area too small for a plug says so', !small[0].ok && /too small/.test(small[0].reason), small);
+  const tube = (() => { const outer = [], inner = []; for (let i = 0; i < 48; i++) { const a = i / 48 * 2 * Math.PI; outer.push([Math.cos(a) * 10, Math.sin(a) * 10]); inner.push([Math.cos(a) * 6, Math.sin(a) * 6]); }
+    const pos = [], idx = []; const ring = (r, z) => { const o = pos.length / 3; for (const [x, y] of r) pos.push(x, y, z); return o; };
+    const o0 = ring(outer, 0), o1 = ring(outer, 30), i0 = ring(inner, 0), i1 = ring(inner, 30);
+    for (let i = 0; i < 48; i++) { const j = (i + 1) % 48; idx.push(o0 + i, o0 + j, o1 + j, o0 + i, o1 + j, o1 + i, i0 + i, i1 + j, i0 + j, i0 + i, i1 + i, i1 + j, o0 + i, i0 + j, o0 + j, o0 + i, i0 + i, i0 + j, o1 + i, o1 + j, i1 + j, o1 + i, i1 + j, i1 + i); }
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) }); })();
+  const ringPlug = K.planPlugs(K.analyzePlane(tube.positions, tube.indices, K.frameFromNormal([0, 0, 1], [0, 0, 15]), plugCfg({}), 40), plugCfg({}));
+  check('a hollow tube gets no plug, with the reason', tube.report.closed && !ringPlug[0].ok && /hole/.test(ringPlug[0].reason), [tube.report.closed, ringPlug]);
+  // on curved cuts: a plug stands on the face that follows the line
+  const spP = K.prepareMesh(uvSphere(20, 96, 64)), ntP = spP.indices.length / 3, gW = new Int32Array(ntP);
+  for (let q = 0; q < ntP; q++) { let x = 0, y = 0, z = 0; for (let k = 0; k < 3; k++) { const v = 3 * spP.indices[3 * q + k]; x += spP.positions[v]; y += spP.positions[v + 1]; z += spP.positions[v + 2]; } gW[q] = z / 3 > 4 * Math.sin(3 * Math.atan2(y, x)) + 2 ? 1 : 0; }
+  const lW = K.borderLoops(spP.positions, K.bordersFromGroups(spP.positions, spP.indices, gW)).find(l => l.closed);
+  const pcW = plugCfg({}), anW = K.analyzeLoop(spP.positions, spP.indices, lW, pcW, 40), plW = K.planPlugs(anW, pcW);
+  const rW = K.cutAlongLoop(spP.positions, spP.indices, lW, { cfg: pcW, plugs: plW, minThickness: 1.2 });
+  check('a plug on a wavy curved cut: sealed, volume adds up', plW[0].ok && plW[0].depth > 5 && allClosed(rW.parts) && Math.abs(sumVol(rW.parts) - (spP.report.volume - area(plW[0].base) * plW[0].ca)) < 1e-3, [plW[0].depth, sumVol(rW.parts), spP.report.volume - area(plW[0].base) * plW[0].ca]);
+  check('on a rounded part the plug is pulled further in, so it can go deep', plW[0].depth >= 9.9, plW[0].depth);
+  const pcW2 = plugCfg({ clearance: 0.1, plugSlope: 8 }), plW2 = K.planPlugs(K.analyzeLoop(spP.positions, spP.indices, lW, pcW2, 40), pcW2);
+  check('…and with a gap and sloping sides it’s sealed too', allClosed(K.cutAlongLoop(spP.positions, spP.indices, lW, { cfg: pcW2, plugs: plW2, minThickness: 1.2 }).parts));
+  // a real outline that once left a plug's flat ends with flipped slivers: a block far from the origin, cut at a tilt
+  for (const { defect, xy, frame } of JSON.parse(fs.readFileSync(__dirname + '/fixtures/sculpt-outlines.json', 'utf8')).plugOutlines) {
+    let ring = []; for (let i = 0; i < xy.length; i += 2) ring.push([xy[i], xy[i + 1]]);
+    if (area(ring) && ring.reduce((s, a, i) => { const b = ring[(i + 1) % ring.length]; return s + a[0] * b[1] - b[0] * a[1]; }, 0) < 0) ring = ring.reverse();
+    const at = (x, y, z) => [0, 1, 2].map(k => frame.o[k] + frame.u[k] * x + frame.v[k] * y + frame.n[k] * z), nr = ring.length, pos = [], idx = [];
+    for (const z of [-15, 15]) for (const [x, y] of ring) pos.push(...at(x, y, z));
+    const loc = K.earcut(ring.flat(), []);
+    for (let i = 0; i < loc.length; i += 3) idx.push(loc[i], loc[i + 2], loc[i + 1], nr + loc[i], nr + loc[i + 1], nr + loc[i + 2]);
+    for (let i = 0; i < nr; i++) { const j = (i + 1) % nr; idx.push(i, j, nr + j, i, nr + j, nr + i); }
+    const blk = K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+    let sealed = 0, tried = 0;
+    for (const off of [-3, 0, 2.3]) for (const slope of [0, 5]) {
+      const F = { o: at(0, 0, off), n: frame.n, u: frame.u, v: frame.v }, c = plugCfg({ margin: 0.8, clearance: slope ? 0.1 : 0, plugSlope: slope });
+      const pl = K.planPlugs(K.analyzePlane(blk.positions, blk.indices, F, c, 60), c);
+      if (!pl[0] || !pl[0].ok) continue;
+      tried++;
+      try { if (allClosed(K.cutMesh(blk.positions, blk.indices, F, { scale: 60, cfg: c, plugs: pl }).parts)) sealed++; } catch (e) { /* counted as not sealed */ }
+    }
+    check(`real outline, ${defect}: sealed`, blk.report.closed && tried >= 4 && sealed === tried, [blk.report.closed, tried, sealed]);
+  }
 }
 
 console.log('performance on a dense mesh');
