@@ -23,6 +23,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Surface regions: colour a model by where its surface turns sharply, like ZBrush polygroups, with an adjustable threshold.
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
+- Regions mode chooses the part first (1.20): a click on a part selects it and shows its key settings; the next click picks a region; settings changes re-run the pick.
 - Repair surface (1.19): untangles edges shared by three or more faces, pinch vertices, flipped patches, duplicate faces and slivers, then fills holes, so exports like Ox Bellows (148 tangled edges) can be cut.
 - Split off a region (1.18): click any region and it's cut along its whole outline at once, like splitting a group in ZBrush; regions on organic sculpts now follow inward folds, so arms, legs, hands and garments come out as their own regions.
 - Plug joints (1.17): the cut face itself, pulled in by the wall, as a plug into a matching pocket, as deep as fits, with sloping sides. On flat and curved cuts.
