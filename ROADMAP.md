@@ -23,6 +23,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Surface regions: colour a model by where its surface turns sharply, like ZBrush polygroups, with an adjustable threshold.
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
+- Shift-click picks (1.23): several regions split off as one piece, or several lines cut at once, with a line that doesn't free anything saying to add another.
 - Cut anyway (1.22): the too-thin and hooked refusals can be overridden, on flat cuts and region splits, with the warning kept. A line that doesn't free a piece says to click the region beside it instead.
 - Smooth curved cut faces (1.21): the face across a curved cut is drawn as a fine grid that follows the line, with the same points on both pieces, instead of a few big facets between the line's own points.
 - Regions mode chooses the part first (1.20): a click on a part selects it and shows its key settings; the next click picks a region; settings changes re-run the pick.

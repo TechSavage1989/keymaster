@@ -2348,7 +2348,7 @@ const KMCore = (() => {
   function cutAlongLoops(P, I, loopsIn, opts = {}) {
     const loops = loopsIn.map(l => straightLoop(P, I, l));
     if (loops.some(l => !l.closed)) throw new Error('This border doesn’t go all the way round, so it can’t split the part. Pick one that circles a limb or the edge of a sleeve.');
-    const nv = P.length / 3, nt = I.length / 3, rings = loops.map(l => l.verts), L = rings.length;
+    const nv = P.length / 3, nt = I.length / 3, rings = loops.map(l => l.verts.slice()), L = rings.length;
     const offs = []; let nn = nv; for (const r of rings) { offs.push(nn); nn += r.length; }
     const extra = nn, M = extra + 2 * L; // centre points for fans after the copies
     const cutEdge = new Set();
@@ -2361,17 +2361,41 @@ const KMCore = (() => {
       const f = first.get(key);
       if (f === undefined) first.set(key, 3 * t + k); else { first.delete(key); nb[3 * t + k] = Math.floor(f / 3); nb[f] = t; }
     }
-    // the triangle on each side of each line's first edge
+    // the pieces of surface the lines bound, with every line as a wall
+    const comp = new Int32Array(nt).fill(-1);
+    let nc = 0;
+    for (let t0 = 0; t0 < nt; t0++) {
+      if (comp[t0] >= 0) continue;
+      const st = [t0]; comp[t0] = nc;
+      while (st.length) { const t = st.pop(); for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && comp[q] < 0) { comp[q] = nc; st.push(q); } } }
+      nc++;
+    }
+    // the piece on each side of each line's first edge (forward: the triangle that holds the edge as the line runs)
     const want = new Map(); // directed edge -> [loop, which side]
-    rings.forEach((ring, li) => { want.set(ring[0] * nv + ring[1], [li, 1]); want.set(ring[1] * nv + ring[0], [li, 2]); });
-    const seeds = rings.map(() => [-1, -1]);
-    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const w = want.get(I[3 * t + k] * nv + I[3 * t + (k + 1) % 3]); if (w) seeds[w[0]][w[1] - 1] = t; }
-    if (seeds.some(s => s[0] < 0 || s[1] < 0)) throw new Error('This border runs along an edge of the surface that isn’t closed. Fill holes in the model panel first.');
+    rings.forEach((ring, li) => { want.set(ring[0] * nv + ring[1], [li, 0]); want.set(ring[1] * nv + ring[0], [li, 1]); });
+    const sidesOf = rings.map(() => [-1, -1]);
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const w = want.get(I[3 * t + k] * nv + I[3 * t + (k + 1) % 3]); if (w) sidesOf[w[0]][w[1]] = comp[t]; }
+    if (sidesOf.some(s => s[0] < 0 || s[1] < 0)) throw new Error('This border runs along an edge of the surface that isn’t closed. Fill holes in the model panel first.');
+    if (sidesOf.some(([a, b]) => a === b)) throw new Error(L > 1 ? (opts.what === 'lines' ? 'Cutting along these lines wouldn’t free a piece yet: the surface still joins up around them. Shift-click another line that goes round the same piece, such as where it touches something else.' : 'Cutting along this region’s outline wouldn’t free it (the surface joins up around it).') : 'Cutting along this border alone wouldn’t split the part in two: the surface joins up around it, as when a hand holds something that touches the body. Click the region beside the line instead, to cut along its whole outline, or shift-click more lines.');
+    // Two sides: side 1 holds every line's forward edges, side 2 the rest, so each piece lies on one side of every
+    // line round it (a region and its neighbours; two balls picked together and the bar between them). Lines whose
+    // forward side lands on side 2 are turned round. Pieces no line touches stay on neither side (loose shells).
+    const colour = new Int8Array(nc);
+    for (let seed = 0; seed < L; seed++) {
+      if (colour[sidesOf[seed][0]] || colour[sidesOf[seed][1]]) continue;
+      colour[sidesOf[seed][0]] = 1;
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const [a, b] of sidesOf) {
+          if (colour[a] && !colour[b]) { colour[b] = 3 - colour[a]; changed = true; } else if (colour[b] && !colour[a]) { colour[a] = 3 - colour[b]; changed = true; }
+          else if (colour[a] && colour[a] === colour[b]) throw new Error('These lines can’t all be cut at once: a piece would have to be on both sides of one of them. Pick fewer lines, or split off a region instead.');
+        }
+      }
+    }
+    rings.forEach((ring, li) => { if (colour[sidesOf[li][0]] === 2) ring.reverse(); });
     const side = new Int8Array(nt);
-    const flood = (start, s) => { const st = [start]; side[start] = s; while (st.length) { const t = st.pop(); for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && !side[q]) { side[q] = s; st.push(q); } } } };
-    for (const [tA] of seeds) if (!side[tA]) flood(tA, 1);
-    if (seeds.some(([, tB]) => side[tB] === 1)) throw new Error(L > 1 ? 'Cutting along this region’s outline wouldn’t free it (the surface joins up around it).' : 'Cutting along this border alone wouldn’t split the part in two: the surface joins up around it, as when a hand holds something that touches the body. Click the region beside the line instead, to cut along its whole outline.');
-    for (const [, tB] of seeds) if (!side[tB]) flood(tB, 2);
+    for (let t = 0; t < nt; t++) side[t] = colour[comp[t]];
     // side 2 gets its own copy of every line's vertices
     const copy = new Map();
     rings.forEach((ring, li) => ring.forEach((v, i) => copy.set(v, offs[li] + i)));
@@ -2458,9 +2482,11 @@ const KMCore = (() => {
         return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions) };
       };
       const one = build(tris[1]), two = build(tris[2]);
-      one.first = true;
-      const rest = L > 1 ? separateShells(two.positions, two.indices) : [];
-      const parts = [one, ...(rest.length ? rest : [two])];
+      // with several lines, either side may come apart into separate pieces (two balls picked together leave the bar)
+      const ones = L > 1 ? separateShells(one.positions, one.indices) : [], rest = L > 1 ? separateShells(two.positions, two.indices) : [];
+      const firsts = ones.length ? ones : [one];
+      for (const q of firsts) q.first = true;
+      const parts = [...firsts, ...(rest.length ? rest : [two])];
       // other shells the lines never touched (eyes, separate pieces) stay with the piece around them, or the bigger one
       if (tris[0].length) {
         const loose = separateShells(...(() => { const m = build(tris[0]); return [m.positions, m.indices]; })());
@@ -2485,7 +2511,11 @@ const KMCore = (() => {
     // the two pieces each line separates: side 1, and the piece of side 2 holding that line's copied vertices
     const keyOf = (x, y, z) => `${x},${y},${z}`;
     const sets = parts.map(q => { const s = new Set(); for (let i = 0; i < q.positions.length; i += 3) s.add(keyOf(q.positions[i], q.positions[i + 1], q.positions[i + 2])); return s; });
-    const pair = (c) => { const k = keyOf(P[3 * c.ring[0]], P[3 * c.ring[0] + 1], P[3 * c.ring[0] + 2]); const other = parts.find((q, i) => !q.first && sets[i].has(k)); return [parts.find(q => q.first), other || parts.find(q => !q.first)]; };
+    const pair = (c) => { // the two pieces this line separates
+      const k = keyOf(P[3 * c.ring[0]], P[3 * c.ring[0] + 1], P[3 * c.ring[0] + 2]);
+      const mine = parts.find((q, i) => q.first && sets[i].has(k)), other = parts.find((q, i) => !q.first && sets[i].has(k));
+      return [mine || parts.find(q => q.first), other || parts.find(q => !q.first)];
+    };
     // The printability rules: a refusal, or with opts.force (the owner's "cut anyway") a warning on the result
     const warnings = [], refuse = (message, code) => { if (opts.force) { if (!warnings.some(w => w.code === code)) warnings.push({ code, message }); return; } throw guardError(message, code); };
     for (const c of caps) {
@@ -2501,7 +2531,7 @@ const KMCore = (() => {
       }
       const mid = [p1, p2].map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
       if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(cfg, c.keys, c.plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
-        const wedged = L > 1 && caps.filter(d => pair(d)[1] === p2).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
+        const wedged = L > 1 && caps.filter(d => { const [a, b] = pair(d); return a === p1 && b === p2; }).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
         refuse(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
           : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked');
@@ -2614,13 +2644,23 @@ const KMCore = (() => {
      outline. The outline may be several loops (an arm has a shoulder loop and a cuff loop), so the cuts go one
      loop at a time, each on the piece that still holds the region, with that loop's own keys or plug. */
   function regionLoops(P, I, seg, g) { return regionOutlines(P, I, seg).filter(l => l.region === g); }
-  function splitRegion(P, I, seg, g, opts = {}) {
-    const loops = regionLoops(P, I, seg, g);
-    if (!loops.length) throw new Error('This region covers the whole surface, so there is nothing to split it from.');
-    if (loops.some(l => !l.closed)) throw new Error('This region’s outline pinches to a point somewhere, so it can’t be cut along cleanly. Try a different fold angle.');
+  function splitRegion(P, I, seg, g, opts = {}) { return splitRegions(P, I, seg, [g], opts); }
+  // The outline of several regions taken together (a head as its face, hair and collar): the borders between them
+  // drop out, so the loops go round the lot.
+  function groupLoops(P, I, seg, groups) {
+    if (groups.length === 1) return regionLoops(P, I, seg, groups[0]);
+    const set = new Set(groups), g0 = groups[0], merged = new Int32Array(seg.groupOf.length);
+    for (let t = 0; t < merged.length; t++) merged[t] = set.has(seg.groupOf[t]) ? g0 : seg.groupOf[t];
+    return regionLoops(P, I, bordersFromGroups(P, I, merged), g0);
+  }
+  // Split off one region, or several as one piece, along their whole outline. The piece (or pieces, when the
+  // regions chosen don't touch) comes first.
+  function splitRegions(P, I, seg, groups, opts = {}) {
+    const loops = groupLoops(P, I, seg, groups), one = groups.length === 1;
+    if (!loops.length) throw new Error(one ? 'This region covers the whole surface, so there is nothing to split it from.' : 'These regions cover the whole surface, so there is nothing to split them from.');
+    if (loops.some(l => !l.closed)) throw new Error(`${one ? 'This region’s' : 'These regions’'} outline pinches to a point somewhere, so it can’t be cut along cleanly. Try a different fold angle.`);
     const r = cutAlongLoops(P, I, loops, opts);
-    const mine = r.parts.findIndex(q => q.first);
-    if (mine > 0) r.parts.unshift(...r.parts.splice(mine, 1)); // the region's own piece first
+    r.parts = [...r.parts.filter(q => q.first), ...r.parts.filter(q => !q.first)]; // the regions' own piece (or pieces, when they don't touch) first
     for (const q of r.parts) delete q.first;
     return { ...r, loops: loops.length };
   }
@@ -3512,7 +3552,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, regionLoops, regionAtPoint, cutAlongLoops,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };

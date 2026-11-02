@@ -407,7 +407,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.22, build 891f12. After an update, refresh the page and check this changes.">v1.22 · 891f12</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.23, build c3fb08. After an update, refresh the page and check this changes.">v1.23 · c3fb08</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -2821,7 +2821,7 @@ const KMCore = (() => {
   function cutAlongLoops(P, I, loopsIn, opts = {}) {
     const loops = loopsIn.map(l => straightLoop(P, I, l));
     if (loops.some(l => !l.closed)) throw new Error('This border doesn’t go all the way round, so it can’t split the part. Pick one that circles a limb or the edge of a sleeve.');
-    const nv = P.length / 3, nt = I.length / 3, rings = loops.map(l => l.verts), L = rings.length;
+    const nv = P.length / 3, nt = I.length / 3, rings = loops.map(l => l.verts.slice()), L = rings.length;
     const offs = []; let nn = nv; for (const r of rings) { offs.push(nn); nn += r.length; }
     const extra = nn, M = extra + 2 * L; // centre points for fans after the copies
     const cutEdge = new Set();
@@ -2834,17 +2834,41 @@ const KMCore = (() => {
       const f = first.get(key);
       if (f === undefined) first.set(key, 3 * t + k); else { first.delete(key); nb[3 * t + k] = Math.floor(f / 3); nb[f] = t; }
     }
-    // the triangle on each side of each line's first edge
+    // the pieces of surface the lines bound, with every line as a wall
+    const comp = new Int32Array(nt).fill(-1);
+    let nc = 0;
+    for (let t0 = 0; t0 < nt; t0++) {
+      if (comp[t0] >= 0) continue;
+      const st = [t0]; comp[t0] = nc;
+      while (st.length) { const t = st.pop(); for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && comp[q] < 0) { comp[q] = nc; st.push(q); } } }
+      nc++;
+    }
+    // the piece on each side of each line's first edge (forward: the triangle that holds the edge as the line runs)
     const want = new Map(); // directed edge -> [loop, which side]
-    rings.forEach((ring, li) => { want.set(ring[0] * nv + ring[1], [li, 1]); want.set(ring[1] * nv + ring[0], [li, 2]); });
-    const seeds = rings.map(() => [-1, -1]);
-    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const w = want.get(I[3 * t + k] * nv + I[3 * t + (k + 1) % 3]); if (w) seeds[w[0]][w[1] - 1] = t; }
-    if (seeds.some(s => s[0] < 0 || s[1] < 0)) throw new Error('This border runs along an edge of the surface that isn’t closed. Fill holes in the model panel first.');
+    rings.forEach((ring, li) => { want.set(ring[0] * nv + ring[1], [li, 0]); want.set(ring[1] * nv + ring[0], [li, 1]); });
+    const sidesOf = rings.map(() => [-1, -1]);
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const w = want.get(I[3 * t + k] * nv + I[3 * t + (k + 1) % 3]); if (w) sidesOf[w[0]][w[1]] = comp[t]; }
+    if (sidesOf.some(s => s[0] < 0 || s[1] < 0)) throw new Error('This border runs along an edge of the surface that isn’t closed. Fill holes in the model panel first.');
+    if (sidesOf.some(([a, b]) => a === b)) throw new Error(L > 1 ? (opts.what === 'lines' ? 'Cutting along these lines wouldn’t free a piece yet: the surface still joins up around them. Shift-click another line that goes round the same piece, such as where it touches something else.' : 'Cutting along this region’s outline wouldn’t free it (the surface joins up around it).') : 'Cutting along this border alone wouldn’t split the part in two: the surface joins up around it, as when a hand holds something that touches the body. Click the region beside the line instead, to cut along its whole outline, or shift-click more lines.');
+    // Two sides: side 1 holds every line's forward edges, side 2 the rest, so each piece lies on one side of every
+    // line round it (a region and its neighbours; two balls picked together and the bar between them). Lines whose
+    // forward side lands on side 2 are turned round. Pieces no line touches stay on neither side (loose shells).
+    const colour = new Int8Array(nc);
+    for (let seed = 0; seed < L; seed++) {
+      if (colour[sidesOf[seed][0]] || colour[sidesOf[seed][1]]) continue;
+      colour[sidesOf[seed][0]] = 1;
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const [a, b] of sidesOf) {
+          if (colour[a] && !colour[b]) { colour[b] = 3 - colour[a]; changed = true; } else if (colour[b] && !colour[a]) { colour[a] = 3 - colour[b]; changed = true; }
+          else if (colour[a] && colour[a] === colour[b]) throw new Error('These lines can’t all be cut at once: a piece would have to be on both sides of one of them. Pick fewer lines, or split off a region instead.');
+        }
+      }
+    }
+    rings.forEach((ring, li) => { if (colour[sidesOf[li][0]] === 2) ring.reverse(); });
     const side = new Int8Array(nt);
-    const flood = (start, s) => { const st = [start]; side[start] = s; while (st.length) { const t = st.pop(); for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && !side[q]) { side[q] = s; st.push(q); } } } };
-    for (const [tA] of seeds) if (!side[tA]) flood(tA, 1);
-    if (seeds.some(([, tB]) => side[tB] === 1)) throw new Error(L > 1 ? 'Cutting along this region’s outline wouldn’t free it (the surface joins up around it).' : 'Cutting along this border alone wouldn’t split the part in two: the surface joins up around it, as when a hand holds something that touches the body. Click the region beside the line instead, to cut along its whole outline.');
-    for (const [, tB] of seeds) if (!side[tB]) flood(tB, 2);
+    for (let t = 0; t < nt; t++) side[t] = colour[comp[t]];
     // side 2 gets its own copy of every line's vertices
     const copy = new Map();
     rings.forEach((ring, li) => ring.forEach((v, i) => copy.set(v, offs[li] + i)));
@@ -2931,9 +2955,11 @@ const KMCore = (() => {
         return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions) };
       };
       const one = build(tris[1]), two = build(tris[2]);
-      one.first = true;
-      const rest = L > 1 ? separateShells(two.positions, two.indices) : [];
-      const parts = [one, ...(rest.length ? rest : [two])];
+      // with several lines, either side may come apart into separate pieces (two balls picked together leave the bar)
+      const ones = L > 1 ? separateShells(one.positions, one.indices) : [], rest = L > 1 ? separateShells(two.positions, two.indices) : [];
+      const firsts = ones.length ? ones : [one];
+      for (const q of firsts) q.first = true;
+      const parts = [...firsts, ...(rest.length ? rest : [two])];
       // other shells the lines never touched (eyes, separate pieces) stay with the piece around them, or the bigger one
       if (tris[0].length) {
         const loose = separateShells(...(() => { const m = build(tris[0]); return [m.positions, m.indices]; })());
@@ -2958,7 +2984,11 @@ const KMCore = (() => {
     // the two pieces each line separates: side 1, and the piece of side 2 holding that line's copied vertices
     const keyOf = (x, y, z) => `${x},${y},${z}`;
     const sets = parts.map(q => { const s = new Set(); for (let i = 0; i < q.positions.length; i += 3) s.add(keyOf(q.positions[i], q.positions[i + 1], q.positions[i + 2])); return s; });
-    const pair = (c) => { const k = keyOf(P[3 * c.ring[0]], P[3 * c.ring[0] + 1], P[3 * c.ring[0] + 2]); const other = parts.find((q, i) => !q.first && sets[i].has(k)); return [parts.find(q => q.first), other || parts.find(q => !q.first)]; };
+    const pair = (c) => { // the two pieces this line separates
+      const k = keyOf(P[3 * c.ring[0]], P[3 * c.ring[0] + 1], P[3 * c.ring[0] + 2]);
+      const mine = parts.find((q, i) => q.first && sets[i].has(k)), other = parts.find((q, i) => !q.first && sets[i].has(k));
+      return [mine || parts.find(q => q.first), other || parts.find(q => !q.first)];
+    };
     // The printability rules: a refusal, or with opts.force (the owner's "cut anyway") a warning on the result
     const warnings = [], refuse = (message, code) => { if (opts.force) { if (!warnings.some(w => w.code === code)) warnings.push({ code, message }); return; } throw guardError(message, code); };
     for (const c of caps) {
@@ -2974,7 +3004,7 @@ const KMCore = (() => {
       }
       const mid = [p1, p2].map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
       if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(cfg, c.keys, c.plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
-        const wedged = L > 1 && caps.filter(d => pair(d)[1] === p2).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
+        const wedged = L > 1 && caps.filter(d => { const [a, b] = pair(d); return a === p1 && b === p2; }).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
         refuse(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
           : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked');
@@ -3087,13 +3117,23 @@ const KMCore = (() => {
      outline. The outline may be several loops (an arm has a shoulder loop and a cuff loop), so the cuts go one
      loop at a time, each on the piece that still holds the region, with that loop's own keys or plug. */
   function regionLoops(P, I, seg, g) { return regionOutlines(P, I, seg).filter(l => l.region === g); }
-  function splitRegion(P, I, seg, g, opts = {}) {
-    const loops = regionLoops(P, I, seg, g);
-    if (!loops.length) throw new Error('This region covers the whole surface, so there is nothing to split it from.');
-    if (loops.some(l => !l.closed)) throw new Error('This region’s outline pinches to a point somewhere, so it can’t be cut along cleanly. Try a different fold angle.');
+  function splitRegion(P, I, seg, g, opts = {}) { return splitRegions(P, I, seg, [g], opts); }
+  // The outline of several regions taken together (a head as its face, hair and collar): the borders between them
+  // drop out, so the loops go round the lot.
+  function groupLoops(P, I, seg, groups) {
+    if (groups.length === 1) return regionLoops(P, I, seg, groups[0]);
+    const set = new Set(groups), g0 = groups[0], merged = new Int32Array(seg.groupOf.length);
+    for (let t = 0; t < merged.length; t++) merged[t] = set.has(seg.groupOf[t]) ? g0 : seg.groupOf[t];
+    return regionLoops(P, I, bordersFromGroups(P, I, merged), g0);
+  }
+  // Split off one region, or several as one piece, along their whole outline. The piece (or pieces, when the
+  // regions chosen don't touch) comes first.
+  function splitRegions(P, I, seg, groups, opts = {}) {
+    const loops = groupLoops(P, I, seg, groups), one = groups.length === 1;
+    if (!loops.length) throw new Error(one ? 'This region covers the whole surface, so there is nothing to split it from.' : 'These regions cover the whole surface, so there is nothing to split them from.');
+    if (loops.some(l => !l.closed)) throw new Error(`${one ? 'This region’s' : 'These regions’'} outline pinches to a point somewhere, so it can’t be cut along cleanly. Try a different fold angle.`);
     const r = cutAlongLoops(P, I, loops, opts);
-    const mine = r.parts.findIndex(q => q.first);
-    if (mine > 0) r.parts.unshift(...r.parts.splice(mine, 1)); // the region's own piece first
+    r.parts = [...r.parts.filter(q => q.first), ...r.parts.filter(q => !q.first)]; // the regions' own piece (or pieces, when they don't touch) first
     for (const q of r.parts) delete q.first;
     return { ...r, loops: loops.length };
   }
@@ -3985,7 +4025,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, regionLoops, regionAtPoint, cutAlongLoops,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
@@ -4487,7 +4527,7 @@ const KMCore = (() => {
     if (state.cut.auto) { state.cut.keys = placeKeys(an); state.cut.why = whyMap(state.cut.keys); }
     state.cut.active = Math.min(state.cut.active, state.cut.keys.length - 1);
     evaluateKeys();
-    if (state.regions.on && state.regions.last && state.regions.last.partId === p.id) pickCutLine(p, state.regions.last.point); // the pick follows the key settings
+    if (state.regions.on && state.regions.last && state.regions.last.partId === p.id) replayPick(p); // the pick follows the key settings
     renderRegions();
     renderKeyMarkers();
     renderInspector();
@@ -5227,7 +5267,7 @@ const KMCore = (() => {
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, pickCutLineAt(partIndex, point) { state.regions.last = { partId: state.parts[partIndex].id, point }; pickCutLine(state.parts[partIndex], point); return state.regions.pick ? { closed: state.regions.pick.loop.closed, ok: !!state.regions.pick.result, error: state.regions.pick.error || '', region: state.regions.pick.region, loops: state.regions.pick.loops.length, pieces: state.regions.pick.result ? state.regions.pick.result.parts.length : 0 } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -5361,7 +5401,7 @@ const KMCore = (() => {
       if (!hit) { clearPick(); renderPick(); markDirty(); return; }
       const part = state.parts.find(q => q.id === hit.object.userData.partId);
       const local = hit.point.clone().sub(hit.object.position); // undo the exploded-view offset
-      regionClick(part, [local.x, local.y, local.z]);
+      regionClick(part, [local.x, local.y, local.z], e.shiftKey);
       return;
     }
     const p = selectedPart();
@@ -5381,10 +5421,18 @@ const KMCore = (() => {
   }
   // A click on a part while regions show: the first click on a part chooses it, so its key settings show on the
   // right; a click on the chosen part picks a region or a line on it.
-  function regionClick(part, point) {
+  // A plain click picks afresh; a shift-click adds to the pick (another line to cut along, or another region to
+  // split off with the first). The clicks are kept so the pick can be replayed when the key settings change.
+  function regionClick(part, point, add = false) {
     if (part.id !== state.selectedId) { clearPick(); selectPart(part.id); renderPick(); updateHint(); return; }
-    state.regions.last = { partId: part.id, point };
-    pickCutLine(part, point);
+    const last = state.regions.last;
+    if (add && last && last.partId === part.id && state.regions.pick) last.clicks.push(point);
+    else state.regions.last = { partId: part.id, clicks: [point] };
+    replayPick(part);
+  }
+  function replayPick(part) {
+    const clicks = state.regions.last ? state.regions.last.clicks : [];
+    clicks.forEach((pt, i) => pickCutLine(part, pt, i > 0));
   }
   function addKey(h) {
     state.cut.keys.push(h);
@@ -5456,7 +5504,7 @@ const KMCore = (() => {
     let t = '';
     const p = selectedPart();
     if (!state.parts.length) t = '';
-    else if (state.regions.on) t = !p ? 'Click a part to choose it. Its key settings appear on the right.' : 'Click a region to split it off, or a dark border line to cut along it. Enter cuts, Esc picks again.';
+    else if (state.regions.on) t = !p ? 'Click a part to choose it. Its key settings appear on the right.' : 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds to the pick. Enter cuts, Esc picks again.';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
     else if (!cameraOnClearSide()) t = 'Orbit around to the clear side to see the cut face.';
     else if (state.cfg.type === 'plug') t = coarse ? 'Drag the arrow to slide the cut, the plane or a ring to tilt it. Each area gets a plug of its own shape.' : 'Drag the arrow to slide the cut, the plane or a ring to tilt it (Shift for fine steps). Each area gets a plug of its own shape. Alt-drag to orbit.';
@@ -5939,18 +5987,30 @@ const KMCore = (() => {
   }
   // Pick the cut line nearest a point on a part (in the part's own coordinates), try the cut straight away, and
   // show the line and what the cut would do.
-  function pickCutLine(p, point) {
+  function pickCutLine(p, point, add = false) {
+    const prev = add && state.regions.pick && state.regions.pick.partId === p.id ? state.regions.pick : null;
     clearPick();
     const seg = regionsFor(p), near = K.borderLoopNear(p.positions, seg, linesFor(p), point);
-    if (near && near.distance <= K.diag(p.bbox) * 0.015) { pickLoops(p, [near.loop], { loop: near.loop }); return; }
+    const sameLoop = (a, b) => a === b || (a.verts.length === b.verts.length && a.verts[0] === b.verts[0] && a.verts[1] === b.verts[1]);
+    if (near && near.distance <= K.diag(p.bbox) * 0.015) {
+      if (prev && prev.regions) { toast('Shift-click adds lines to lines, or regions to regions. Click to start again.', 'warn'); pickLoops(p, prev.loops, { regions: prev.regions, seg }); return; }
+      const loops = prev ? prev.loops.filter(l => !sameLoop(l, near.loop)) : []; // a line already in the pick comes out again
+      if (!prev || loops.length === prev.loops.length) loops.push(near.loop);
+      pickLoops(p, loops, { lines: true });
+      return;
+    }
     const g = K.regionAtPoint(p.positions, p.indices, seg, point);
-    if (g < 0) { toast('Click a region to split it off, or a dark border line to cut along it.'); renderPick(); return; }
-    pickLoops(p, K.regionLoops(p.positions, p.indices, seg, g), { region: g, seg });
+    if (g < 0) { toast('Click a region to split it off, or a dark border line to cut along it.'); if (prev) pickLoops(p, prev.loops, prev.regions ? { regions: prev.regions, seg } : { lines: true }); else renderPick(); return; }
+    if (prev && !prev.regions) { toast('Shift-click adds lines to lines, or regions to regions. Click to start again.', 'warn'); pickLoops(p, prev.loops, { lines: true }); return; }
+    let regions = prev ? prev.regions.filter(x => x !== g) : []; // a region already in the pick comes out again
+    if (!prev || regions.length === prev.regions.length) regions.push(g);
+    if (!regions.length) { renderPick(); return; }
+    pickLoops(p, K.groupLoops(p.positions, p.indices, seg, regions), { regions, seg });
   }
   // Try the cut along one line, or round a whole region (all its outline loops at once), with keys or a plug on
   // each line from the key settings, and show the lines and what the cut would do.
   function pickLoops(p, loops, info) {
-    const pick = { partId: p.id, loops, loop: info.loop || loops[0], region: info.region, keys: [], plugs: [], perLoop: [], frames: [], ans: [] };
+    const pick = { partId: p.id, loops, loop: loops[0], regions: info.regions, region: info.regions ? info.regions[0] : undefined, keys: [], plugs: [], perLoop: [], frames: [], ans: [] };
     const cfg = coreCfg(), minThickness = minWall(), D = K.diag(p.bbox);
     const closed = loops.length > 0 && loops.every(l => l.closed);
     if (closed && cfg.type !== 'none') {
@@ -5975,7 +6035,7 @@ const KMCore = (() => {
     } else pick.perLoop = loops.map(() => ({ keys: [], plugs: [] }));
     const run = (withJoints, force) => {
       const o = { cfg, minThickness, force, perLoop: withJoints ? pick.perLoop : loops.map(() => ({ keys: [], plugs: [] })) };
-      return info.region !== undefined ? K.splitRegion(p.positions, p.indices, info.seg, info.region, o) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
+      return info.regions ? K.splitRegions(p.positions, p.indices, info.seg, info.regions, o) : loops.length > 1 ? K.cutAlongLoops(p.positions, p.indices, loops, { ...o, what: 'lines' }) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
     };
     try { pick.result = run(true); }
     catch (err) {
@@ -6070,19 +6130,21 @@ const KMCore = (() => {
   function renderPick() {
     const el = $('#cutLineInfo'), pick = state.regions.pick;
     if (!el) return;
-    if (!pick) { el.innerHTML = `<p class="muted small">${selectedPart() ? 'Click a region to split it off, or a dark border line to cut along it. Keys use the settings on the right.' : 'Click a part to choose it, then a region on it to split off.'}</p>`; return; }
-    const region = pick.region !== undefined, nl = pick.loops.length;
+    if (!pick) { el.innerHTML = `<p class="muted small">${selectedPart() ? 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds another region or line. Keys use the settings on the right.' : 'Click a part to choose it, then a region on it to split off.'}</p>`; return; }
+    const region = !!pick.regions, nr = region ? pick.regions.length : 0, nl = pick.loops.length;
     const len = `${fmt(pick.loops.reduce((s, l) => s + l.length, 0))} mm`;
-    if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>`; return; }
+    const addHint = '<p class="muted small">Shift-click adds another line, or another region to split off with this one.</p>';
+    if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>${addHint}`; return; }
     const cm3 = (v) => (v / 1000 >= 10 ? Math.round(v / 1000) : (v / 1000).toFixed(1));
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
     const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
     const vols = pick.result.parts.map(q => cm3(q.volume));
-    const what = region ? `This region’s outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting it off gives a piece of ${vols[0]} cm³ and leaves ${vols.length === 2 ? `${vols[1]} cm³` : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')} cm³`}.`
-      : `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]} cm³.`;
+    const what = region ? `${nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} cm³ and leaves ${vols.length === 2 ? `${vols[1]} cm³` : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')} cm³`}.`
+      : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]} cm³.`
+      : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')} cm³.`;
     el.innerHTML = `${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}</span></p>`}
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
-      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>${pick.forced ? (region ? 'Split it off anyway' : 'Cut along it anyway') : region ? 'Split off this region' : 'Cut along this line'}</span></button>`;
+      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>${pick.forced ? (region ? `Split ${nr === 1 ? 'it' : 'them'} off anyway` : `Cut along ${nl === 1 ? 'it' : 'them'} anyway`) : region ? `Split off ${nr === 1 ? 'this region' : 'these regions'}` : `Cut along ${nl === 1 ? 'this line' : 'these lines'}`}</span></button>${addHint}`;
   }
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);
@@ -6097,7 +6159,7 @@ const KMCore = (() => {
     renderPick();
     const pinsMade = (pick.result.pins || []).length;
     const n = pick.result.parts.length;
-    toast(`${pick.region !== undefined ? `Split off the region: ${n} pieces` : 'Cut along the line into 2 pieces'}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}. Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
+    toast(`${pick.regions ? `Split off the ${pick.regions.length === 1 ? 'region' : 'regions'}: ${n} pieces` : `Cut along the ${pick.loops.length === 1 ? 'line' : 'lines'} into ${n} pieces`}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}. Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
   }
   regionsPanel.addEventListener('click', (e) => { if (e.target.closest('[data-act=cut-line]')) cutAlongPick(); });
   function applyRegions() {
