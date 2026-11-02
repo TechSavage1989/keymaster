@@ -780,6 +780,41 @@ console.log('hole filling');
   check('open-mesh cut either works or explains the hole', true);
 }
 
+console.log('repair');
+{
+  const vox = (fill, nx, ny, nz, h = 1) => { const pos = [], idx = [], vid = new Map(); const v = (i, j, k) => { const key = (i * (ny + 1) + j) * (nz + 1) + k; let id = vid.get(key); if (id === undefined) { id = pos.length / 3; vid.set(key, id); pos.push(i * h, j * h, k * h); } return id; }; const f = (i, j, k) => i >= 0 && j >= 0 && k >= 0 && i < nx && j < ny && k < nz && fill(i, j, k); const quad = (a, b, c, d) => idx.push(a, b, c, a, c, d); for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) { if (!f(i, j, k)) continue; if (!f(i - 1, j, k)) quad(v(i, j, k), v(i, j, k + 1), v(i, j + 1, k + 1), v(i, j + 1, k)); if (!f(i + 1, j, k)) quad(v(i + 1, j, k), v(i + 1, j + 1, k), v(i + 1, j + 1, k + 1), v(i + 1, j, k + 1)); if (!f(i, j - 1, k)) quad(v(i, j, k), v(i + 1, j, k), v(i + 1, j, k + 1), v(i, j, k + 1)); if (!f(i, j + 1, k)) quad(v(i, j + 1, k), v(i, j + 1, k + 1), v(i + 1, j + 1, k + 1), v(i + 1, j + 1, k)); if (!f(i, j, k - 1)) quad(v(i, j, k), v(i, j + 1, k), v(i + 1, j + 1, k), v(i + 1, j, k)); if (!f(i, j, k + 1)) quad(v(i, j, k + 1), v(i + 1, j, k + 1), v(i + 1, j + 1, k + 1), v(i, j + 1, k + 1)); } return { positions: new Float32Array(pos), indices: new Uint32Array(idx) }; };
+  const sealed = (r) => r.report.closed && K.volume(r.positions, r.indices) > 0;
+  // 1. two blocks welded along one edge: four faces meet there. Untangled, they are two closed shells
+  const two = vox((i, j, k) => (i < 4 && k < 4) || (i >= 4 && k >= 4), 8, 4, 8), vol2 = K.volume(two.positions, two.indices);
+  check('two blocks sharing an edge are tangled', K.edgeReport(two.indices).badEdges > 0 && K.edgeReport(two.indices).openEdges === 0);
+  const r2 = K.repairMesh(two.positions, two.indices);
+  check('…repair untangles the edge into two closed shells, volume kept', r2.untangled === 4 && sealed(r2) && K.separateShells(r2.positions, r2.indices).length === 2 && Math.abs(K.volume(r2.positions, r2.indices) - vol2) < 1e-9, [r2.untangled, r2.report, K.separateShells(r2.positions, r2.indices).length]);
+  // 2. a block with a patch of faces turned the wrong way
+  const cube = vox(() => true, 4, 4, 4), I3 = cube.indices.slice();
+  for (let t = 0; t < 6; t++) { const x = I3[3 * t + 1]; I3[3 * t + 1] = I3[3 * t + 2]; I3[3 * t + 2] = x; }
+  const r3 = K.repairMesh(cube.positions, I3);
+  check('a patch facing the wrong way is turned back', K.edgeReport(I3).badEdges > 0 && r3.flipped === 6 && sealed(r3) && Math.abs(K.volume(r3.positions, r3.indices) - 64) < 1e-9, [r3.flipped, r3.report]);
+  // 3. a face stored twice, and a face with its mirror twin (a fin) inside
+  const I4 = new Uint32Array([...cube.indices, cube.indices[0], cube.indices[1], cube.indices[2], 0, 5, 10, 0, 10, 5]);
+  const r4 = K.repairMesh(cube.positions, I4);
+  check('faces stored twice and a zero-thickness fin are removed', r4.duplicates === 3 && sealed(r4) && r4.indices.length === cube.indices.length, [r4.duplicates, r4.report, r4.indices.length, cube.indices.length]);
+  // 4. two blocks touching at one corner: a pinch. Split, they are two closed shells
+  const bow = vox((i, j, k) => (i < 3 && j < 3 && k < 3) || (i >= 3 && j >= 3 && k >= 3), 6, 6, 6);
+  const r5 = K.repairMesh(bow.positions, bow.indices);
+  check('two blocks touching at a point are separated at it', K.edgeReport(bow.indices).closed && r5.pinched === 1 && sealed(r5) && K.separateShells(r5.positions, r5.indices).length === 2, [r5.pinched, r5.report]);
+  // 5. a hole, plus a loose sliver: filled and dropped
+  const holey = { positions: cube.positions, indices: cube.indices.filter((_, i) => Math.floor(i / 3) > 1) }; // the first two faces (one quad) gone
+  const n0 = holey.positions.length / 3, pos6 = new Float32Array([...holey.positions, 20, 20, 20, 20.1, 20, 20, 20, 20.1, 20]), I6 = new Uint32Array([...holey.indices, n0, n0 + 1, n0 + 2]);
+  const r6 = K.repairMesh(pos6, I6);
+  check('a hole is filled and a loose sliver dropped', r6.filled === 1 && r6.slivers === 1 && sealed(r6) && Math.abs(K.volume(r6.positions, r6.indices) - 64) < 1e-9, [r6.filled, r6.slivers, r6.report]);
+  // 6. a sound model is left alone
+  const r7 = K.repairMesh(cube.positions, cube.indices);
+  check('a sound model comes back unchanged', r7.duplicates + r7.untangled + r7.pinched + r7.flipped + r7.slivers + r7.filled === 0 && r7.indices.length === cube.indices.length && sealed(r7));
+  // 7. after untangling, the welded blocks can be cut, with sealed parts
+  const bb = K.bounds(r2.positions), rc = K.cutMesh(r2.positions, r2.indices, K.frameFromNormal([1, 0, 0], bb.center), { scale: K.diag(bb), cfg: cfgOf({}) });
+  check('a repaired model cuts into sealed parts', allClosed(rc.parts) && Math.abs(sumVol(rc.parts) - vol2) / vol2 < 1e-6, rc.parts.map(q => K.edgeReport(q.indices)));
+}
+
 console.log('file round trips');
 {
   const s = K.prepareMesh(uvSphere(10, 24, 16));

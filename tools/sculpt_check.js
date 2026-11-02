@@ -30,7 +30,12 @@ for (const f of files) {
   const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   let t = Date.now();
   const raw = /\.obj$/i.test(f) ? K.parseOBJ(new TextDecoder().decode(ab)) : K.parseSTL(ab);
-  const m = K.prepareMesh(raw);
+  let m = K.prepareMesh(raw);
+  if (!m.report.closed) { // as the app's Repair surface would
+    const r = K.repairMesh(m.positions, m.indices);
+    console.log(`  repaired: untangled ${r.untangled}, pinched ${r.pinched}, flipped ${r.flipped}, duplicates ${r.duplicates}, slivers ${r.slivers}, filled ${r.filled} -> ${r.report.closed ? 'closed' : `${r.report.openEdges} open, ${r.report.badEdges} tangled`}`);
+    m = { positions: r.positions, indices: r.indices, report: { ...m.report, ...r.report, volume: K.volume(r.positions, r.indices) } };
+  }
   const b = K.bounds(m.positions), scale = K.diag(b), V0 = m.report.volume;
   console.log(`\n${f}: ${m.indices.length / 3} triangles, ${b.size.map(v => v.toFixed(1)).join(' x ')} mm, open in ${Date.now() - t} ms`);
   console.log(`  surface: ${m.report.closed ? 'closed' : `${m.report.openEdges} open edges`}${m.report.flipped ? ', was inside out' : ''}${m.report.specks ? `, ${m.report.specks} specks removed` : ''}`);

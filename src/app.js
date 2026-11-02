@@ -924,7 +924,7 @@
     frameAll();
     const specks = m.report.specks ? ` Removed ${m.report.specks} loose ${m.report.specks === 1 ? 'speck' : 'specks'} too small to print.` : '';
     if (m.report.flipped) toast('The model was inside out, so Keymaster flipped it to print correctly.' + specks);
-    else if (!m.report.closed) toast('This model has gaps in its surface. Fill holes in the model panel before cutting.', 'warn');
+    else if (!m.report.closed) toast(`This model’s surface has ${m.report.badEdges ? 'tangles' : 'gaps'}. Press Repair surface in the model panel before cutting.`, 'warn');
     else if (state.model.tris > 3e6) toast('This is a very dense model. Cuts may take a few seconds.' + specks, 'warn');
     else if (specks) toast(specks.trim());
   }
@@ -1037,18 +1037,30 @@
     if (!(f > 0) || !isFinite(f)) return;
     transformAll((x, y, z) => [x * f, y * f, z * f], 'the scale change');
   }
-  function fillAllHoles() {
-    let filled = 0;
+  // Repair every part's surface: faces stored twice, parts welded along a seam, patches facing the wrong way,
+  // loose slivers, pinched vertices and holes, in that order. Says what it did, and what it couldn't.
+  function repairSurface() {
+    const sum = { duplicates: 0, untangled: 0, pinched: 0, flipped: 0, slivers: 0, filled: 0 };
+    let open = 0, bad = 0;
     const parts = state.parts.map(p => {
-      const r = K.fillHoles(p.positions, p.indices);
-      filled += r.filled;
+      const r = K.repairMesh(p.positions, p.indices);
+      for (const k of Object.keys(sum)) sum[k] += r[k];
+      open += r.report.openEdges; bad += r.report.badEdges;
       return makePart({ ...p, positions: r.positions, indices: r.indices });
     });
-    commit(parts, 'hole filling');
-    const rep = K.edgeReport(parts[0].indices);
-    state.model.report = { ...state.model.report, ...rep };
+    commit(parts, 'the repair');
+    state.model.report = { ...state.model.report, openEdges: open, badEdges: bad, closed: open === 0 && bad === 0 };
     syncScene();
-    toast(rep.closed ? `Filled ${filled} ${filled === 1 ? 'hole' : 'holes'}. The model is closed now.` : `Filled ${filled} ${filled === 1 ? 'hole' : 'holes'}. Some gaps are too tangled to fill here; repair them in Blender or Meshmixer.`, rep.closed ? '' : 'warn');
+    const did = [];
+    if (sum.untangled) did.push(`untangled ${sum.untangled} ${sum.untangled === 1 ? 'edge' : 'edges'} where surfaces were welded together`);
+    if (sum.pinched) did.push(`separated ${sum.pinched} ${sum.pinched === 1 ? 'point' : 'points'} where surfaces touched`);
+    if (sum.flipped) did.push(`turned ${sum.flipped} ${sum.flipped === 1 ? 'face' : 'faces'} the right way`);
+    if (sum.duplicates) did.push(`removed ${sum.duplicates} ${sum.duplicates === 1 ? 'face' : 'faces'} stored twice`);
+    if (sum.slivers) did.push(`dropped ${sum.slivers} loose ${sum.slivers === 1 ? 'sliver' : 'slivers'}`);
+    if (sum.filled) did.push(`filled ${sum.filled} ${sum.filled === 1 ? 'hole' : 'holes'}`);
+    const what = did.length ? did[0].charAt(0).toUpperCase() + did[0].slice(1) + (did.length > 1 ? ', ' + did.slice(1).join(', ') : '') + '.' : 'Nothing needed repairing.';
+    const closed = open === 0 && bad === 0;
+    toast(closed ? `${what} The model is closed now.` : `${what} ${fmtInt(open + bad)} ${open + bad === 1 ? 'edge is' : 'edges are'} still open or tangled; that needs Blender or Meshmixer. Cuts away from them still work.`, closed ? '' : 'warn');
   }
 
   /* ---------------- export ---------------- */
@@ -1620,8 +1632,8 @@
     const total = state.parts.reduce((s, p) => s + p.tris, 0);
     const health = rep.closed
       ? `<p class="status ok">${ICONS.check}<span>Closed surface, ready to cut.</span></p>`
-      : `<p class="status warn">${ICONS.alert}<span>${fmtInt(rep.openEdges)} open edges${rep.badEdges ? ` and ${fmtInt(rep.badEdges)} tangled ones` : ''}. Cuts that cross a gap can’t be closed.</span></p>
-         <button class="btn" data-act="fill-holes">Fill holes</button>`;
+      : `<p class="status warn">${ICONS.alert}<span>${rep.openEdges ? `${fmtInt(rep.openEdges)} open ${rep.openEdges === 1 ? 'edge' : 'edges'}` : ''}${rep.openEdges && rep.badEdges ? ' and ' : ''}${rep.badEdges ? `${fmtInt(rep.badEdges)} tangled ${rep.badEdges === 1 ? 'edge' : 'edges'}` : ''}. Cuts that cross ${rep.openEdges + rep.badEdges === 1 ? 'it' : 'them'} can’t be closed.</span></p>
+         <button class="btn" data-act="fill-holes">Repair surface</button>`;
     return `<div class="ins-section">
       <h2>${esc(state.model.name)}</h2>
       <dl class="facts">
@@ -1801,7 +1813,7 @@
       case 'remove-key': if (state.cut.active >= 0) removeKey(state.cut.active); break;
       case 'cut': doCut(); break;
       case 'export-one': exportParts(state.selectedId); break;
-      case 'fill-holes': fillAllHoles(); break;
+      case 'fill-holes': busy('Repairing the surface'); setTimeout(() => { repairSurface(); busy(null); }, 30); break;
       case 'rotate': rotateAll(val); break;
       case 'scale': scaleAll(+val); break;
       case 'scale-custom': scaleAll((+$('#scalePct').value || 100) / 100); break;

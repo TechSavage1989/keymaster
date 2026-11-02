@@ -579,6 +579,172 @@ const KMCore = (() => {
     return drop.size;
   }
 
+  /* ---------- repair ----------
+     Real exports come tangled: faces stored twice, two modelled parts welded along a seam so four faces meet at
+     an edge, a patch facing the wrong way, loose slivers, holes. Cutting needs a surface where every
+     edge has exactly two faces running opposite ways, so repairMesh works through the kinds in turn, up to a few
+     passes (filling a hole can expose the next flaw), and says what it did. */
+  function repairMesh(P, I, passes = 3) {
+    let cur = { positions: P, indices: I };
+    const totals = { duplicates: 0, untangled: 0, pinched: 0, flipped: 0, slivers: 0, filled: 0, skipped: 0 };
+    for (let pass = 0; pass < passes; pass++) {
+      const r = repairPass(cur.positions, cur.indices);
+      for (const k of Object.keys(totals)) totals[k] += r[k];
+      cur = r;
+      if (r.report.closed || !(r.duplicates + r.untangled + r.pinched + r.flipped + r.slivers + r.filled)) break;
+    }
+    return { positions: cur.positions, indices: cur.indices, ...totals, report: cur.report };
+  }
+  // Half-edges of a triangle list grouped by their smaller vertex, each group sorted by the larger, so the faces
+  // on any edge are a short scan. Half-edge i = 3t + k runs tris[i] -> tris[3t + (k + 1) % 3].
+  function edgeTable(tris, nv) {
+    const n = tris.length, lo = new Int32Array(n), hi = new Int32Array(n), start = new Int32Array(nv + 1), list = new Int32Array(n);
+    for (let i = 0; i < n; i++) { const a = tris[i], b = tris[i - (i % 3) + (i + 1) % 3]; lo[i] = Math.min(a, b); hi[i] = Math.max(a, b); start[lo[i] + 1]++; }
+    for (let v = 0; v < nv; v++) start[v + 1] += start[v];
+    const fill = start.slice(0, nv);
+    for (let i = 0; i < n; i++) list[fill[lo[i]]++] = i;
+    for (let v = 0; v < nv; v++) { // sort each small group by the larger vertex (insertion sort: groups are a handful)
+      for (let i = start[v] + 1; i < start[v + 1]; i++) { const x = list[i]; let j = i - 1; while (j >= start[v] && hi[list[j]] > hi[x]) { list[j + 1] = list[j]; j--; } list[j + 1] = x; }
+    }
+    const faces = (a, b) => { // half-edges on the undirected edge a-b
+      const l = Math.min(a, b), h = Math.max(a, b), out = [];
+      for (let i = start[l]; i < start[l + 1]; i++) { const x = list[i]; if (hi[x] === h) out.push(x); else if (hi[x] > h) break; }
+      return out;
+    };
+    const forward = (i, a, b) => tris[i] === a; // does half-edge i run a -> b?
+    return { faces, forward, lo, hi };
+  }
+  function repairPass(P, I) {
+    let nv = P.length / 3, pos = Array.from(P), tris = [];
+    // 1. faces stored twice: keep one; a face and its mirror twin are a zero-thickness fin, so both go
+    const dropped = new Set();
+    {
+      const byMin = new Map();
+      for (let t = 0; t < I.length / 3; t++) {
+        const a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
+        if (a === b || b === c || a === c) { dropped.add(t); continue; }
+        const s = [a, b, c].sort((x, y) => x - y), key = s[1] * nv + s[2];
+        let m = byMin.get(s[0]); if (!m) byMin.set(s[0], m = new Map());
+        const u = m.get(key);
+        if (u === undefined) { m.set(key, t); continue; }
+        const same = [0, 1, 2].some(r => I[3 * u] === I[3 * t + r] && I[3 * u + 1] === I[3 * t + (r + 1) % 3]);
+        dropped.add(t); if (!same) dropped.add(u);
+      }
+    }
+    const duplicates = dropped.size;
+    for (let t = 0; t < I.length / 3; t++) if (!dropped.has(t)) tris.push(I[3 * t], I[3 * t + 1], I[3 * t + 2]);
+    let nt = tris.length / 3;
+    // 2. edges with more than two faces, or two running the same way: pair the faces by which side their
+    //    material lies on (sweeping round the edge from a face, its material is behind its normal). A face left
+    //    without a partner keeps an open edge.
+    let E = edgeTable(tris, nv);
+    const pairOf = new Map(); // half-edge -> the half-edge it pairs with across a tangled edge
+    const badVerts = new Set(), done = new Set();
+    let untangled = 0;
+    for (let i = 0; i < tris.length; i++) {
+      const a = E.lo[i], b = E.hi[i], key = a * nv + b;
+      if (done.has(key)) continue; done.add(key);
+      const hs = E.faces(a, b);
+      if (hs.length < 2) continue;
+      if (hs.length === 2 && E.forward(hs[0], a, b) !== E.forward(hs[1], a, b)) continue; // an ordinary edge
+      untangled++; badVerts.add(a); badVerts.add(b);
+      const d = norm3([pos[3 * b] - pos[3 * a], pos[3 * b + 1] - pos[3 * a + 1], pos[3 * b + 2] - pos[3 * a + 2]]);
+      const F = frameFromNormal(d, [pos[3 * a], pos[3 * a + 1], pos[3 * a + 2]]);
+      const ang = hs.map(h => { const t = Math.floor(h / 3), c = [0, 1, 2].map(k => tris[3 * t + k]).find(v => v !== a && v !== b); const r = [pos[3 * c] - F.o[0], pos[3 * c + 1] - F.o[1], pos[3 * c + 2] - F.o[2]]; return { h, th: Math.atan2(r[0] * F.v[0] + r[1] * F.v[1] + r[2] * F.v[2], r[0] * F.u[0] + r[1] * F.u[1] + r[2] * F.u[2]), fwd: E.forward(h, a, b) }; }).sort((x, y) => x.th - y.th);
+      const n = ang.length, want = new Map();
+      for (let j = 0; j < n; j++) { const f = ang[j], g = ang[(j + (f.fwd ? n - 1 : 1)) % n]; want.set(f.h, g.h); } // a→b faces look behind (−θ), b→a faces ahead
+      for (const [f, g] of want) if (want.get(g) === f && f !== g) pairOf.set(f, g);
+    }
+    // round every vertex, group its faces by the edges that join them (ordinary edges, and the pairs chosen above),
+    // and give each group after the first its own copy of the vertex. That separates the surfaces welded along a
+    // tangled edge, and also two surfaces that touch at a single vertex (a pinch), which the hole filler can't close
+    let pinched = 0;
+    {
+      const cstart = new Int32Array(nv + 1), clist = new Int32Array(tris.length);
+      for (let i = 0; i < tris.length; i++) cstart[tris[i] + 1]++;
+      for (let v = 0; v < nv; v++) cstart[v + 1] += cstart[v];
+      const cfill = cstart.slice(0, nv);
+      for (let i = 0; i < tris.length; i++) clist[cfill[tris[i]]++] = i;
+      const splits = [], par = new Map();
+      const find = (x) => { while (par.get(x) !== x) { par.set(x, par.get(par.get(x))); x = par.get(x); } return x; };
+      for (let v = 0; v < nv; v++) {
+        if (cstart[v + 1] - cstart[v] < 2) continue;
+        par.clear();
+        for (let c = cstart[v]; c < cstart[v + 1]; c++) par.set(Math.floor(clist[c] / 3), Math.floor(clist[c] / 3));
+        for (let c = cstart[v]; c < cstart[v + 1]; c++) {
+          const corner = clist[c], t = Math.floor(corner / 3), k = corner % 3;
+          for (const i of [3 * t + k, 3 * t + (k + 2) % 3]) { // the two edges of t that touch v
+            const a = E.lo[i], b = E.hi[i], hs = E.faces(a, b);
+            let mate = -1;
+            if (hs.length === 2 && !pairOf.has(hs[0]) && !pairOf.has(hs[1]) && E.forward(hs[0], a, b) !== E.forward(hs[1], a, b)) mate = Math.floor((hs[0] === i ? hs[1] : hs[0]) / 3);
+            else if (pairOf.has(i)) mate = Math.floor(pairOf.get(i) / 3);
+            if (mate >= 0) { const x = find(t), y = find(mate); if (x !== y) par.set(x, y); }
+          }
+        }
+        const groups = new Map();
+        for (let c = cstart[v]; c < cstart[v + 1]; c++) { const t = Math.floor(clist[c] / 3), r = find(t); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(t); }
+        if (groups.size < 2) continue;
+        let first = true;
+        for (const [, g] of groups) { if (first) { first = false; continue; } splits.push([v, g]); if (!badVerts.has(v)) pinched++; }
+      }
+      for (const [v, g] of splits) { // applied once every vertex has been looked at, since each split renumbers faces
+        const copy = pos.length / 3; pos.push(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]);
+        for (const t of g) for (let k = 0; k < 3; k++) if (tris[3 * t + k] === v) tris[3 * t + k] = copy;
+      }
+      nv = pos.length / 3;
+    }
+    // 3. orientation: walk each connected surface, turning faces to agree with their neighbours, then turn any
+    //    closed surface that ends up inside out
+    E = edgeTable(tris, nv);
+    const comp = new Int32Array(nt).fill(-1), flip = new Uint8Array(nt);
+    let flipped = 0, ncomp = 0;
+    const flipTri = (t) => { const x = tris[3 * t + 1]; tris[3 * t + 1] = tris[3 * t + 2]; tris[3 * t + 2] = x; };
+    const compOpen = [];
+    for (let s = 0; s < nt; s++) {
+      if (comp[s] >= 0) continue;
+      const id = ncomp++, st = [s], mine = []; comp[s] = id;
+      let open = false;
+      while (st.length) {
+        const t = st.pop(); mine.push(t);
+        for (let k = 0; k < 3; k++) {
+          const i = 3 * t + k, hs = E.faces(E.lo[i], E.hi[i]);
+          if (hs.length !== 2) { open = true; continue; }
+          const q = Math.floor((hs[0] === i ? hs[1] : hs[0]) / 3);
+          if (comp[q] >= 0) continue;
+          comp[q] = id;
+          // the edge as t runs it now (t may have been turned since the table was built)
+          const a0 = E.lo[i], b0 = E.hi[i];
+          let fwd = false; for (let j = 0; j < 3; j++) if (tris[3 * t + j] === a0 && tris[3 * t + (j + 1) % 3] === b0) fwd = true;
+          const a = fwd ? a0 : b0, b = fwd ? b0 : a0;
+          let same = false; for (let j = 0; j < 3; j++) if (tris[3 * q + j] === a && tris[3 * q + (j + 1) % 3] === b) same = true; // uses a→b too: faces the other way
+          if (same) { flipTri(q); flip[q] = 1; }
+          st.push(q);
+        }
+      }
+      let turned = 0; for (const t of mine) if (flip[t]) turned++;
+      if (turned > mine.length / 2) { for (const t of mine) { flipTri(t); flip[t] ^= 1; } turned = mine.length - turned; } // the root was the odd one out
+      let vol = 0;
+      for (const t of mine) { const a = 3 * tris[3 * t], b = 3 * tris[3 * t + 1], c = 3 * tris[3 * t + 2]; vol += (pos[a] * (pos[b + 1] * pos[c + 2] - pos[b + 2] * pos[c + 1]) - pos[a + 1] * (pos[b] * pos[c + 2] - pos[b + 2] * pos[c]) + pos[a + 2] * (pos[b] * pos[c + 1] - pos[b + 1] * pos[c])) / 6; }
+      if (!open && vol < 0) { for (const t of mine) { flipTri(t); flip[t] ^= 1; } turned = mine.length - turned; } // a closed surface facing in
+      flipped += turned; compOpen[id] = open;
+    }
+    // 4. loose open slivers (under 0.5 mm across, not closed) go
+    const lo = [], hi = [];
+    for (let t = 0; t < nt; t++) { const c = comp[t]; if (!lo[c]) { lo[c] = [Infinity, Infinity, Infinity]; hi[c] = [-Infinity, -Infinity, -Infinity]; } for (let k = 0; k < 3; k++) { const v = 3 * tris[3 * t + k]; for (let j = 0; j < 3; j++) { if (pos[v + j] < lo[c][j]) lo[c][j] = pos[v + j]; if (pos[v + j] > hi[c][j]) hi[c][j] = pos[v + j]; } } }
+    const gone = new Set();
+    for (let c = 0; c < ncomp; c++) if (compOpen[c] && Math.max(hi[c][0] - lo[c][0], hi[c][1] - lo[c][1], hi[c][2] - lo[c][2]) < 0.5) gone.add(c);
+    const kept = []; for (let t = 0; t < nt; t++) if (!gone.has(comp[t])) kept.push(tris[3 * t], tris[3 * t + 1], tris[3 * t + 2]);
+    const slivers = gone.size;
+    // 5. holes
+    const filled = fillHoles(new Float32Array(pos), new Uint32Array(kept));
+    // compact: drop vertices nothing uses any more
+    const remap = new Int32Array(nv).fill(-1), outPos = [], outIdx = new Uint32Array(filled.indices.length);
+    for (let i = 0; i < filled.indices.length; i++) { const v = filled.indices[i]; if (remap[v] < 0) { remap[v] = outPos.length / 3; outPos.push(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]); } outIdx[i] = remap[v]; }
+    const positions = new Float32Array(outPos), indices = outIdx;
+    const report = edgeReport(indices);
+    return { positions, indices, duplicates, untangled, pinched, flipped, slivers, filled: filled.filled, skipped: filled.skipped, report };
+  }
+
   /* ---------- hole filling ---------- */
   function fillHoles(P, I) {
     const em = new PairMap(I.length);
@@ -3237,7 +3403,7 @@ const KMCore = (() => {
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
     segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, regionLoops, regionAtPoint, cutAlongLoops,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
-    cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
+    repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
