@@ -123,6 +123,8 @@
     LineLoop: class extends Mesh {},
     LineSegments: class extends Mesh {},
     Line: class extends Mesh {},
+    Points: class extends Mesh {},
+    PointsMaterial: class extends Material {},
     SphereGeometry: class extends BufferGeometry {},
     HemisphereLight: class extends Object3D {},
     DirectionalLight: class extends Object3D {},

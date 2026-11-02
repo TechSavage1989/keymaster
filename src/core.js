@@ -2503,7 +2503,7 @@ const KMCore = (() => {
     const sidesOf = rings.map(() => [-1, -1]);
     for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const w = want.get(I[3 * t + k] * nv + I[3 * t + (k + 1) % 3]); if (w) sidesOf[w[0]][w[1]] = comp[t]; }
     if (sidesOf.some(s => s[0] < 0 || s[1] < 0)) throw new Error('This border runs along an edge of the surface that isn’t closed. Fill holes in the model panel first.');
-    if (sidesOf.some(([a, b]) => a === b)) throw new Error(L > 1 ? (opts.what === 'lines' ? 'Cutting along these lines wouldn’t free a piece yet: the surface still joins up around them. Shift-click another line that goes round the same piece, such as where it touches something else.' : 'Cutting along this region’s outline wouldn’t free it (the surface joins up around it).') : 'Cutting along this border alone wouldn’t split the part in two: the surface joins up around it, as when a hand holds something that touches the body. Click the region beside the line instead, to cut along its whole outline, or shift-click more lines.');
+    if (sidesOf.some(([a, b]) => a === b)) throw new Error(L > 1 ? (opts.what === 'lines' ? 'Cutting along these lines wouldn’t free a piece yet: the surface still joins up around them. Shift-click another line that goes round the same piece, such as where it touches something else, or paint the area to split off.' : 'Cutting along this region’s outline wouldn’t free it (the surface joins up around it).') : 'Cutting along this border alone wouldn’t split the part in two: the surface joins up around it, as when a hand holds something that touches the body. Click the region beside the line instead, to cut along its whole outline, shift-click more lines, or paint the area to split off.');
     const colour = new Int8Array(nc);
     for (let seed = 0; seed < L; seed++) {
       if (colour[sidesOf[seed][0]] || colour[sidesOf[seed][1]]) continue;
@@ -2528,6 +2528,88 @@ const KMCore = (() => {
     const side = new Int8Array(nt);
     for (let t = 0; t < nt; t++) side[t] = colour[comp[t]];
     return { loops: out, side };
+  }
+  /* ---------- painted selections ----------
+     What Meshmixer and ZBrush do: paint faces with a brush, then split the painted faces off and cap the holes.
+     A painted area always has a closed outline, so it always separates; it is cut like a region (splitRegions on
+     a two-group labelling), so keys, plugs, sinking and "cut anyway" all apply. */
+  const triAdjCache = new WeakMap();
+  function triangleAdjacency(P, I) {
+    let adj = triAdjCache.get(I);
+    if (adj) return adj;
+    const nt = I.length / 3, nv = P.length / 3, nb = new Int32Array(nt * 3).fill(-1), first = new Map(), C = new Float32Array(nt * 3);
+    for (let t = 0; t < nt; t++) {
+      for (let k = 0; k < 3; k++) {
+        const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a, f = first.get(key);
+        if (f === undefined) first.set(key, 3 * t + k); else { first.delete(key); nb[3 * t + k] = Math.floor(f / 3); nb[f] = t; }
+        C[3 * t] += P[3 * a] / 3; C[3 * t + 1] += P[3 * a + 1] / 3; C[3 * t + 2] += P[3 * a + 2] / 3;
+      }
+    }
+    adj = { nb, C };
+    triAdjCache.set(I, adj);
+    return adj;
+  }
+  // The triangle whose centre is nearest a point (none when the point is far from the surface).
+  function nearestTriangle(P, I, point, limit = Infinity) {
+    const { C } = triangleAdjacency(P, I);
+    let best = -1, bd = limit * limit;
+    for (let t = 0; t < C.length / 3; t++) { const d = (C[3 * t] - point[0]) ** 2 + (C[3 * t + 1] - point[1]) ** 2 + (C[3 * t + 2] - point[2]) ** 2; if (d < bd) { bd = d; best = t; } }
+    return best;
+  }
+  // A brush dab: the triangles within `radius` of `centre`, reached across the surface from the triangle under the
+  // brush, so a dab on a hand doesn't paint the other side of a thin hand... unless the surface is thinner than the
+  // brush, as in the real tools. Returns triangle ids.
+  function brushTriangles(P, I, start, centre, radius) {
+    const { nb, C } = triangleAdjacency(P, I), r2 = radius * radius, seen = new Uint8Array(C.length / 3), out = [], st = [start];
+    if (start < 0) return out;
+    seen[start] = 1;
+    while (st.length) {
+      const t = st.pop();
+      if ((C[3 * t] - centre[0]) ** 2 + (C[3 * t + 1] - centre[1]) ** 2 + (C[3 * t + 2] - centre[2]) ** 2 > r2) continue;
+      out.push(t);
+      for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && !seen[q]) { seen[q] = 1; st.push(q); } }
+    }
+    return out;
+  }
+  // Grow a selection outward by `mm` across the surface (shrink: grow what isn't selected). Returns a new Uint8Array.
+  function growSelection(P, I, sel, mm) {
+    const { nb, C } = triangleAdjacency(P, I), nt = sel.length, dist = new Float64Array(nt).fill(Infinity), out = new Uint8Array(sel);
+    const heap = [];
+    const push = (x) => { heap.push(x); let i = heap.length - 1; while (i > 0) { const pI = (i - 1) >> 1; if (heap[pI][0] <= heap[i][0]) break; [heap[pI], heap[i]] = [heap[i], heap[pI]]; i = pI; } };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+    for (let t = 0; t < nt; t++) if (sel[t]) { let edge = false; for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && !sel[q]) edge = true; } if (edge) { dist[t] = 0; push([0, t]); } }
+    while (heap.length) {
+      const [d, t] = pop();
+      if (d > dist[t]) continue;
+      for (let k = 0; k < 3; k++) {
+        const q = nb[3 * t + k]; if (q < 0 || sel[q]) continue;
+        const nd = d + Math.hypot(C[3 * q] - C[3 * t], C[3 * q + 1] - C[3 * t + 1], C[3 * q + 2] - C[3 * t + 2]);
+        if (nd <= mm && nd < dist[q]) { dist[q] = nd; out[q] = 1; push([nd, q]); }
+      }
+    }
+    return out;
+  }
+  function shrinkSelection(P, I, sel, mm) {
+    const inv = new Uint8Array(sel.length); for (let t = 0; t < sel.length; t++) inv[t] = sel[t] ? 0 : 1;
+    const grown = growSelection(P, I, inv, mm), out = new Uint8Array(sel.length);
+    for (let t = 0; t < sel.length; t++) out[t] = grown[t] ? 0 : 1;
+    return out;
+  }
+  // Tidy a selection's edge: drop tongues and fill notches narrower than 2·r (open, then close), so the outline is
+  // something a cut can follow cleanly.
+  function tidySelection(P, I, sel, r) {
+    const opened = growSelection(P, I, shrinkSelection(P, I, sel, r), r);
+    return shrinkSelection(P, I, growSelection(P, I, opened, r), r);
+  }
+  // A painted selection as a two-region labelling (1 painted, 0 not), ready for splitRegions(..., [1], opts).
+  function selectionSeg(P, I, sel) {
+    const groupOf = new Int32Array(sel.length);
+    let n = 0; for (let t = 0; t < sel.length; t++) { groupOf[t] = sel[t] ? 1 : 0; n += sel[t] ? 1 : 0; }
+    if (!n) throw new Error('Nothing is painted yet. Drag over the part to paint the area to split off.');
+    if (n === sel.length) throw new Error('The whole part is painted, so there is nothing to split it from. Erase some, or Clear and paint just the area to split off.');
+    const seg = bordersFromGroups(P, I, groupOf);
+    seg.areas = [0, 0];
+    return seg;
   }
   function cutAlongLoop(P, I, loop, opts = {}) {
     const r = cutAlongLoops(P, I, [loop], opts);
@@ -3751,7 +3833,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex,
+    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
