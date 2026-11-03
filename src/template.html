@@ -286,6 +286,8 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .inline-num { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .inline-num input { width: 52px; }
 .paint-tools { margin-top: 4px; }
+.export-group { display: inline-flex; align-items: center; gap: 6px; }
+.export-group select { font: inherit; font-size: 12px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--ink); }
 #seamSmooth { width: 90px; }
 .regions-panel .btn[aria-pressed="true"] { background: var(--focus); color: #fff; border-color: var(--focus); }
 .status + .btn { margin-top: 8px; }
@@ -425,7 +427,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <button class="icon-btn" id="redoBtn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 9H8a4.5 4.5 0 0 0 0 9h2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
       </div>
     </div>
-    <button class="btn primary" id="exportBtn" disabled title="Save every part as an STL, bundled in a ZIP">Export parts</button>
+    <div class="export-group"><select id="exportFormat" aria-label="Export format" title="What to save"><option value="zip">STLs in a ZIP</option><option value="3mf">One 3MF</option><option value="sheet">STLs + assembly sheet</option></select><button class="btn primary" id="exportBtn" disabled title="Save every part">Export parts</button></div>
   </header>
   <main class="layout">
     <aside class="parts-panel" aria-label="Parts">
@@ -491,7 +493,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
     <aside class="inspector" id="inspector" aria-label="Settings"></aside>
   </main>
 </div>
-<input type="file" id="fileInput" accept=".stl,.obj" hidden>
+<input type="file" id="fileInput" accept=".stl,.obj,.zip" hidden>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/TransformControls.js"></script>

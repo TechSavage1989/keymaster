@@ -33,6 +33,7 @@
   state.regions = { on: false, angle: 60, fold: 15 };
   state.here = { on: false };
   state.joint = 1; // the next joint number to engrave, when Number the joints is on
+  state.cutId = 0; // every cut gets an id, so the assembly sheet can pair the pieces it made
   state.reduce = 0.02; // Reduce detail: the surface may move this far (mm)
   state.split = { planes: null, counts: [null, null, null] }; // split to fit the bed: the planned planes ({axis, pos}), and counts set by hand // Cut at a spot: the next click on the part finds the narrowest cut through it
   state.draw = { on: false, points: [] }; // a cut line drawn by hand: points clicked on the chosen part
@@ -53,9 +54,11 @@
     window.claude.use('downloads').then(d => { downloads = d; }).catch(() => { downloads = null; });
   }
 
-  function makePart({ name, color, positions, indices, kind, pull }) {
-    return { id: uid++, name, color, positions, indices, bbox: K.bounds(positions), tris: indices.length / 3, volume: K.volume(positions, indices), kind: kind || 'part', pull: pull || null };
+  function makePart({ name, color, positions, indices, kind, pull, joints }) {
+    return { id: uid++, name, color, positions, indices, bbox: K.bounds(positions), tris: indices.length / 3, volume: K.volume(positions, indices), kind: kind || 'part', pull: pull || null, joints: joints || [] };
   }
+  // The joints a cut made, kept on each piece for the assembly sheet: { id, type, keys, number }
+  function jointOf(p, extra) { return [...(p.joints || []), { id: ++state.cutId, ...extra }]; }
   const selectedPart = () => state.parts.find(p => p.id === state.selectedId) || null;
   const fmt = (n) => (Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(1));
   const fmtInt = (n) => n.toLocaleString('en-US');
@@ -965,11 +968,12 @@
   const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 16)));
   async function loadFile(file) {
     const ext = (file.name.split('.').pop() || '').toLowerCase();
-    if (ext !== 'stl' && ext !== 'obj') { toast('Keymaster opens STL and OBJ files. Export your model in one of those formats, then open it here.', 'error'); return; }
+    if (ext !== 'stl' && ext !== 'obj' && ext !== 'zip') { toast('Keymaster opens STL and OBJ files, and its own saved projects (.keymaster.zip). Export your model in one of those formats, then open it here.', 'error'); return; }
     busy('Opening ' + file.name);
     await nextFrame();
     try {
       const buf = await file.arrayBuffer();
+      if (ext === 'zip') { openProject(buf, file.name); return; }
       const raw = ext === 'stl' ? K.parseSTL(buf) : K.parseOBJ(new TextDecoder().decode(buf));
       setModel(file.name.replace(/\.[^.]+$/, ''), K.prepareMesh(raw));
     } catch (err) {
@@ -994,7 +998,7 @@
   }
   function setModel(name, m) {
     state.model = { name, report: m.report, tris: m.indices.length / 3 };
-    state.nextColor = 1; state.joint = 1;
+    state.nextColor = 1; state.joint = 1; state.cutId = 0;
     state.parts = [makePart({ name, color: PALETTE[0], positions: m.positions, indices: m.indices })];
     history.past = []; history.future = [];
     state.selectedId = null; state.hidden.clear(); state.explode = 0;
@@ -1084,10 +1088,11 @@
     const made = [];
     const label = (side, i, count) => side === 'both' ? p.name : `${p.name} ${side === 'below' ? 'A' : 'B'}${count > 1 ? i + 1 : ''}`;
     let first = true;
+    const joints = jointOf(p, { type: state.cfg.type, keys: res.keysUsed || 0, number: numbered.length && !unmarked ? numbered[0] : null });
     for (const side of ['both', 'below', 'above']) {
       groups[side].sort((a, b) => b.volume - a.volume);
       groups[side].forEach((c, i) => {
-        made.push(makePart({ name: label(side, i, groups[side].length), color: first ? p.color : nextColor(), positions: c.positions, indices: c.indices, pull: side === 'below' ? [-nrm[0], -nrm[1], -nrm[2]] : side === 'above' ? nrm.slice() : null }));
+        made.push(makePart({ name: label(side, i, groups[side].length), color: first ? p.color : nextColor(), positions: c.positions, indices: c.indices, pull: side === 'below' ? [-nrm[0], -nrm[1], -nrm[2]] : side === 'above' ? nrm.slice() : null, joints }));
         first = false;
       });
     }
@@ -1192,9 +1197,17 @@
   }
   /* ---------------- export ---------------- */
   function safeName(s) { return (s || 'part').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'part'; }
-  async function exportParts(onlyId) {
+  // Export: every part as an STL in a ZIP (the default), all parts in one 3MF, or the STLs with an assembly sheet.
+  async function exportParts(onlyId, format) {
     const list = onlyId ? state.parts.filter(p => p.id === onlyId) : state.parts;
     if (!list.length) return;
+    const fmt3 = format || ($('#exportFormat') ? $('#exportFormat').value : 'zip');
+    const base = safeName(state.model ? state.model.name : 'model') + (onlyId ? '-' + safeName(list[0].name) : '-parts');
+    if (fmt3 === '3mf') {
+      const data = K.make3MF(list), filename = base + '.3mf';
+      if (await saveFile(filename, new Blob([data], { type: 'model/3mf' }), false)) toast(`Saved ${filename} with ${list.length} ${list.length === 1 ? 'part' : 'parts'} in one file.`);
+      return;
+    }
     const used = new Set();
     const files = list.map(p => {
       let n = safeName(p.name), k = 2;
@@ -1202,17 +1215,16 @@
       used.add(n);
       return { name: n + '.stl', data: new Uint8Array(K.writeSTL(p.positions, p.indices, p.name)) };
     });
-    const zip = K.makeZip(files);
-    const filename = safeName(state.model ? state.model.name : 'model') + (onlyId ? '-' + safeName(list[0].name) : '-parts') + '.zip';
-    const blob = new Blob([zip], { type: 'application/zip' });
-    if (downloads) {
-      try {
-        await downloads.save({ filename, data: blob });
-        toast(`Saved ${filename} with ${files.length} STL ${files.length === 1 ? 'file' : 'files'}.`);
-        return;
-      } catch (err) {
-        if (err && err.code === 'declined') return;
-        if (err && err.code === 'rate_limited') { toast('A save is already waiting for your answer.', 'warn'); return; }
+    if (fmt3 === 'sheet') files.push({ name: 'assembly.html', data: new TextEncoder().encode(K.assemblySheet(list, { name: state.model ? state.model.name : 'Model', bed: state.bed, date: new Date().toLocaleDateString() })) });
+    const zip = K.makeZip(files), filename = base + '.zip';
+    if (await saveFile(filename, new Blob([zip], { type: 'application/zip' }), true)) toast(`Saved ${filename} with ${list.length} STL ${list.length === 1 ? 'file' : 'files'}${fmt3 === 'sheet' ? ' and the assembly sheet' : ''}.`);
+  }
+  // Save a file: through the downloads capability when it's there and the kind is allowed (ZIP), else a plain link
+  async function saveFile(filename, blob, allowed) {
+    if (downloads && allowed) {
+      try { await downloads.save({ filename, data: blob }); return true; } catch (err) {
+        if (err && err.code === 'declined') return false;
+        if (err && err.code === 'rate_limited') { toast('A save is already waiting for your answer.', 'warn'); return false; }
       }
     }
     const a = document.createElement('a');
@@ -1220,7 +1232,32 @@
     a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-    toast(`Saved ${filename} with ${files.length} STL ${files.length === 1 ? 'file' : 'files'}.`);
+    return true;
+  }
+  // Projects: every part with its name, colour, pull and joints, plus the settings, in one ZIP to open later.
+  async function saveProject() {
+    if (!state.parts.length) return;
+    const name = state.model ? state.model.name : 'model';
+    const data = K.packProject(state.parts, { name, bed: state.bed, cfg: state.cfg, joint: state.joint, cutId: state.cutId, reduce: state.reduce, saved: new Date().toISOString() });
+    const filename = safeName(name) + '.keymaster.zip';
+    if (await saveFile(filename, new Blob([data], { type: 'application/zip' }), true)) toast(`Saved the project as ${filename}: ${state.parts.length} ${state.parts.length === 1 ? 'part' : 'parts'} and your settings. Open it here any time to carry on.`);
+  }
+  function openProject(buf, filename) {
+    const pr = K.unpackProject(buf);
+    const parts = pr.parts.map(q => makePart({ name: q.name, color: q.color || nextColor(), positions: q.positions, indices: q.indices, kind: q.kind, pull: q.pull, joints: q.joints }));
+    const open = pr.parts.reduce((s, q) => s + (q.report ? q.report.openEdges + q.report.badEdges : 0), 0);
+    state.model = { name: pr.name || filename.replace(/\.keymaster\.zip$|\.zip$/i, ''), report: { closed: open === 0, openEdges: open, badEdges: 0 }, tris: parts.reduce((s, q) => s + q.tris, 0) };
+    state.nextColor = parts.length + 1;
+    state.parts = parts;
+    if (pr.bed) Object.assign(state.bed, pr.bed);
+    if (pr.cfg) Object.assign(state.cfg, pr.cfg);
+    state.joint = pr.joint || 1; state.cutId = pr.cutId || 0; if (pr.reduce) state.reduce = pr.reduce;
+    history.past = []; history.future = [];
+    state.selectedId = null; state.hidden.clear(); state.explode = 0; state.split.planes = null;
+    $('#empty').hidden = true;
+    savePrefs();
+    syncScene(); frameAll(); updateChrome();
+    toast(`Opened the project: ${parts.length} ${parts.length === 1 ? 'part' : 'parts'}, with the settings as saved.`);
   }
 
   /* ---------------- pointer interaction ---------------- */
@@ -2105,6 +2142,11 @@
       ${health}
     </div>
     <div class="ins-section">
+      <h3>Project</h3>
+      <p class="muted small">Save the parts, their names and colours, the joints and your settings in one file, and open it here later to carry on.</p>
+      <div class="row tight"><button class="btn" data-act="save-project">Save project</button><button class="btn" data-act="open-project">Open project</button></div>
+    </div>
+    <div class="ins-section">
       <h3>Reduce detail</h3>
       <p class="muted small">A lighter model paints and cuts faster. Light keeps the surface within 0.02 mm, Strong within 0.1 mm; the shape and the volume stay. Ctrl+Z puts the detail back.</p>
       <div class="row tight">
@@ -2224,7 +2266,8 @@
         } catch (err) { next.push(p); continue; } // a cut that only cracks the part, or can't seal: the part stays whole here
         cuts++;
         const base = baseOf.get(p.id) || p.name;
-        for (const c of res.parts) { const np = makePart({ name: base, color: p.color, positions: c.positions, indices: c.indices, pull: c.side === 'below' ? [-n[0], -n[1], -n[2]] : c.side === 'above' ? n.slice() : null }); baseOf.set(np.id, base); next.push(np); }
+        const joints = jointOf(p, { type: state.cfg.type, keys: res.keysUsed || 0, number: null });
+        for (const c of res.parts) { const np = makePart({ name: base, color: p.color, positions: c.positions, indices: c.indices, pull: c.side === 'below' ? [-n[0], -n[1], -n[2]] : c.side === 'above' ? n.slice() : null, joints }); baseOf.set(np.id, base); next.push(np); }
         for (const pin of res.pins || []) next.push(makePart({ name: `${base} pin`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' }));
         await nextFrame();
       }
@@ -2385,6 +2428,8 @@
       case 'export-one': exportParts(state.selectedId); break;
       case 'fill-holes': busy('Repairing the surface'); setTimeout(() => { repairSurface(); busy(null); }, 30); break;
       case 'reduce': reduceModel(); break;
+      case 'save-project': saveProject(); break;
+      case 'open-project': fileInput.click(); break;
       case 'split-plan': planSplit(null); break;
       case 'split-cut': cutToFit(); break;
       case 'split-clear': clearSplit(); break;
@@ -2731,7 +2776,9 @@
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);
     if (!p || !pick.result) return;
-    const made = pick.result.parts.map((c, i) => makePart({ name: `${p.name} ${String.fromCharCode(65 + i)}`, color: i ? nextColor() : p.color, positions: c.positions, indices: c.indices, pull: c.pull || null }));
+    const numberedHere = pick.perLoop.some(per => per.marks && per.marks.length) ? state.joint : null;
+    const joints = jointOf(p, { type: state.cfg.type, keys: pick.keys.length + pick.plugs.length, number: numberedHere });
+    const made = pick.result.parts.map((c, i) => makePart({ name: `${p.name} ${String.fromCharCode(65 + i)}`, color: i ? nextColor() : p.color, positions: c.positions, indices: c.indices, pull: c.pull || null, joints }));
     (pick.result.pins || []).forEach((pin, i) => made.push(makePart({ name: `${p.name} pin ${i + 1}`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' })));
     const idx = state.parts.indexOf(p);
     clearPick();

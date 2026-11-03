@@ -507,6 +507,31 @@ with sync_playwright() as p:
     print('    zip:', d.suggested_filename, z.namelist())
     check('zip has one STL per part', len(z.namelist()) == pg.locator('#partList li[data-id]').count() and all(n.endswith('.stl') for n in z.namelist()))
     check('zip integrity', z.testzip() is None)
+    # export as one 3MF, and as STLs with an assembly sheet
+    pg.select_option('#exportFormat', '3mf')
+    with pg.expect_download() as dl3:
+        pg.click('#exportBtn')
+    d3 = dl3.value; z3 = zipfile.ZipFile(io.BytesIO(open(d3.path(), 'rb').read()))
+    check('One 3MF saves a .3mf holding every part', d3.suggested_filename.endswith('.3mf') and '3D/3dmodel.model' in z3.namelist() and z3.read('3D/3dmodel.model').count(b'<object ') == pg.locator('#partList li[data-id]').count(), (d3.suggested_filename, z3.namelist()))
+    pg.select_option('#exportFormat', 'sheet')
+    with pg.expect_download() as dls:
+        pg.click('#exportBtn')
+    ds = dls.value; zs = zipfile.ZipFile(io.BytesIO(open(ds.path(), 'rb').read()))
+    sheet = zs.read('assembly.html').decode('utf-8') if 'assembly.html' in zs.namelist() else ''
+    check('STLs + assembly sheet adds assembly.html naming the parts and their joints', 'assembly.html' in zs.namelist() and 'Torso' in sheet and 'with' in sheet, zs.namelist())
+    pg.select_option('#exportFormat', 'zip')
+    # save the project and open it again
+    pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
+    if pg.locator('[data-act=done]').count(): pg.click('[data-act=done]'); pg.wait_for_timeout(200)
+    names_before = pg.locator('#partList .part-name').all_inner_texts()
+    with pg.expect_download() as dlp:
+        pg.click('[data-act=save-project]')
+    dp = dlp.value
+    check('Save project downloads a .keymaster.zip with project.json and every part', dp.suggested_filename.endswith('.keymaster.zip') and 'project.json' in zipfile.ZipFile(io.BytesIO(open(dp.path(), 'rb').read())).namelist(), dp.suggested_filename)
+    proj = str(OUT / 'saved.keymaster.zip'); dp.save_as(proj)
+    pg.set_input_files('#fileInput', proj)
+    pg.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').innerText.includes('Opened the project')", timeout=30000)
+    check('opening the project brings the parts back with their names', pg.locator('#partList .part-name').all_inner_texts() == names_before, (names_before, pg.locator('#partList .part-name').all_inner_texts()))
 
     pg.screenshot(path=str(OUT / 'shot_parts.png'))
     pg.set_viewport_size({'width': 390, 'height': 844})

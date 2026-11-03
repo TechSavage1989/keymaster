@@ -639,6 +639,23 @@ console.log('reduce detail');
   check('a cube has nothing to take out within a small tolerance', rc.indices.length === cube.indices.length && rc.removed === 0, rc.removed);
 }
 
+console.log('export formats and projects');
+{
+  const knot = K.prepareMesh(K.torusKnot());
+  const parts = [{ name: 'Knot A', color: '#c05050', positions: knot.positions, indices: knot.indices, volume: knot.report.volume, joints: [{ id: 1, type: 'peg', keys: 2, number: 1 }] }, { name: 'Knot <B>', color: '#5050c0', positions: knot.positions, indices: knot.indices, joints: [{ id: 1, type: 'peg', keys: 2, number: 1 }] }];
+  const z = K.readZip(K.makeZip([{ name: 'a.txt', data: new TextEncoder().encode('hello') }, { name: 'dir/b.bin', data: new Uint8Array([1, 2, 3]) }]));
+  check('a ZIP written by Keymaster reads back entry for entry', z.length === 2 && z[0].name === 'a.txt' && new TextDecoder().decode(z[0].data) === 'hello' && z[1].name === 'dir/b.bin' && z[1].data.length === 3, z.map(e => e.name));
+  const tmf = K.make3MF(parts), entries = K.readZip(tmf), model = entries.find(e => e.name === '3D/3dmodel.model');
+  const xml = model ? new TextDecoder().decode(model.data) : '';
+  check('a 3MF holds the content types, the relationships and one model with every part as a named, coloured object', entries.length === 3 && !!entries.find(e => e.name === '[Content_Types].xml') && !!entries.find(e => e.name === '_rels/.rels') && (xml.match(/<object /g) || []).length === 2 && (xml.match(/<triangle /g) || []).length === 2 * knot.indices.length / 3 && xml.includes('name="Knot &lt;B&gt;"') && xml.includes('displaycolor="#c05050"') && xml.includes('unit="millimeter"'), entries.map(e => e.name));
+  const sheet = K.assemblySheet(parts, { name: 'Knot', bed: { w: 220, d: 220, h: 250 }, date: 'today' });
+  check('the assembly sheet names every part, its joint number and the parts a joint pairs', sheet.includes('Knot A') && sheet.includes('Knot &lt;B&gt;') && sheet.includes('№ 1') && sheet.includes('Knot A + Knot &lt;B&gt;') && sheet.includes('220 × 220 × 250') && sheet.startsWith('<!doctype html>'), sheet.length);
+  const pz = K.packProject(parts, { name: 'Knot', bed: { w: 1, d: 2, h: 3 }, joint: 2 }), back = K.unpackProject(pz);
+  check('a project packs and unpacks with its parts, names, colours, joints and settings', back.app === 'Keymaster' && back.name === 'Knot' && back.bed.h === 3 && back.joint === 2 && back.parts.length === 2 && back.parts[1].name === 'Knot <B>' && back.parts[0].color === '#c05050' && back.parts[0].joints[0].number === 1 && back.parts[0].indices.length === knot.indices.length && back.parts[0].report.closed, back.parts.map(q => q.name));
+  let msg = ''; try { K.unpackProject(K.makeZip([{ name: 'x.stl', data: new Uint8Array(84) }])); } catch (e) { msg = e.message; }
+  check('a ZIP that isn’t a project says so', msg.includes('isn’t a Keymaster project'), msg);
+}
+
 console.log('split to fit the bed');
 {
   const box = (sx, sy, sz) => ({ min: [0, 0, 0], max: [sx, sy, sz], size: [sx, sy, sz], center: [sx / 2, sy / 2, sz / 2] });
