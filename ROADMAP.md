@@ -23,6 +23,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Surface regions: colour a model by where its surface turns sharply, like ZBrush polygroups, with an adjustable threshold.
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
+- Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
 - Cut at a spot (1.33): click where the cut should go round and Keymaster finds the narrowest cut through that spot for the piece it frees, puts the cut plane there and cuts just that piece.
 - Suggested cuts judged by what they free (1.32): narrow points and joins (shoulders, hips, a head under hair) scored by the piece they free and how narrow the cut is for it, each cutting only the areas that free the piece; regions to split off along their outline (an arm, a head, a backpack) suggested too; pins on thumbs, base edges and slices through both legs gone.
 - Models with gaps or tangles are repaired as they open (1.31), so region picks and cuts on them work straight away.

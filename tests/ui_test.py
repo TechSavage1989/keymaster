@@ -655,6 +655,19 @@ with sync_playwright() as p:
     info = pg.inner_text('#cutLineInfo')
     print('    picked line:', res, info.replace('\n', ' ')[:140])
     check('clicking the seam picks a line all the way round, ready to cut', bool(res) and res['closed'] and res['ok'] and 'all the way round' in info and pg.locator('[data-act=cut-line]').count() == 1, (res, info))
+    # seam editing: the picked line becomes handles; one dragged up the ball re-routes the line, Smooth eases it, Done keeps it
+    check('the pick offers Edit the line', pg.locator('[data-act=edit-seam]').count() == 1)
+    nh = pg.evaluate("KeymasterDebug.seamEdit()"); pg.wait_for_timeout(600)
+    check('editing turns the line into handles and shows the seam tools', bool(nh) and nh[0] >= 6 and pg.is_visible('#seamTools') and 'Drag a handle' in pg.inner_text('#hint') and pg.locator('[data-act=edit-seam]').count() == 0, (nh, pg.inner_text('#hint')))
+    len0 = pg.evaluate("KeymasterDebug.seamSmooth(0)")['length']
+    up = [ax[k] * (z + 4) + u[k] * 4.5 for k in range(3)]  # a spot 4 mm up the ball from the seam
+    resE = pg.evaluate(f"KeymasterDebug.seamDrag(0, 2, {up})"); pg.wait_for_timeout(600)
+    check('dragging a handle up the ball re-routes the line through it and re-runs the pick', bool(resE) and resE['ok'] and resE['length'] > len0 and 'all the way round' in pg.inner_text('#cutLineInfo'), (resE, len0))
+    resS = pg.evaluate("KeymasterDebug.seamSmooth(4)"); pg.wait_for_timeout(600)
+    check('Smooth eases the line and keeps the pick', bool(resS) and resS['ok'] and resS['length'] < resE['length'], (resS, resE))
+    pg.click('[data-act=seam-done]'); pg.wait_for_timeout(200)
+    check('Done puts the handles away and keeps the line picked', not pg.is_visible('#seamTools') and pg.locator('[data-act=cut-line]').count() == 1 and pg.locator('[data-act=edit-seam]').count() == 1)
+    pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam})"); pg.wait_for_timeout(300)
     pg.click('[data-act=cut-line]')
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
     names = pg.locator('#partList .part-name').all_inner_texts()
