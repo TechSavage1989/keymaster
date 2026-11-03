@@ -1500,7 +1500,7 @@ const KMCore = (() => {
      smallest, and keeps the first that fits. Pegs are 1.2 times as long as they are wide; dowel pins 2.5 times;
      magnets come from standard disc sizes. */
   const PRINTERS = { resin: { min: 1, gap: 0.1, wall: 0.8 }, fdm: { min: 2.5, gap: 0.2, wall: 1.2 } };
-  const KEY_SIZES = [12, 10, 8, 7, 6, 5, 4.5, 4, 3.5, 3, 2.5, 2, 1.6, 1.2, 1];
+  const KEY_SIZES = [15, 12, 10, 8, 7, 6, 5, 4.5, 4, 3.5, 3, 2.5, 2, 1.6, 1.2, 1];
   const MAGNET_SIZES = [[10, 3], [8, 3], [6, 3], [5, 2], [4, 2], [3, 1.5], [3, 1], [2, 1]]; // diameter × thickness, mm
   function sizeLadder(cfg) {
     const max = cfg.sizeMax || cfg.diameter, min = cfg.sizeMin || PRINTERS[cfg.printer === 'resin' ? 'resin' : 'fdm'].min;

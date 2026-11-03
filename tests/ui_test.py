@@ -707,8 +707,27 @@ with sync_playwright() as p:
     pg.click('#modelTools [data-act=scale][data-value="10"]'); pg.wait_for_timeout(500)
     size1 = pg.inner_text('#partList li[data-id] .part-size') if pg.locator('#partList li[data-id] .part-size').count() else pg.inner_text('#partList')
     check('x 10 from the view tools scales the model', size0 != size1 and '438' in size1, (size0, size1))
-    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
-    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
+    # the Largest key follows the model's size: 5 mm on a 50 mm dumbbell, 15 mm once it's 500 mm (an earlier test set
+    # a size by hand, which would hold it; let it follow the model again)
+    pg.evaluate("KeymasterDebug.sizeByHand(false)")
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(200)
+    if pg.get_attribute('#regionsBtn', 'aria-pressed') == 'true': pg.click('#regionsBtn'); pg.wait_for_timeout(200)
+    check('scaled up ten times, the Largest key grows to 15 mm', pg.input_value('input[data-cfg=diameter]') == '15', pg.input_value('input[data-cfg=diameter]'))
+    pg.keyboard.press('Control+z'); pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1", timeout=15000); pg.wait_for_timeout(300)
+    pg.click('#modelTools [data-act=scale][data-value="0.1"]'); pg.wait_for_timeout(500)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(200)
+    check('scaled back down, it returns to 5 mm', pg.input_value('input[data-cfg=diameter]') == '5', pg.input_value('input[data-cfg=diameter]'))
+    pg.fill('input[data-cfg=diameter]', '7'); pg.press('input[data-cfg=diameter]', 'Tab'); pg.wait_for_timeout(200)
+    pg.click('#modelTools [data-act=scale][data-value="10"]'); pg.wait_for_timeout(500)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(200)
+    check('a size set by hand stays when the model is scaled', pg.input_value('input[data-cfg=diameter]') == '7', pg.input_value('input[data-cfg=diameter]'))
+    pg.fill('input[data-cfg=diameter]', '5'); pg.press('input[data-cfg=diameter]', 'Tab'); pg.wait_for_timeout(200)
+    pg.evaluate("() => { localStorage.clear(); document.activeElement.blur(); }")
+    pg.keyboard.press('Escape'); pg.wait_for_timeout(100)  # the part is let go, so the next click chooses it again
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)  # the x 10
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)  # the x 0.1: back to the dumbbell as it was
+    pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000); pg.wait_for_timeout(300)
+    if pg.locator('[data-act=keytype]').count() == 0: pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
     # a cut line drawn by hand: four points round a ball, closed with Enter, cut like any line
     pg.click('#drawLineBtn'); pg.wait_for_timeout(200)
     check('the draw button turns drawing on and the hint explains', pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'true' and 'Click points' in pg.inner_text('#hint'), pg.inner_text('#hint'))

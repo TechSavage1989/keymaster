@@ -23,6 +23,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Surface regions: colour a model by where its surface turns sharply, like ZBrush polygroups, with an adjustable threshold.
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
+- Keys sized to the model (1.29): the Largest key follows the model's size when it's opened or scaled (5 mm on a miniature, 15 mm on a 300 mm figure) until set by hand.
 - Plugs on the right piece (1.28): on curved cuts the plug or pegs stand on the piece being split off ("This piece" / "Other piece"), plugs on awkward outlines are made shallower instead of refused, key markers show through the model, and several drawn lines cut together.
 - Brush polish (1.27): the brush shows as a circle on the surface and starts at a size to suit the model; faces show while painting (and **Show faces** in the view tools any time); turn and scale buttons stay over the view.
 - Paint an area to split off (1.26): a brush paints faces like a Meshmixer or ZBrush selection, with grow, shrink, tidy and erase; the painted area always splits off, with the usual keys, plug and sinking.

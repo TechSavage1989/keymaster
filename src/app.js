@@ -918,6 +918,16 @@
     setModel('Sample knot', K.prepareMesh(K.torusKnot()));
     busy(null);
   }
+  // The Largest key follows the model's size (about 3.5% of its longest side, 5 to 15 mm, as kits of that size use)
+  // when a model is opened or scaled, until it's set by hand: on a figure scaled to 300 mm a 5 mm peg was a dot.
+  function fitKeySizeToModel() {
+    if (state.cfg.sizeByHand || !state.parts.length) return;
+    const h = Math.max(...modelBounds().size), d = Math.min(15, Math.max(5, Math.round(h * 0.035 * 2) / 2));
+    if (d === state.cfg.diameter) return;
+    state.cfg.diameter = d;
+    state.cfg.length = Math.max(1, Math.round(d * 1.2 * 2) / 2);
+    savePrefs();
+  }
   function setModel(name, m) {
     state.model = { name, report: m.report, tris: m.indices.length / 3 };
     state.nextColor = 1;
@@ -925,6 +935,7 @@
     history.past = []; history.future = [];
     state.selectedId = null; state.hidden.clear(); state.explode = 0;
     $('#empty').hidden = true;
+    fitKeySizeToModel();
     syncScene();
     frameAll();
     const specks = m.report.specks ? ` Removed ${m.report.specks} loose ${m.report.specks === 1 ? 'speck' : 'specks'} too small to print.` : '';
@@ -1042,6 +1053,8 @@
   function scaleAll(f) {
     if (!(f > 0) || !isFinite(f)) return;
     transformAll((x, y, z) => [x * f, y * f, z * f], 'the scale change');
+    fitKeySizeToModel();
+    renderInspector();
   }
   // Repair every part's surface: faces stored twice, parts welded along a seam, patches facing the wrong way,
   // loose slivers, pinched vertices and holes, in that order. Says what it did, and what it couldn't.
@@ -1235,7 +1248,7 @@
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintDone() { pickPainted(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintDone() { pickPainted(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -2010,6 +2023,7 @@
     }
     if (t.dataset.cfg) {
       const k = t.dataset.cfg;
+      if (k === 'diameter' || k === 'length') state.cfg.sizeByHand = true; // the owner's own size stays, whatever the model's size
       if (t.type === 'checkbox') state.cfg[k] = t.checked;
       else {
         const v = parseFloat(t.value);
