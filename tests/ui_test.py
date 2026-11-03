@@ -1246,6 +1246,10 @@ with sync_playwright() as p:
     print('    plug:', foot.replace('\n', ' ')[:160])
     check('choosing Plug shows its own settings: depth, slope, fit, wall, side', all(w in ins for w in ('As deep as fits', 'Slope', 'Gap', 'Wall', 'Plug on')) and pg.locator('[data-act=shape]').count() == 0, ins[:400])
     check('the footer says how deep the plug goes', 'A plug 5.5 mm deep' in foot, foot)
+    rings = pg.evaluate("KeymasterDebug.plugRings()"); marks = pg.evaluate("KeymasterDebug.markerBounds()")
+    bodies = [m for m in marks if m['kind'] == 'Mesh']
+    fits = all(any(m['min'][0] >= r['min'][0] - 1 and m['max'][0] <= r['max'][0] + 1 and m['min'][1] >= r['min'][1] - 1 and m['max'][1] <= r['max'][1] + 1 for r in rings) for m in bodies)
+    check('the plug marker stays within its own outline (no wedge to the middle of the cut)', len(bodies) == len(rings) and len(rings) >= 1 and fits, (rings, bodies))
     pg.click('[data-act=plugdepth][data-value=set]'); pg.wait_for_timeout(400)
     for w, h in ((1280, 800), (1366, 768)):
         pg.set_viewport_size({'width': w, 'height': h}); pg.wait_for_timeout(250)
