@@ -1,10 +1,19 @@
-# Keymaster
+<h1 align="center">Keymaster</h1>
+<p align="center">Cut 3D-printable sculptures and figures into pieces, with keys that line the pieces up when you glue them.</p>
 
-Cut 3D-printable sculptures and figures into pieces, with keys that line the pieces up when you glue them.
+<p align="center">
+  <a href="https://keymaster.techsavage3d.com">Open the app</a> ·
+  <a href="#getting-started">Get started</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#screenshots">Screenshots</a> ·
+  <a href="#development">Development</a>
+</p>
 
-Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com**. Open the page, drop in an STL or OBJ, and nothing is installed or uploaded.
+<p align="center">
+  <img src="docs/images/hero.png" alt="Keymaster main window" width="900">
+</p>
 
-## What it does
+## Features
 
 - **Live cut preview.** Drag the arrow to slide the cut, and the blue rings or the plane itself to tilt it (Shift for 5° steps or fine control). The toolbar under the view takes an exact position and X, Y and Z angles. Everything fits on one screen, with no scrolling. The cut face appears as a hatched section while you drag, even on dense sculpts.
 - **Cut as many times as you need.** Every piece lands in the parts list and can be cut again. Undo and redo cover every step.
@@ -28,7 +37,23 @@ Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com*
 - **Model tools.** Repair a tangled surface (faces stored twice, parts welded along a seam, patches facing the wrong way, loose slivers, holes), fix inside-out models, turn the model a quarter turn, scale it (including inches to millimeters), and see which parts fit your printer bed.
 - **Export.** Every part is saved as its own STL, bundled in one ZIP.
 
-## Using it
+## Screenshots
+
+**Plugs: each area of the cut face stands out into a matching pocket**
+
+<img src="docs/images/plugs.png" alt="Plugs: each area of the cut face stands out into a matching pocket" width="900">
+
+**Cut pieces with their joints, spread apart in the exploded view**
+
+<img src="docs/images/exploded-parts.png" alt="Cut pieces with their joints, spread apart in the exploded view" width="900">
+
+**Split to fit the bed: the straight cuts that make every piece fit your printer**
+
+<img src="docs/images/split-to-fit-bed.png" alt="Split to fit the bed: the straight cuts that make every piece fit your printer" width="900">
+
+## Getting started
+
+Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com**. Open the page, drop in an STL or OBJ, and nothing is installed or uploaded.
 
 1. Open the app and choose **Open STL or OBJ**, or drop a file onto the view. **Try the sample** loads a knot to experiment with.
 2. Click a part to select it. The cut plane appears through its middle.
@@ -37,15 +62,19 @@ Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com*
 5. Press **Cut part** or Enter. Repeat on any piece.
 6. Press **Export parts** to save everything.
 
+## How to use
+
 Shortcuts: Enter cut, Esc done, X/Y/Z align, F frame, Delete remove key, Ctrl+Z undo, Ctrl+Shift+Z redo.
 
 **Before printing a large piece, print a small test cut.** The right fit depends on your printer, material, orientation and post-processing.
 
-The version shows beside the name at the top left (for example **v1.14 · 2c6ad6**). After an update, refresh the page: if the label changed, the new version is live.
-
 ## Running it yourself
 
 The whole app is the single file `index.html`. To host it free on GitHub Pages: open the repository's **Settings**, then **Pages**, choose **Deploy from a branch**, pick `main` and `/ (root)`, and save. The app will be live at `https://<your-username>.github.io/keymaster/`.
+
+## Updates and settings
+
+The version shows beside the name at the top left (for example **v1.14 · 2c6ad6**). After an update, refresh the page: if the label changed, the new version is live.
 
 ## Development
 
