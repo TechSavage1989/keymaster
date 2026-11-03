@@ -1310,6 +1310,7 @@ const KMCore = (() => {
   const KEY_SHAPES = ['round', 'square', 'hexagon', 'cross', 'oval', 'slot', 'dshape'];
   const MAGNET_SHAPES = ['round', 'square'];
   function shapeFor(cfg) {
+    if (cfg.shape === 'bar') return 'bar'; // an engraved mark's segment, whatever the key type
     const s = KEY_SHAPES.includes(cfg.shape) ? cfg.shape : 'round';
     return cfg.type === 'magnet' && !MAGNET_SHAPES.includes(s) ? 'round' : s;
   }
@@ -1319,6 +1320,7 @@ const KMCore = (() => {
     const arc = (cx, cy, rad, a0, a1, n, closed) => { for (let i = 0; i < n; i++) { const a = a0 + (a1 - a0) * (closed ? i / n : i / (n - 1)); out.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad]); } };
     switch (shape) {
       case 'square': out.push([R, -R], [R, R], [-R, R], [-R, -R]); break;
+      case 'bar': { const w = 0.28 * r + d; out.push([R, -w], [R, w], [-R, w], [-R, -w]); break; } // a stroke of an engraved digit: 2r long, 0.56r thick
       case 'hexagon': { const q = R * 2 / Math.sqrt(3); arc(0, 0, q, 0, 2 * Math.PI, 6, true); break; } // across flats = 2R
       case 'cross': {
         const w = 0.38 * r + d; // arm half-thickness
@@ -2633,6 +2635,43 @@ const KMCore = (() => {
     let length = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; length += Math.hypot(P[3 * p] - P[3 * q], P[3 * p + 1] - P[3 * q + 1], P[3 * p + 2] - P[3 * q + 2]); }
     return { verts: ring, closed: true, length, drawn: true };
   }
+  /* ---------- engraved joint numbers ----------
+     The same number on both mating faces of a cut (modelsplitter's joint numbers), so a kit of many pieces goes
+     together without guessing. Each digit is seven strokes, and each stroke is a shallow pocket cut by the key
+     machinery (shape 'bar', a both-sides socket with no clearance), so flat and curved cuts engrave alike. */
+  const DIGIT_STROKES = { 0: 'abcdef', 1: 'bc', 2: 'abged', 3: 'abgcd', 4: 'fgbc', 5: 'afgcd', 6: 'afgedc', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg' };
+  // Marks (strokes) for `number`, as {x, y, len, deg, side}: laid out in an area of a cut face (`sec`, `ri`) at
+  // the clearest spot away from its keys, as big as fits from 3 mm strokes down to 1.5 mm; `mirror` lays a second
+  // set mirrored for the other face (side +1), so each reads the right way round. Null when nothing fits.
+  function jointMarks(sec, ri, keys, cfg, number, opts = {}) {
+    const digits = String(Math.max(0, Math.round(number))).split('').map(Number);
+    if (!sec.regions[ri] || sec.regions[ri].nested || sec.regions[ri].inverted) return null;
+    const samples = regionSamples(sec, ri, 400), outerOf = (k) => { try { return keyGeometrySpec(keyCfg(cfg, k)).outer; } catch (err) { return 3; } };
+    const kk = (keys || []).map(k => ({ x: k.x, y: k.y, r: outerOf(k) }));
+    for (const W of [3, 2.5, 2, 1.5]) { // a digit is W wide, 2W tall
+      const t = 0.205 * W, L = W - 1.3 * t, pitch = 1.4 * W, width = (digits.length - 1) * pitch + W + t, height = 2 * W + t, half = Math.hypot(width, height) / 2 + 0.3;
+      let best = null, bs = -Infinity;
+      for (const s of samples) { let sc = s.clear - half; for (const k of kk) sc = Math.min(sc, Math.hypot(s.x - k.x, s.y - k.y) - k.r - half); if (sc > bs) { bs = sc; best = s; } }
+      if (!best || bs < 0) continue;
+      const strokes = [];
+      digits.forEach((d, i) => {
+        const cx = best.x - ((digits.length - 1) * pitch) / 2 + i * pitch, cy = best.y, on = DIGIT_STROKES[d] || '';
+        const seg = { a: [cx, cy + W, 0], g: [cx, cy, 0], d: [cx, cy - W, 0], f: [cx - W / 2, cy + W / 2, 90], b: [cx + W / 2, cy + W / 2, 90], e: [cx - W / 2, cy - W / 2, 90], c: [cx + W / 2, cy - W / 2, 90] };
+        // every stroke is nudged by a hair of its own: two pockets whose edges line up exactly leave the cap's
+        // triangulation with collinear points it can't always sew up (digits 0, 4, 8 and 9 came out open)
+        for (const ch of on) { const [x, y, deg] = seg[ch], k = strokes.length; strokes.push({ x: x + (((k * 3) % 5) - 2) * 0.03 * t, y: y + (((k * 7) % 5) - 2) * 0.03 * t, len: L * (1 - ((k % 3) * 0.01)), deg }); }
+      });
+      const depth = opts.depth > 0 ? opts.depth : 0.6, out = [];
+      for (const s of strokes) out.push({ ...s, depth, side: opts.mirror ? -1 : undefined });
+      if (opts.mirror) for (const s of strokes) out.push({ x: 2 * best.x - s.x, y: s.y, len: s.len, deg: s.deg, depth, side: +1 }); // mirrored about the label's centre, for the face seen from the other side
+      return { marks: out, x: best.x, y: best.y, width: W, number: digits.join('') };
+    }
+    return null;
+  }
+  // Marks as key-like objects for the cut routines: each stroke a 'bar' of its length, engraved `depth` deep.
+  function markKeys(marks) {
+    return (marks || []).map(m => ({ x: m.x, y: m.y, mark: true, side: m.side, o: { shape: 'bar', diameter: m.len, length: m.depth || 0.6, clearance: 0, taper: 0, taperSocket: false, align: false, turn: m.deg || 0 } }));
+  }
   /* ---------- inlay cut ----------
      Pop a detail out as its own part to print in another colour (an eye, a gem, a badge), as modelsplitter's inlay
      cut: the body gets a pocket under the painted or picked area, and the inlay is the same area cut with its
@@ -3037,7 +3076,7 @@ const KMCore = (() => {
       const sunk = opts.sink > 0 ? sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, !!opts.sinkFlat, opts.sinkPlane || null) : null;
       const faceOf = (fxy, fh) => { const sec = { loops: [makeLoop(ring, [], fxy)] }; sec.regions = buildRegions(sec.loops); return { xy: fxy, h: fh, sec, step: capStep(fxy), H: capHeight(fxy, fh) }; };
       const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, cfg: lcfg, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
-      c.use = (which) => { const f = which === 'sunk' && c.sunkFace ? c.sunkFace : c.plain; Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0 }); c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length; };
+      c.use = (which) => { const f = which === 'sunk' && c.sunkFace ? c.sunkFace : c.plain; Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0 }); c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length; };
       c.use('sunk');
       return c;
     });
@@ -3050,7 +3089,7 @@ const KMCore = (() => {
       let src = pos;
       caps.forEach((c, li) => {
         const { ring, n, F, xy, wantCCW, cap, sunk } = c;
-        if (c.joined) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys, c.cfg, surf, ek, c.plugs, sunk); src = r.V; pins.push(...r.pins); }
+        if (c.joined || c.marks.length) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys.concat(c.marks), c.cfg, surf, ek, c.plugs, sunk); src = r.V; pins.push(...r.pins); }
         else {
           const xyMap = new Map([[extra + 2 * li, null]]);
           // the new points on the face that follows the line, each with a copy for the other piece
@@ -3218,6 +3257,7 @@ const KMCore = (() => {
     const items = keys.map(k => {
       k.cfg = keyCfg(cfg, k); k.spec = keyGeometrySpec(k.cfg); k.angle = keyAngle(sec, 0, k.cfg);
       const ks = k.spec, at2 = (prof) => prof.map(([px, py]) => [k.x + px, k.y + py]);
+      if (k.mark) { const prof = at2(keyProfile('bar', ks.r, 0, k.angle, ks.res)); return Object.assign(k, { mouth2: prof, base2: prof, end2: prof, floor2: prof, len: k.cfg.length, gap: 0, depthOn: () => k.cfg.length }); }
       return Object.assign(k, { mouth2: at2(keyProfile(ks.shape, ks.r, ks.cs, k.angle, ks.res)), base2: at2(keyProfile(ks.shape, ks.r, 0, k.angle, ks.res)), end2: at2(keyProfile(ks.shape, ks.r * ks.taper, 0, k.angle, ks.res)), floor2: at2(keyProfile(ks.shape, ks.r * ks.sockTip, ks.cs, k.angle, ks.res)), len: k.cfg.length, gap: ks.cs, depthOn: (sg) => (ks.sockets.find(q => q.side === sg) || { depth: k.cfg.length + ks.ca }).depth });
     }).concat(plugs.filter(q => q.ok).map(q => ({ x: q.x, y: q.y, plug: true, mouth2: q.mouth, base2: q.base, end2: q.top, floor2: q.floor, len: q.depth, gap: cfg.clearance, depthOn: () => q.depth + q.ca })));
     for (const k of items) {
@@ -3271,7 +3311,7 @@ const KMCore = (() => {
           }
           T.push(...endCap(end, endXY, (role === 'peg' ? dir : -dir) > 0));
         };
-        if ((cfg.type === 'peg' || k.plug) && sg === pegSide) {
+        if (!k.mark && (cfg.type === 'peg' || k.plug) && sg === pegSide) {
           // the fit gap: a ring of face from the socket outline in to the peg (none with no gap), then the peg itself
           const peg = k.gap > 1e-9 ? k.peg.map(q => addV(at(q.x, q.y, q.z))) : sock, m = peg.length;
           if (peg !== sock) for (let i = 0; i < m; i++) { const j = (i + 1) % m; pushOriented(sock[i], sock[j], peg[j], face); pushOriented(sock[i], peg[j], peg[i], face); }
@@ -3283,7 +3323,7 @@ const KMCore = (() => {
         }
       }
     }
-    if (cfg.type === 'dowel') for (const k of keys) { const zc = (k.lo + k.hi) / 2; pins.push(makePin((x, y, z) => at(x, y, z + zc), k, k.spec, k.cfg.length)); }
+    if (cfg.type === 'dowel') for (const k of keys) { if (k.mark) continue; const zc = (k.lo + k.hi) / 2; pins.push(makePin((x, y, z) => at(x, y, z + zc), k, k.spec, k.cfg.length)); }
     return { V, pins };
   }
 
@@ -3855,7 +3895,7 @@ const KMCore = (() => {
     };
 
     const spec = keyGeometrySpec(cfg);
-    const keys = (cfg.type === 'none' ? [] : (opts.keys || [])).map(k => ({ ...k, region: -1 }));
+    const keys = (cfg.type === 'none' ? [] : (opts.keys || [])).concat(markKeys(opts.marks)).map(k => ({ ...k, region: -1 }));
     const tmpSec = { loops, regions };
     for (const k of keys) { k.region = regionAt(tmpSec, k.x, k.y); k.cfg = keyCfg(cfg, k); k.spec = k.o || k.a ? keyGeometrySpec(k.cfg) : spec; k.angle = keyAngle(tmpSec, k.region, k.cfg); }
     const plugs = (cfg.type === 'plug' ? (opts.plugs || []).filter(q => q.ok) : []).map(q => ({ ...q, region: regionAt(tmpSec, q.x, q.y) }));
@@ -3896,7 +3936,10 @@ const KMCore = (() => {
         for (const k of myKeys) {
           const ks = k.spec, kc = k.cfg; // each key may have its own size, shape and taper
           let role, grow, depth, dir, tipR = ks.r;
-          if (cfg.type === 'peg') {
+          if (k.mark) { // an engraved mark: a shallow pocket on the side it's for (each side gets its own, read the right way round)
+            if (k.side !== undefined && k.side !== side) continue;
+            role = 'socket'; grow = 0; depth = kc.length; dir = side;
+          } else if (cfg.type === 'peg') {
             const pegSide = cfg.pegSide === 'above' ? +1 : -1;
             if (side === pegSide) { role = 'peg'; grow = 0; depth = kc.length; dir = -side; tipR = ks.r * ks.taper; }
             else { role = 'socket'; grow = ks.cs; depth = kc.length + ks.ca; dir = side; tipR = ks.r * ks.sockTip; }
@@ -3953,7 +3996,7 @@ const KMCore = (() => {
           }
         }
       }
-      if (cfg.type === 'dowel') for (const k of myKeys) pins.push(makePin(at, k, k.spec, k.cfg.length));
+      if (cfg.type === 'dowel') for (const k of myKeys) if (!k.mark) pins.push(makePin(at, k, k.spec, k.cfg.length));
     });
 
     // An area whose two faces end up in the same piece (the joined areas hold them together) would only be a crack.
@@ -3964,7 +4007,7 @@ const KMCore = (() => {
       const names = areaNames(regions, comps.cracked), one = comps.cracked.length === 1;
       throw guardError(`The joined areas hold both sides of ${names} together, so cutting ${one ? 'it' : 'them'} would only make a crack, not separate pieces. Cut another area too, or leave ${one ? 'it' : 'them'} joined.`, 'crack', { regions: comps.cracked });
     }
-    return { parts: comps, pins, shift: sec.shift, regions, keysUsed: keys.filter(k => k.region >= 0 && !skip.has(k.region)).length + plugs.filter(q => q.region >= 0 && !skip.has(q.region)).length };
+    return { parts: comps, pins, shift: sec.shift, regions, keysUsed: keys.filter(k => !k.mark && k.region >= 0 && !skip.has(k.region)).length + plugs.filter(q => q.region >= 0 && !skip.has(q.region)).length, marksUsed: keys.filter(k => k.mark && k.region >= 0 && !skip.has(k.region)).length };
   }
 
   function makePin(at, k, spec, L) {
@@ -4209,7 +4252,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
