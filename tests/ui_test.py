@@ -205,6 +205,13 @@ with sync_playwright() as p:
     check('cutting with a custom key works', pg.locator('#partList li[data-id]').count() > n_parts)
     # the exploded view moves each piece along the cut that made it, not out from the middle
     pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
+    # start over: the model as it was opened, in one piece, as one undoable step
+    check('with pieces cut, the model panel offers Start over', pg.locator('[data-act=start-over]').count() == 1)
+    n_cut = pg.locator('#partList li[data-id]').count()
+    pg.click('[data-act=start-over]'); pg.wait_for_timeout(400)
+    check('Start over brings the model back in one piece and says so', pg.locator('#partList li[data-id]').count() == 1 and 'as it was opened' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(400)
+    check('undo brings the cut pieces back', pg.locator('#partList li[data-id]').count() == n_cut, (n_cut, pg.locator('#partList li[data-id]').count()))
     pg.evaluate("(() => { const e = document.querySelector('#explode'); e.value = '0.6'; e.dispatchEvent(new Event('input', { bubbles: true })); })()"); pg.wait_for_timeout(1500)
     ex = pg.evaluate("KeymasterDebug.explodeOffsets()")
     def along(o):
@@ -290,6 +297,16 @@ with sync_playwright() as p:
     check('printer type sits with the bed size', pg.locator('[data-act=printer]').count() == 2 and pg.get_attribute('[data-act=printer][data-value=fdm]', 'aria-pressed') == 'true')
     pg.click('[data-act=printer][data-value=resin]'); pg.wait_for_timeout(200)
     check('choosing resin explains what changed', 'Set up for resin' in pg.inner_text('#toast'))
+    # printer presets: a common printer sets the bed size and the type in one go
+    check('the Printer section offers common printers, with Custom size chosen', pg.locator('#bedPreset').count() == 1 and pg.input_value('#bedPreset') == '' and pg.locator('#bedPreset option').count() > 10)
+    pg.select_option('#bedPreset', 'Bambu Lab A1 mini'); pg.wait_for_timeout(300)
+    check('choosing a filament printer sets its bed and switches to filament', pg.input_value('input[data-bed=w]') == '180' and pg.input_value('input[data-bed=h]') == '180' and pg.get_attribute('[data-act=printer][data-value=fdm]', 'aria-pressed') == 'true' and 'A1 mini' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    pg.select_option('#bedPreset', 'Elegoo Saturn 3 Ultra'); pg.wait_for_timeout(300)
+    check('choosing a resin printer sets its bed and switches to resin', pg.input_value('input[data-bed=d]') == '123' and pg.get_attribute('[data-act=printer][data-value=resin]', 'aria-pressed') == 'true', pg.input_value('input[data-bed=d]'))
+    pg.fill('input[data-bed=w]', '220'); pg.press('input[data-bed=w]', 'Tab'); pg.wait_for_timeout(200)
+    check('editing the bed by hand goes back to Custom size', pg.input_value('#bedPreset') == '')
+    for k, v in (('d', 220), ('h', 250)): pg.fill(f'input[data-bed={k}]', str(v)); pg.press(f'input[data-bed={k}]', 'Tab'); pg.wait_for_timeout(100)
+    pg.click('[data-act=printer][data-value=resin]'); pg.wait_for_timeout(200)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(500)
     check('resin: keys down to 1 mm, 0.1 mm gap, 0.8 mm walls', pg.input_value('input[data-cfg=sizeMin]') == '1' and pg.input_value('input[data-cfg=clearance]') == '0.1' and pg.input_value('input[data-cfg=margin]') == '0.8')
     pg.click('[data-act=done]'); pg.click('[data-act=printer][data-value=fdm]'); pg.wait_for_timeout(200)

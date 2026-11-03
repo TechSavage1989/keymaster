@@ -360,6 +360,8 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .tool-panel .btn-row { margin-top: 6px; }
 .tool-panel .paint-tools .btn-row + .btn-row { margin-top: 4px; }
 .action-note { font-size: 12.5px; color: var(--muted); margin: 0; }
+#bedPreset { width: 100%; margin: 2px 0 8px; }
+.model-head .status + .btn.small { margin-top: 8px; }
 select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--field); color: var(--ink); font-size: 13.5px; min-width: 0; }
 .row .inline-num input { width: 58px; }
 .cut-action .btn.cut:disabled { opacity: .55; }
@@ -470,7 +472,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.48, build 45d4aa. After an update, refresh the page and check this changes.">v1.48 · 45d4aa</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.49, build 5be050. After an update, refresh the page and check this changes.">v1.49 · 5be050</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -5055,8 +5057,40 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null');
     if (saved && saved.cfg) Object.assign(state.cfg, saved.cfg);
     if (saved && saved.bed) Object.assign(state.bed, saved.bed);
+    if (saved && typeof saved.bedPreset === 'string') state.bedPreset = saved.bedPreset;
   } catch (e) { /* storage unavailable */ }
-  function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ cfg: state.cfg, bed: state.bed })); } catch (e) { /* ignore */ } }
+  function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ cfg: state.cfg, bed: state.bed, bedPreset: state.bedPreset || '' })); } catch (e) { /* ignore */ } }
+  // Common printers and the build volumes their makers quote (width × depth × height, mm), as a shortcut for the
+  // bed size and the printer type; the owner's own printer is "Custom size".
+  const BED_PRESETS = [
+    ['Filament (FDM)', [
+      ['Bambu Lab A1 mini', 180, 180, 180], ['Bambu Lab A1, P1P, P1S, X1C', 256, 256, 256],
+      ['Prusa MINI', 180, 180, 180], ['Prusa MK3S, MK4, MK4S', 250, 210, 220], ['Prusa XL', 360, 360, 360],
+      ['Creality Ender 3 family', 220, 220, 250], ['Creality K1', 220, 220, 250], ['Creality K1 Max', 300, 300, 300],
+      ['Elegoo Neptune 4', 225, 225, 265], ['Anycubic Kobra 2', 220, 220, 250]]],
+    ['Resin', [
+      ['Elegoo Mars 4 Ultra, Mars 5 Ultra', 153, 78, 165], ['Elegoo Saturn 3 Ultra', 219, 123, 260], ['Elegoo Saturn 4 Ultra', 219, 123, 220],
+      ['Anycubic Photon Mono 4 Ultra', 153, 87, 165], ['Anycubic Photon Mono M5s', 218, 123, 200],
+      ['Phrozen Sonic Mini 8K', 165, 72, 180], ['Phrozen Sonic Mighty 8K', 218, 123, 235],
+      ['Formlabs Form 3', 145, 145, 185], ['Formlabs Form 4', 200, 125, 210]]],
+  ];
+  function bedPresetHTML() {
+    const cur = state.bedPreset || '';
+    return `<select id="bedPreset" class="sel" aria-label="Printer" title="Pick your printer to set the bed size and the printer type; the sizes are the makers' quoted build volumes, so check yours">
+      <option value="" ${cur ? '' : 'selected'}>Custom size</option>
+      ${BED_PRESETS.map(([group, list]) => `<optgroup label="${group}">${list.map(([name, w, d, h]) => `<option value="${esc(name)}" ${name === cur ? 'selected' : ''}>${esc(name)} (${w} × ${d} × ${h} mm)</option>`).join('')}</optgroup>`).join('')}
+    </select>`;
+  }
+  function applyBedPreset(name) {
+    state.bedPreset = name || '';
+    for (const [group, list] of BED_PRESETS) for (const [n, w, d, h] of list) if (n === name) {
+      state.bed = { w, d, h };
+      const type = group === 'Resin' ? 'resin' : 'fdm';
+      if (state.cfg.printer !== type) { const pr = K.PRINTERS[type]; state.cfg.printer = type; state.cfg.sizeMin = pr.min; state.cfg.clearance = pr.gap; state.cfg.margin = pr.wall; }
+      toast(`${n}: a ${w} × ${d} × ${h} mm bed, set up for ${type === 'resin' ? 'resin' : 'filament'}.`);
+    }
+    savePrefs(); renderParts(); renderInspector();
+  }
 
   if (window.claude && typeof window.claude.use === 'function') {
     window.claude.use('downloads').then(d => { downloads = d; }).catch(() => { downloads = null; });
@@ -5954,6 +5988,17 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   }
   if (pinLayer) pinLayer.addEventListener('click', (e) => { const b = e.target.closest('[data-pin]'); if (b) applySuggestion(+b.dataset.pin); });
   /* ---------------- history ---------------- */
+  // Start over: the parts as the model was opened (or repaired, or the project saved), kept apart from any later
+  // change, so one step brings the whole model back; the step can itself be undone.
+  function snapshot(parts) { return parts.map(p => ({ ...p, positions: p.positions.slice(), indices: p.indices.slice(), joints: [] })); }
+  function startOver() {
+    if (!state.start) return;
+    if (state.regions.on) setRegions(false);
+    commit(snapshot(state.start).map(p => makePart({ name: p.name, color: p.color, positions: p.positions, indices: p.indices, kind: p.kind, pull: null })), 'starting over');
+    state.selectedId = null; state.hidden.clear(); state.explode = 0; state.split.planes = null; state.joint = 1; state.cutId = 0;
+    syncScene(); frameAll(); renderSplitPlanes();
+    toast('Back to the model as it was opened. Ctrl+Z brings the cuts back.');
+  }
   function commit(parts, label) {
     history.past.push({ parts: state.parts, label });
     if (history.past.length > 60) history.past.shift();
@@ -6026,10 +6071,12 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     fitKeySizeToModel();
     syncScene();
     frameAll();
+    state.start = snapshot(state.parts);
     const specks = m.report.specks ? ` Removed ${m.report.specks} loose ${m.report.specks === 1 ? 'speck' : 'specks'} too small to print.` : '';
     if (!m.report.closed) { // a surface with gaps or tangles can't be cut: repair it now, rather than refuse later
       repairSurface(`This model’s surface had ${m.report.badEdges ? 'tangles' : 'gaps'}, so Keymaster repaired it.`);
       history.past = []; history.future = []; updateChrome();
+      state.start = snapshot(state.parts); // the repaired model is the one to start over from
       return;
     }
     if (m.report.flipped) toast('The model was inside out, so Keymaster flipped it to print correctly.' + specks);
@@ -6326,6 +6373,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     $('#empty').hidden = true;
     savePrefs();
     syncScene(); frameAll(); updateChrome();
+    state.start = snapshot(state.parts);
     toast(`Opened the project: ${parts.length} ${parts.length === 1 ? 'part' : 'parts'}, with the settings as saved.`);
   }
 
@@ -7371,6 +7419,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
         <div><dt>Triangles</dt><dd>${fmtInt(total)}</dd></div>
       </dl>
       ${health}${fit}
+      ${state.start && (state.parts.length > 1 || history.past.length) ? '<button class="btn small" data-act="start-over" title="Back to the model as it was opened, in one piece; the cuts can be undone back">Start over</button>' : ''}
     </div>
     <details class="sec" data-sec="model"${(state.ui.model !== null ? state.ui.model : state.tool === 'plane') ? ' open' : ''}><summary>Model<span class="sec-sum">Orientation, scale, printer, detail, project</span></summary>
     <div class="sec-body">
@@ -7387,6 +7436,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     </div>
     <div class="ins-section">
       <h3>Printer</h3>
+      ${bedPresetHTML()}
       ${seg('printer', state.cfg.printer === 'resin' ? 'resin' : 'fdm', [['fdm', 'Filament (FDM)'], ['resin', 'Resin']])}
       <p class="muted small printer-help">Sets the smallest keys, gap and walls that print well.</p>
       <div class="row three">
@@ -7692,6 +7742,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       case 'export-one': exportParts(state.selectedId); break;
       case 'fill-holes': busy('Repairing the surface'); setTimeout(() => { repairSurface(); busy(null); }, 30); break;
       case 'reduce': reduceModel(); break;
+      case 'start-over': startOver(); break;
       case 'save-project': saveProject(); break;
       case 'open-project': fileInput.click(); break;
       case 'split-plan': planSplit(null); break;
@@ -7724,9 +7775,11 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       }
       if (k === 'perArea') state.cut.auto = true;
       savePrefs(); scheduleAnalysis(0); renderInspector();
+    } else if (t.id === 'bedPreset') {
+      applyBedPreset(t.value);
     } else if (t.dataset.bed) {
       const v = parseFloat(t.value);
-      if (isFinite(v) && v > 0) { state.bed[t.dataset.bed] = v; savePrefs(); renderParts(); if (!selectedPart()) renderInspector(); }
+      if (isFinite(v) && v > 0) { state.bed[t.dataset.bed] = v; state.bedPreset = ''; savePrefs(); renderParts(); if (!selectedPart()) renderInspector(); }
     } else if (t.dataset.splitCount !== undefined) {
       const ax = +t.dataset.splitCount, v = Math.max(0, Math.min(20, Math.round(parseFloat(t.value) || 0)));
       const counts = [0, 1, 2].map(a => (a === ax ? v : state.split.planes.filter(q => q.axis === a).length));
