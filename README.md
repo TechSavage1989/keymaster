@@ -54,7 +54,7 @@
 ### Suggested cuts
 
 <table>
-<tr><td width="50%" valign="top"><b>Find cut spots: lettered pins and a list of what each cut frees</b><br><img src="docs/images/suggested-cuts.png" alt="Find cut spots: lettered pins and a list of what each cut frees" width="440"></td><td width="50%" valign="top"><b>Cut at a spot: the narrowest cut through a clicked point</b><br><img src="docs/images/cut-at-a-spot.png" alt="Cut at a spot: the narrowest cut through a clicked point" width="440"></td></tr>
+<tr><td width="50%" valign="top"><b>Suggest: lettered pins and a list of what each cut frees</b><br><img src="docs/images/suggested-cuts.png" alt="Suggest: lettered pins and a list of what each cut frees" width="440"></td><td width="50%" valign="top"><b>Cut at a spot: the narrowest cut through a clicked point</b><br><img src="docs/images/cut-at-a-spot.png" alt="Cut at a spot: the narrowest cut through a clicked point" width="440"></td></tr>
 </table>
 
 ### Surface regions and curved cuts
@@ -73,14 +73,14 @@
 ### Numbered joints, export and assembly
 
 <table>
-<tr><td width="50%" valign="top"><b>Number the joints: ticked in the key settings before a cut</b><br><img src="docs/images/number-the-joints.png" alt="Number the joints: ticked in the key settings before a cut" width="440"></td><td width="50%" valign="top"><b>The joint number engraved on the cut face</b><br><img src="docs/images/numbered-joints.png" alt="The joint number engraved on the cut face" width="440"></td></tr>
+<tr><td width="50%" valign="top"><b>Number the joints: ticked in the Joints section before a cut</b><br><img src="docs/images/number-the-joints.png" alt="Number the joints: ticked in the Joints section before a cut" width="440"></td><td width="50%" valign="top"><b>The joint number engraved on the cut face</b><br><img src="docs/images/numbered-joints.png" alt="The joint number engraved on the cut face" width="440"></td></tr>
 <tr><td width="50%" valign="top"><b>STLs + assembly sheet: each part, its size, volume and the parts its joints pair with</b><br><img src="docs/images/assembly-sheet.png" alt="STLs + assembly sheet: each part, its size, volume and the parts its joints pair with" width="440"></td><td width="50%" valign="top"><b>Split to fit the bed: the straight cuts that make every piece fit your printer</b><br><img src="docs/images/split-to-fit-bed.png" alt="Split to fit the bed: the straight cuts that make every piece fit your printer" width="440"></td></tr>
 </table>
 
 ### Model tools
 
 <table>
-<tr><td width="50%" valign="top"><b>Repair: a tangled model is untangled as it opens</b><br><img src="docs/images/repair-surface.png" alt="Repair: a tangled model is untangled as it opens" width="440"></td><td width="50%" valign="top"><b>Reduce detail: the sample knot at half its triangles, within 0.1 mm</b><br><img src="docs/images/reduce-detail.png" alt="Reduce detail: the sample knot at half its triangles, within 0.1 mm" width="440"></td></tr>
+<tr><td width="50%" valign="top"><b>Repair: a tangled model is untangled as it opens</b><br><img src="docs/images/repair-surface.png" alt="Repair: a tangled model is untangled as it opens" width="440"></td><td width="50%" valign="top"><b>Reduce detail: the pawn at an eighth of its triangles, still within 0.1 mm</b><br><img src="docs/images/reduce-detail.png" alt="Reduce detail: the pawn at an eighth of its triangles, still within 0.1 mm" width="440"></td></tr>
 </table>
 
 ## Getting started
