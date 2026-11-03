@@ -736,6 +736,8 @@ with sync_playwright() as p:
     check('choosing it turns regions on and picks the region, ready to split off', pg.get_attribute('#regionsBtn', 'aria-pressed') == 'true' and 'This region' in infoR and 'Split off this region' in pg.inner_text('#cutAction'), (infoR[:160], pg.inner_text('#cutAction')))
     check('the suggestions stay in view while the region is picked', pg.get_attribute('[data-tool=suggest]', 'aria-pressed') == 'true' and pg.is_visible('#suggestPanel'))
     check('the pins stay on the model while regions show', not pg.evaluate("document.querySelector('#suggestPins').hidden"))
+    rc = pg.evaluate("KeymasterDebug.regionColours()")
+    check('regions are outlined, not coloured: the part keeps its colour (plus the picked tint) with its border lines', rc['colours'] <= 2 and rc['borders'] and rc['vertexColors'], rc)
     pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
     pg.click('#regionsBtn'); pg.wait_for_selector('#tiltOut'); pg.wait_for_timeout(300)
     pg.keyboard.press('z'); pg.wait_for_timeout(300)  # level the cut again, so moving it to the bar shows
@@ -884,6 +886,8 @@ with sync_playwright() as p:
     r1 = pg.evaluate(f"KeymasterDebug.regionClick(0, {seam})"); pg.wait_for_timeout(400)
     check('clicking the part chooses it and shows the key settings, without picking yet', r1['selected'] and not r1['picked'] and 'Pegs' in pg.inner_text('#inspector') and 'Click a region' in pg.inner_text('#hint'), r1)
     r2 = pg.evaluate(f"KeymasterDebug.regionClick(0, {seam})"); pg.wait_for_timeout(400)
+    rc2 = pg.evaluate("KeymasterDebug.regionColours()")
+    check('the picked region is tinted in the cut colour over the part colour', rc2['colours'] >= 2, rc2)
     check('clicking the chosen part picks on it', r2['selected'] and r2['picked'] and pg.locator('[data-act=cut-line]').count() == 1, r2)
     pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
     # clicking the bar itself (a region with a seam at each end) splits it off along both seams at once
@@ -1211,6 +1215,8 @@ with sync_playwright() as p:
     check('the plan is one cut across X in the middle, two pieces that fit', bool(plan) and plan['planes'] == [[0, 50]] and plan['pieces'] == 2 and plan['fits'], plan)
     ins = pg.inner_text('#inspector')
     check('the panel lists the cut, says every piece fits, and offers to cut into 2 pieces', 'X at' in ins and 'every piece fits' in ins and 'Cut into 2 pieces' in ins, ins[-400:])
+    pc = pg.evaluate("KeymasterDebug.partColours()")
+    check('every piece of a cut gets a colour of its own', len(set(pc)) == len(pc), pc)
     pg.fill('input[data-split-pos="0"]', '80'); pg.press('input[data-split-pos="0"]', 'Tab'); pg.wait_for_timeout(300)
     check('moving the cut to 80 mm leaves a piece too big, and the panel says so', 'too big for the bed' in pg.inner_text('#inspector') and 'Add a cut' in pg.inner_text('#inspector'), pg.inner_text('#inspector')[-300:])
     pg.fill('input[data-split-count="0"]', '2'); pg.press('input[data-split-count="0"]', 'Tab'); pg.wait_for_timeout(300)
