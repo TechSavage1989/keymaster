@@ -24,6 +24,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
+- Move a line in or out, and a flat cut in its place (1.42): any picked line can be moved along the surface by a distance, and replaced by a flat cut through its plane that cuts only its area.
 - Brush upgrades (1.41): a Sphere brush that reaches layers behind, Fill to paint a whole region with a click, Snap to borders, and [ ] to size the brush.
 - Isolate a painted area (1.40): hide everything but the painted faces, so the rest of the model stays out of the way of the brush and clicks; the cut still uses the whole model.
 - Projects, 3MF and an assembly sheet (1.39): save and reopen a project with every part, its joints and your settings; export all parts as one 3MF; export the STLs with an assembly sheet that pairs the pieces by joint; roadmap items 9 and 14.

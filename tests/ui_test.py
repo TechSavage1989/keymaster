@@ -680,6 +680,16 @@ with sync_playwright() as p:
     info = pg.inner_text('#cutLineInfo')
     print('    picked line:', res, info.replace('\n', ' ')[:140])
     check('clicking the seam picks a line all the way round, ready to cut', bool(res) and res['closed'] and res['ok'] and 'all the way round' in info and pg.locator('[data-act=cut-line]').count() == 1, (res, info))
+    # move the line in or out along the surface, and a flat cut in its place
+    len1 = res and pg.evaluate("KeymasterDebug.movePick(0, 1)")  # (dir 0: nothing moves; just reads the pick)
+    mvIn = pg.evaluate("KeymasterDebug.movePick(-1, 1)"); pg.wait_for_timeout(600)
+    check('Move the line in by 1 mm re-picks a shorter closed line, still ready to cut', bool(mvIn) and mvIn['ok'] and mvIn['loops'] == 1 and mvIn['length'] < len1['length'] and pg.locator('[data-act=cut-line]').count() == 1, (len1, mvIn))
+    mvOut = pg.evaluate("KeymasterDebug.movePick(1, 1)"); pg.wait_for_timeout(600)
+    check('Move the line out by 1 mm takes it back out', bool(mvOut) and mvOut['ok'] and mvOut['length'] > mvIn['length'], (mvIn, mvOut))
+    fl = pg.evaluate("KeymasterDebug.flatHere()"); pg.wait_for_timeout(700)
+    check('Flat cut here turns regions off and sets a flat cut focused on the line’s area', not fl['regions'] and fl['focus'] == 1 and pg.get_attribute('#regionsBtn', 'aria-pressed') == 'false' and 'flat cut' in pg.inner_text('#toast').lower(), (fl, pg.inner_text('#toast')))
+    pg.click('#regionsBtn'); pg.wait_for_timeout(400)
+    pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam})"); pg.wait_for_timeout(300)
     # seam editing: the picked line becomes handles; one dragged up the ball re-routes the line, Smooth eases it, Done keeps it
     check('the pick offers Edit the line', pg.locator('[data-act=edit-seam]').count() == 1)
     nh = pg.evaluate("KeymasterDebug.seamEdit()"); pg.wait_for_timeout(600)
