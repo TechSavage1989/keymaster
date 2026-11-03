@@ -2806,6 +2806,9 @@ const KMCore = (() => {
           : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked');
       }
     }
+    // which way each piece pulls away from the others: along the lines' frame normals, away from the piece across
+    // each line (the exploded view moves pieces this way)
+    for (const q of parts) { let s = [0, 0, 0]; for (const c of caps) { const [p1, p2] = pair(c); const sg = q === p1 ? -c.into2 : q === p2 ? c.into2 : 0; if (sg) for (let k = 0; k < 3; k++) s[k] += sg * c.F.n[k]; } const L = Math.hypot(...s); q.pull = L > 1e-9 ? s.map(v => v / L) : null; }
     return warnings;
     }
   }
