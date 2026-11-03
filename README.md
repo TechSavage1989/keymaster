@@ -15,6 +15,7 @@
 
 ## Features
 
+- **Look from any side, light or dark.** A View from list turns the view to the front, back, a side, the top or the bottom of the part, and a sun button in the top bar switches between light and dark.
 - **Your printer, in one pick.** Choose a common printer (Bambu Lab, Prusa, Creality, Elegoo, Anycubic, Phrozen, Formlabs) and the bed size and the filament or resin settings follow; or type your own size. **Start over** brings the model back as it was opened, in one undoable step.
 - **One row of cut tools.** Plane, Regions, Paint, Draw, Suggest and Fit bed sit in a row at the top of the right panel, each with its own controls under it; the Joints section folds to a one-line summary when a tool needs the room, and the one yellow button at the foot always does what the tool is ready to do.
 - **Live cut preview.** Drag the arrow to slide the cut, and the blue rings or the plane itself to tilt it (Shift for 5° steps or fine control). The toolbar under the view takes an exact position and X, Y and Z angles. Everything fits on one screen, with no scrolling. The cut face appears as a hatched section while you drag, even on dense sculpts.
