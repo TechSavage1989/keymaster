@@ -624,6 +624,21 @@ console.log('engraved joint numbers');
   check('a number engraved on a curved cut seals, and takes its strokes’ volume out of both pieces', !!jmC && jmC.marks.length === 3 && rc.parts.length === 2 && allClosed(rc.parts) && sumVol(rc.parts) < sumVol(rc0.parts) - 0.5, jmC && [jmC.marks.length, sumVol(rc0.parts) - sumVol(rc.parts)]);
 }
 
+console.log('reduce detail');
+{
+  const sp = (() => { const pos = [], idx = [], seg = 96, rings = 64, r = 20; for (let i = 0; i <= rings; i++) { const ph = Math.PI * i / rings; for (let j = 0; j < seg; j++) { const th = 2 * Math.PI * j / seg; pos.push(r * Math.sin(ph) * Math.cos(th), r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph)); } } for (let i = 0; i < rings; i++) for (let j = 0; j < seg; j++) { const a = i * seg + j, b = i * seg + (j + 1) % seg, c = (i + 1) * seg + j, d = (i + 1) * seg + (j + 1) % seg; if (i > 0) idx.push(a, c, b); if (i < rings - 1) idx.push(b, c, d); } return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) }); })();
+  const nt = sp.indices.length / 3;
+  const r3 = K.reduceMesh(sp.positions, sp.indices, { target: 0.3 });
+  check('a sphere reduced to 30% of its triangles stays closed, with its volume within half a percent', r3.indices.length / 3 <= 0.3 * nt + 3 && K.edgeReport(r3.indices).closed && Math.abs(K.volume(r3.positions, r3.indices) - sp.report.volume) < 0.005 * sp.report.volume && r3.removed === nt - r3.indices.length / 3, [r3.indices.length / 3, nt, K.volume(r3.positions, r3.indices), sp.report.volume]);
+  const light = K.reduceMesh(sp.positions, sp.indices, { tolerance: 0.02 }), strong = K.reduceMesh(sp.positions, sp.indices, { tolerance: 0.1 });
+  check('a tighter tolerance keeps more triangles, and both stay closed', light.indices.length / 3 > strong.indices.length / 3 && strong.indices.length / 3 < 0.6 * nt && K.edgeReport(light.indices).closed && K.edgeReport(strong.indices).closed, [light.indices.length / 3, strong.indices.length / 3]);
+  let far = 0; for (let i = 0; i < strong.positions.length; i += 3) far = Math.max(far, Math.abs(Math.hypot(strong.positions[i], strong.positions[i + 1], strong.positions[i + 2]) - 20));
+  check('within tolerance: no vertex of the strongly reduced sphere is more than 0.2 mm off it', far < 0.2, far);
+  const cube = K.prepareMesh(gridCube(1));
+  const rc = K.reduceMesh(cube.positions, cube.indices, { tolerance: 0.05 });
+  check('a cube has nothing to take out within a small tolerance', rc.indices.length === cube.indices.length && rc.removed === 0, rc.removed);
+}
+
 console.log('split to fit the bed');
 {
   const box = (sx, sy, sz) => ({ min: [0, 0, 0], max: [sx, sy, sz], size: [sx, sy, sz], center: [sx / 2, sy / 2, sz / 2] });

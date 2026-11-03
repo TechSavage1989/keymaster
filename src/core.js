@@ -2672,6 +2672,78 @@ const KMCore = (() => {
   function markKeys(marks) {
     return (marks || []).map(m => ({ x: m.x, y: m.y, mark: true, side: m.side, o: { shape: 'bar', diameter: m.len, length: m.depth || 0.6, clearance: 0, taper: 0, taperSocket: false, align: false, turn: m.deg || 0 } }));
   }
+  /* ---------- reduce detail ----------
+     A lighter copy of a dense model, so it paints and cuts faster (modelsplitter's Reduce for cutting): quadric
+     edge collapse (Garland & Heckbert). Every vertex carries the sum of its faces' plane quadrics; the cheapest
+     edge is collapsed onto whichever of its two ends or their midpoint costs least, as long as the mesh stays a
+     closed manifold (the link condition: the ends share exactly the two apexes of the edge's triangles) and no
+     triangle turns over. Stops at the target count, or when the next collapse would move the surface more than
+     `tolerance` (the root of the quadric cost, in mm). Returns { positions, indices, removed }. */
+  function reduceMesh(P, I, opts = {}) {
+    const nv = P.length / 3, nt0 = I.length / 3;
+    const target = opts.target > 0 ? Math.max(4, Math.floor(opts.target < 1 ? nt0 * opts.target : opts.target)) : 4;
+    const tol2 = opts.tolerance > 0 ? opts.tolerance * opts.tolerance : Infinity;
+    const X = Float64Array.from(P), T = Int32Array.from(I);
+    const Q = new Float64Array(nv * 10), vt = Array.from({ length: nv }, () => []), ver = new Int32Array(nv), alive = new Uint8Array(nv).fill(1);
+    const normalOf = (t) => { const a = 3 * T[3 * t], b = 3 * T[3 * t + 1], c = 3 * T[3 * t + 2]; const ux = X[b] - X[a], uy = X[b + 1] - X[a + 1], uz = X[b + 2] - X[a + 2], vx = X[c] - X[a], vy = X[c + 1] - X[a + 1], vz = X[c + 2] - X[a + 2]; return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx]; };
+    for (let t = 0; t < nt0; t++) {
+      const n = normalOf(t), L = Math.hypot(n[0], n[1], n[2]);
+      for (let k = 0; k < 3; k++) vt[T[3 * t + k]].push(t);
+      if (!(L > 1e-18)) continue;
+      const a = n[0] / L, b = n[1] / L, c = n[2] / L, v0 = 3 * T[3 * t], d = -(a * X[v0] + b * X[v0 + 1] + c * X[v0 + 2]);
+      for (let k = 0; k < 3; k++) { const o = T[3 * t + k] * 10; Q[o] += a * a; Q[o + 1] += a * b; Q[o + 2] += a * c; Q[o + 3] += a * d; Q[o + 4] += b * b; Q[o + 5] += b * c; Q[o + 6] += b * d; Q[o + 7] += c * c; Q[o + 8] += c * d; Q[o + 9] += d * d; }
+    }
+    const qcost = (v, x, y, z) => { const o = v * 10; return Q[o] * x * x + 2 * Q[o + 1] * x * y + 2 * Q[o + 2] * x * z + 2 * Q[o + 3] * x + Q[o + 4] * y * y + 2 * Q[o + 5] * y * z + 2 * Q[o + 6] * y + Q[o + 7] * z * z + 2 * Q[o + 8] * z + Q[o + 9]; };
+    // a binary heap of [cost, a, b, verA, verB, x, y, z]
+    const heap = [];
+    const push = (e) => { heap.push(e); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+    const best = (a, b) => { // the cheapest of the two ends and the midpoint
+      const ax = X[3 * a], ay = X[3 * a + 1], az = X[3 * a + 2], bx = X[3 * b], by = X[3 * b + 1], bz = X[3 * b + 2];
+      let out = null;
+      for (const [x, y, z] of [[(ax + bx) / 2, (ay + by) / 2, (az + bz) / 2], [ax, ay, az], [bx, by, bz]]) { const c = qcost(a, x, y, z) + qcost(b, x, y, z); if (!out || c < out[0]) out = [c, a, b, ver[a], ver[b], x, y, z]; }
+      return out;
+    };
+    const seen = new Set();
+    for (let t = 0; t < nt0; t++) for (let k = 0; k < 3; k++) { const a = T[3 * t + k], b = T[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a; if (seen.has(key)) continue; seen.add(key); push(best(a, b)); }
+    seen.clear();
+    const ring = (v) => { const s = new Set(); for (const t of vt[v]) { if (T[3 * t] < 0) continue; for (let k = 0; k < 3; k++) { const w = T[3 * t + k]; if (w !== v) s.add(w); } } return s; }; // (a vertex's list can still hold triangles killed by an earlier collapse)
+    let nt = nt0; const stats = { stale: 0, edge: 0, link: 0, flip: 0, done: 0 };
+    while (heap.length && nt > target) {
+      const e = pop(), [cost, a, b, va, vb, x, y, z] = e;
+      if (!alive[a] || !alive[b] || ver[a] !== va || ver[b] !== vb) { stats.stale++; continue; } // stale
+      if (cost > tol2) break;
+      // the edge's own triangles, and the link condition
+      vt[a] = vt[a].filter(t => T[3 * t] >= 0); vt[b] = vt[b].filter(t => T[3 * t] >= 0);
+      const shared = vt[a].filter(t => T[3 * t] === b || T[3 * t + 1] === b || T[3 * t + 2] === b);
+      if (shared.length !== 2) { stats.edge++; continue; } // a boundary or tangled edge stays as it is
+      const ra = ring(a), rb = ring(b); let common = 0; for (const w of ra) if (rb.has(w)) common++;
+      if (common !== 2) { stats.link++; continue; }
+      // no triangle may turn over or vanish when a and b move to the new point
+      let ok = true;
+      const trial = (v, t) => { const o = 3 * v, sx = X[o], sy = X[o + 1], sz = X[o + 2]; const before = normalOf(t); X[o] = x; X[o + 1] = y; X[o + 2] = z; const after = normalOf(t); X[o] = sx; X[o + 1] = sy; X[o + 2] = sz; const Lb = Math.hypot(...before), La = Math.hypot(...after); return La > 1e-14 && (before[0] * after[0] + before[1] * after[1] + before[2] * after[2]) > 0.2 * Lb * La; };
+      for (const t of vt[a]) if (ok && !shared.includes(t) && !trial(a, t)) ok = false;
+      for (const t of vt[b]) if (ok && !shared.includes(t) && !trial(b, t)) ok = false;
+      if (!ok) { stats.flip++; continue; }
+      // collapse b into a at the new point
+      stats.done++;
+      X[3 * a] = x; X[3 * a + 1] = y; X[3 * a + 2] = z;
+      for (const t of shared) { T[3 * t] = T[3 * t + 1] = T[3 * t + 2] = -1; }
+      nt -= shared.length;
+      const keep = vt[a].filter(t => T[3 * t] >= 0);
+      for (const t of vt[b]) { if (T[3 * t] < 0) continue; for (let k = 0; k < 3; k++) if (T[3 * t + k] === b) T[3 * t + k] = a; keep.push(t); }
+      vt[a] = keep; vt[b] = []; alive[b] = 0;
+      for (let k = 0; k < 10; k++) Q[a * 10 + k] += Q[b * 10 + k];
+      ver[a]++; ver[b]++;
+      for (const w of ring(a)) push(best(a, w));
+    }
+    // compact
+    const map = new Int32Array(nv).fill(-1), pos = []; let n = 0;
+    for (let t = 0; t < nt0; t++) { if (T[3 * t] < 0) continue; for (let k = 0; k < 3; k++) { const v = T[3 * t + k]; if (map[v] < 0) { map[v] = n++; pos.push(X[3 * v], X[3 * v + 1], X[3 * v + 2]); } } }
+    const idx = new Uint32Array(nt * 3); let j = 0;
+    for (let t = 0; t < nt0; t++) { if (T[3 * t] < 0) continue; for (let k = 0; k < 3; k++) idx[j++] = map[T[3 * t + k]]; }
+    return { positions: new Float32Array(pos), indices: idx, removed: nt0 - nt, stats };
+  }
   /* ---------- inlay cut ----------
      Pop a detail out as its own part to print in another colour (an eye, a gem, a badge), as modelsplitter's inlay
      cut: the body gets a pocket under the painted or picked area, and the inlay is the same area cut with its
@@ -4252,7 +4324,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };

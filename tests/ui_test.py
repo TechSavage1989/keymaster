@@ -958,6 +958,22 @@ with sync_playwright() as p:
     check('a cut lower down, through both towers, is fine', 'sliver' not in pg.inner_text('#keyStatus'), pg.inner_text('#keyStatus'))
     pg.screenshot(path=str(OUT / 'shot_thin.png'))
     pg.keyboard.press('Escape')
+    # reduce detail: the sample knot loses most of its triangles within 0.1 mm, as one undo step
+    profile_stl(str(OUT / 'ball.stl'), lambda z: max(0.05, math.sqrt(max(0, 400 - (z - 20) ** 2))), 40, b'ball')  # a 40 mm ball of 8,000 triangles
+    pg.set_input_files('#fileInput', str(OUT / 'ball.stl'))
+    pg.wait_for_function("document.querySelector('#partList .part-name') && document.querySelector('#partList .part-name').innerText.includes('ball')", timeout=20000)
+    if pg.get_attribute('#regionsBtn', 'aria-pressed') == 'true': pg.click('#regionsBtn'); pg.wait_for_timeout(200)
+    if pg.locator('[data-act=done]').count(): pg.click('[data-act=done]'); pg.wait_for_timeout(200)
+    tris_now = lambda: int(pg.evaluate("document.querySelector('#inspector .facts').innerText.match(/Triangles\\s+([\\d,]+)/)[1].replace(/,/g, '')"))
+    tri0 = tris_now()
+    check('the model panel offers Reduce detail with a level to keep within', pg.locator('#reduceLevel').count() == 1 and pg.locator('[data-act=reduce]').count() == 1)
+    pg.select_option('#reduceLevel', '0.1')
+    pg.click('[data-act=reduce]')
+    pg.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').innerText.includes('Reduced from')", timeout=30000)
+    tri1 = tris_now()
+    check('reducing takes most of the triangles out and says so', tri1 < 0.7 * tri0 and 'fewer' in pg.inner_text('#toast') and 'Ctrl+Z' in pg.inner_text('#toast'), (tri0, tri1, pg.inner_text('#toast')))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(400)
+    check('undo puts the detail back', tris_now() == tri0, (tri0, tris_now()))
     # split to fit the bed: a 100 mm bar on a 60 mm bed needs one cut; the planes show, and Cut makes the pieces
     boxes_stl(str(OUT / 'bar.stl'), [(0, 0, 0, 100, 20, 20)])
     pg.set_input_files('#fileInput', str(OUT / 'bar.stl'))

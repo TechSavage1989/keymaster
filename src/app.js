@@ -33,6 +33,7 @@
   state.regions = { on: false, angle: 60, fold: 15 };
   state.here = { on: false };
   state.joint = 1; // the next joint number to engrave, when Number the joints is on
+  state.reduce = 0.02; // Reduce detail: the surface may move this far (mm)
   state.split = { planes: null, counts: [null, null, null] }; // split to fit the bed: the planned planes ({axis, pos}), and counts set by hand // Cut at a spot: the next click on the part finds the narrowest cut through it
   state.draw = { on: false, points: [] }; // a cut line drawn by hand: points clicked on the chosen part
   state.edit = null; // the picked lines as draggable handles: { partId, loops: [{ pts, base }], smooth, snap }
@@ -1166,6 +1167,29 @@
     toast(closed ? `${head}${what} The model is closed now.` : `${head}${what} ${fmtInt(open + bad)} ${open + bad === 1 ? 'edge is' : 'edges are'} still open or tangled; that needs Blender or Meshmixer. Cuts away from them still work.`, closed ? '' : 'warn');
   }
 
+  // Reduce detail: every part collapsed to fewer triangles within the chosen tolerance (quadric edge collapse in
+  // core), one undo step, so dense sculpts paint and cut faster. The parts keep their names, colours and pulls.
+  async function reduceModel() {
+    const tol = Math.max(0.005, parseFloat(($('#reduceLevel') || {}).value) || state.reduce);
+    state.reduce = tol;
+    busy('Reducing the detail');
+    await nextFrame();
+    const before = state.parts.reduce((s, p) => s + p.tris, 0), parts = [];
+    for (const p of state.parts) {
+      if (p.kind === 'pin') { parts.push(p); continue; }
+      const r = K.reduceMesh(p.positions, p.indices, { tolerance: tol });
+      parts.push(r.removed ? makePart({ ...p, positions: r.positions, indices: r.indices }) : p);
+      await nextFrame();
+    }
+    const after = parts.reduce((s, p) => s + p.tris, 0);
+    busy(null);
+    if (after >= before) { toast('Nothing to take out at this setting: the model is already as light as it gets within that tolerance. Try Strong.'); return; }
+    commit(parts, 'the reduction');
+    state.selectedId = null; endSeamEdit(); clearPick(); state.regions.last = null;
+    regionCache.clear(); lineCache.clear();
+    syncScene(); renderPick(); updateHint();
+    toast(`Reduced from ${fmtInt(before)} to ${fmtInt(after)} triangles (${Math.round(100 - 100 * after / before)}% fewer), keeping the surface within ${tol} mm. Ctrl+Z puts the detail back.`);
+  }
   /* ---------------- export ---------------- */
   function safeName(s) { return (s || 'part').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'part'; }
   async function exportParts(onlyId) {
@@ -2081,6 +2105,14 @@
       ${health}
     </div>
     <div class="ins-section">
+      <h3>Reduce detail</h3>
+      <p class="muted small">A lighter model paints and cuts faster. Light keeps the surface within 0.02 mm, Strong within 0.1 mm; the shape and the volume stay. Ctrl+Z puts the detail back.</p>
+      <div class="row tight">
+        <label class="numi"><span>Keep within</span><select id="reduceLevel" aria-label="How much detail to keep">${[['0.02', 'Light (0.02 mm)'], ['0.05', 'Balanced (0.05 mm)'], ['0.1', 'Strong (0.1 mm)']].map(([v, l]) => `<option value="${v}" ${v === String(state.reduce) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <button class="btn" data-act="reduce">Reduce the model</button>
+      </div>
+    </div>
+    <div class="ins-section">
       <h3>Orientation</h3>
       <p class="muted small">Turn the whole model a quarter turn if it came in lying down.</p>
       <div class="row">${['x', 'y', 'z'].map(a => `<button class="btn" data-act="rotate" data-value="${a}">Turn on ${a.toUpperCase()}</button>`).join('')}</div>
@@ -2352,6 +2384,7 @@
       case 'cut': doCut(); break;
       case 'export-one': exportParts(state.selectedId); break;
       case 'fill-holes': busy('Repairing the surface'); setTimeout(() => { repairSurface(); busy(null); }, 30); break;
+      case 'reduce': reduceModel(); break;
       case 'split-plan': planSplit(null); break;
       case 'split-cut': cutToFit(); break;
       case 'split-clear': clearSplit(); break;
