@@ -27,11 +27,12 @@
     flat: true, // show faces: flat shading, so every face of the mesh shows (the owner wants this by default)
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1 },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, numberJoints: false },
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, angle: 60, fold: 15 };
   state.here = { on: false };
+  state.joint = 1; // the next joint number to engrave, when Number the joints is on
   state.split = { planes: null, counts: [null, null, null] }; // split to fit the bed: the planned planes ({axis, pos}), and counts set by hand // Cut at a spot: the next click on the part finds the narrowest cut through it
   state.draw = { on: false, points: [] }; // a cut line drawn by hand: points clicked on the chosen part
   state.edit = null; // the picked lines as draggable handles: { partId, loops: [{ pts, base }], smooth, snap }
@@ -992,7 +993,7 @@
   }
   function setModel(name, m) {
     state.model = { name, report: m.report, tris: m.indices.length / 3 };
-    state.nextColor = 1;
+    state.nextColor = 1; state.joint = 1;
     state.parts = [makePart({ name, color: PALETTE[0], positions: m.positions, indices: m.indices })];
     history.past = []; history.future = [];
     state.selectedId = null; state.hidden.clear(); state.explode = 0;
@@ -1055,13 +1056,28 @@
     await nextFrame();
     let res;
     const F = currentFrame(), nrm = F.n;
+    // joint numbers: the same number engraved on both faces of each area cut, clear of its keys
+    const marks = [], numbered = [];
+    if (state.cfg.numberJoints) {
+      let num = state.joint;
+      for (const ri of shownNow) {
+        if (state.cut.skip.has(ri)) continue;
+        const hasPlug = state.cfg.type === 'plug' && state.cut.plugs.some(q => q.ok && q.region === ri);
+        const jm = hasPlug ? null : K.jointMarks(an.base, ri, pointKeys() ? state.cut.keys.filter(k => K.regionAt(an.base, k.x, k.y) === ri) : [], coreCfg(), num, { mirror: true });
+        if (jm) { marks.push(...jm.marks); numbered.push(num); }
+        num++;
+      }
+    }
+    let unmarked = false;
+    const cutWith = (mk) => K.cutMesh(p.positions, p.indices, F, { scale: K.diag(p.bbox), cfg: coreCfg(), keys: pointKeys() ? state.cut.keys : [], plugs: state.cfg.type === 'plug' ? state.cut.plugs.filter(q => q.ok && !state.cut.skip.has(q.region)) : [], skip: state.cut.skip, minThickness: minWall(), force, marks: mk });
     try { // pieces below pull along -n, above along +n (the exploded view)
-      res = K.cutMesh(p.positions, p.indices, F, { scale: K.diag(p.bbox), cfg: coreCfg(), keys: pointKeys() ? state.cut.keys : [], plugs: state.cfg.type === 'plug' ? state.cut.plugs.filter(q => q.ok && !state.cut.skip.has(q.region)) : [], skip: state.cut.skip, minThickness: minWall(), force });
+      try { res = cutWith(marks); } catch (err) { if (!marks.length || err.code) throw err; res = cutWith([]); unmarked = true; } // the numbers didn't seal here: cut without them
     } catch (err) {
       busy(null);
       toast(err.message, 'error', err.code === 'locked' ? { label: 'Cut anyway', fn: () => doCut(true) } : undefined);
       return;
     }
+    if (numbered.length && !unmarked) state.joint += shownNow.filter(ri => !state.cut.skip.has(ri)).length;
     const groups = { below: [], above: [], both: [] };
     for (const c of res.parts) groups[c.side].push(c);
     const made = [];
@@ -1094,7 +1110,7 @@
     });
     const pieces = made.filter(m => m.kind !== 'pin').length;
     if (res.warnings && res.warnings.length) toast(`Cut made anyway, into ${pieces} pieces. ${res.warnings.map(w => w.message).join(' ')}`, 'warn');
-    else toast(`Cut into ${pieces} pieces${res.pins.length ? ` and ${res.pins.length} dowel pins` : ''}. Click a part to keep cutting.`);
+    else toast(`Cut into ${pieces} pieces${res.pins.length ? ` and ${res.pins.length} dowel pins` : ''}${numbered.length && !unmarked ? `, ${numbered.length === 1 ? `joint numbered ${numbered[0]}` : `joints numbered ${numbered.join(', ')}`}` : ''}.${unmarked ? ' The joint numbers didn’t fit here, so this cut has none.' : ''} Click a part to keep cutting.`);
   }
   function removeBadKeys() {
     state.cut.keys = state.cut.keys.filter((k, i) => state.cut.evals[i] && state.cut.evals[i].ok);
@@ -2270,6 +2286,7 @@
         <label class="numi"><span>Keys per area</span><select data-cfg="perArea" aria-label="Keys per area">${[1, 2, 3, 4].map(n => `<option ${n === c.perArea ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <button class="btn small" data-act="auto-keys">${state.cut.auto ? 'Re-place keys' : 'Auto-place keys'}</button>
       </div>
+      <label class="check" title="Engrave the same number on both faces of each cut, 0.6 mm deep, so the pieces of a big kit pair up"><input type="checkbox" data-cfg="numberJoints" ${c.numberJoints ? 'checked' : ''}> Number the joints</label>
 `}
     </div>`}
     <div class="ins-section cut-action">
@@ -2516,6 +2533,7 @@
             if (!per.keys.length && !pick.noKeys) pick.noKeys = `No room for keys inside ${loops.length > 1 ? 'one of its lines' : 'this line'} at these settings, so that line will be cut without them.`;
           }
         } catch (err) { pick.frames.push(null); pick.ans.push(null); if (!pick.noKeys) pick.noKeys = 'Keys couldn’t be placed on this line, so it will be cut without them.'; }
+        if (state.cfg.numberJoints && !per.plugs.length && pick.ans[pick.ans.length - 1]) { const jm = K.jointMarks(pick.ans[pick.ans.length - 1].base, 0, per.keys, per.cfg || cfg, state.joint + pick.perLoop.length, { mirror: false }); per.marks = jm ? jm.marks : []; }
         pick.perLoop.push(per); pick.keys.push(...per.keys); pick.plugs.push(...per.plugs);
       }
     } else pick.perLoop = loops.map(() => ({ keys: [], plugs: [] }));
@@ -2690,8 +2708,11 @@
     renderPick();
     const pinsMade = (pick.result.pins || []).length;
     const n = pick.result.parts.length;
+    const numbered = pick.perLoop.filter(per => per.marks && per.marks.length).length; // joint numbers engraved on these lines
+    const numberLine = numbered ? ` ${numbered === 1 ? `The joint is numbered ${state.joint}` : `The joints are numbered ${state.joint} to ${state.joint + numbered - 1}`}.` : '';
+    if (numbered) state.joint += pick.perLoop.length;
     if (pick.painted) setPainting(false);
-    toast(`${pick.painted ? `Split off the painted area: ${n} pieces` : pick.regions ? `Split off the ${pick.regions.length === 1 ? 'region' : 'regions'}: ${n} pieces` : `Cut along the ${pick.loops.length === 1 ? 'line' : 'lines'} into ${n} pieces`}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}. Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
+    toast(`${pick.painted ? `Split off the painted area: ${n} pieces` : pick.regions ? `Split off the ${pick.regions.length === 1 ? 'region' : 'regions'}: ${n} pieces` : `Cut along the ${pick.loops.length === 1 ? 'line' : 'lines'} into ${n} pieces`}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}.${numberLine} Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
   }
   regionsPanel.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]') && e.target.closest('[data-act]').dataset.act;

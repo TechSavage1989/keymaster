@@ -24,6 +24,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
+- Engraved joint numbers (1.37): Number the joints engraves the same number on both faces of each cut, clear of the keys, so the pieces of a big kit pair up; roadmap item 12.
 - Inlay cut (1.36): any painted, picked or drawn area becomes a pocket in the body and a matching inlay pulled in by the fit, with a flat floor to print on, for details in another colour.
 - Split to fit the bed (1.35): straight cuts across X, Y and Z worked out from the printer's bed size (or set by count), shown in the view, movable, then all cut at once with keys; roadmap item 13.
 - Cut at a spot (1.33): click where the cut should go round and Keymaster finds the narrowest cut through that spot for the piece it frees, puts the cut plane there and cuts just that piece.
@@ -59,7 +60,6 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 9. **Save and reopen projects.** A `.keymaster` file holding the parts, names, colors and settings.
 10. **Seam-hiding cut shapes.** Zigzag, stepped and dovetail cuts so seams are less visible and pieces can't slide.
 11. **Hollowing and drain holes.** Shell a part to a chosen wall thickness, with drain holes placed for resin printing.
-12. **Part labels.** Emboss a small part number on a hidden face of each piece.
 14. **3MF export** with all parts in one file, already arranged.
 15. **Measure tool.** Click two points to read a distance.
 

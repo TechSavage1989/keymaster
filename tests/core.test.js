@@ -583,6 +583,47 @@ console.log('cut suggestions');
   check('a single solid has no separate pieces', K.separateShells(uvSphere(10, 24, 16).positions, uvSphere(10, 24, 16).indices).length === 0);
 }
 
+console.log('engraved joint numbers');
+{
+  const lathe = (radius, len, axis, seg = 48, rings = 120) => {
+    const a = norm(axis), u = norm(Math.abs(a[2]) < 0.9 ? cr(a, [0, 0, 1]) : cr(a, [1, 0, 0])), v = cr(a, u);
+    const pos = [0, 0, 0];
+    for (let i = 1; i < rings; i++) {
+      const tt = i / rings, r = radius(tt);
+      for (let j = 0; j < seg; j++) { const ph = (j / seg) * 2 * Math.PI, c = Math.cos(ph) * r, s = Math.sin(ph) * r; for (let k = 0; k < 3; k++) pos.push(a[k] * tt * len + u[k] * c + v[k] * s); }
+    }
+    pos.push(a[0] * len, a[1] * len, a[2] * len);
+    const S = pos.length / 3 - 1, idx = [];
+    for (let j = 0; j < seg; j++) idx.push(0, 1 + (j + 1) % seg, 1 + j);
+    for (let i = 0; i < rings - 2; i++) for (let j = 0; j < seg; j++) { const p0 = 1 + i * seg + j, p1 = 1 + i * seg + (j + 1) % seg, q0 = p0 + seg, q1 = p1 + seg; idx.push(p0, p1, q1, p0, q1, q0); }
+    const base = 1 + (rings - 2) * seg;
+    for (let j = 0; j < seg; j++) idx.push(S, base + j, base + (j + 1) % seg);
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  };
+  // a 30 mm box cut level with two pegs and the number 48 engraved on both faces, each read the right way round
+  const box = (() => { const h = 15, c = [[-h, -h, -h], [h, -h, -h], [h, h, -h], [-h, h, -h], [-h, -h, h], [h, -h, h], [h, h, h], [-h, h, h]], f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]], P = [], I = []; f.forEach(tr => tr.forEach(i => P.push(...c[i]))); for (let i = 0; i < P.length / 3; i++) I.push(i); return K.prepareMesh({ positions: new Float32Array(P), indices: new Uint32Array(I) }); })();
+  const F = K.frameFromNormal([0, 0, 1], [0, 0, 0]), cfg = cfgOf({ type: 'peg', diameter: 4, length: 5, clearance: 0.2, margin: 1, sizeMode: 'set' }), keys = [{ x: -8, y: 0 }, { x: 8, y: 0 }];
+  const an = K.analyzePlane(box.positions, box.indices, F, cfg, 60);
+  const jm = K.jointMarks(an.base, 0, keys, cfg, 48, { mirror: true });
+  check('the number 48 lays out as 11 strokes a side, 3 mm wide, clear of the pegs', !!jm && jm.marks.length === 22 && jm.width === 3 && jm.marks.every(m => Math.hypot(m.x - 8, m.y) > 2.2 + 1.5 && Math.hypot(m.x + 8, m.y) > 2.2 + 1.5) && jm.marks.filter(m => m.side === -1).length === 11, jm && [jm.marks.length, jm.width, jm.x, jm.y]);
+  const mirrored = jm.marks.filter(m => m.side === 1), plain = jm.marks.filter(m => m.side === -1);
+  check('the second face gets the strokes mirrored about the label’s centre', mirrored.every((m, i) => Math.abs(m.x - (2 * jm.x - plain[i].x)) < 1e-9 && Math.abs(m.y - plain[i].y) < 1e-9));
+  const r = K.cutMesh(box.positions, box.indices, F, { scale: 60, cfg, keys, marks: jm.marks });
+  const r0 = K.cutMesh(box.positions, box.indices, F, { scale: 60, cfg, keys });
+  const pocketV = 22 * jm.marks[0].len * 0.28 * jm.marks[0].len * 0.6; // 22 strokes, each len × 0.28 len × 0.6 mm deep
+  check('the engraved cut is sealed on both sides, with the strokes’ volume gone', r.parts.length === 2 && allClosed(r.parts) && r.marksUsed === 22 && r.keysUsed === 2 && Math.abs((sumVol(r0.parts) - sumVol(r.parts)) - pocketV) < 0.15 * pocketV, [sumVol(r0.parts) - sumVol(r.parts), pocketV]);
+  const bad = [];
+  for (const num of [0, 1, 4, 8, 9, 10, 19, 88, 99]) { const m = K.jointMarks(an.base, 0, keys, cfg, num, { mirror: true }); try { const rr = K.cutMesh(box.positions, box.indices, F, { scale: 60, cfg, keys, marks: m.marks }); if (!allClosed(rr.parts)) bad.push(num); } catch (e) { bad.push(num); } }
+  check('every digit, and two-digit numbers, engrave sealed (the strokes are nudged so no two edges line up)', bad.length === 0, bad);
+  check('a number that doesn’t fit gives nothing', K.jointMarks(an.base, 0, [{ x: 0, y: 0, o: { diameter: 40 } }], cfg, 7, { mirror: true }) === null);
+  // on a curved cut: a line drawn round a 12 mm bar, numbered, seals too
+  const thick = lathe(tt => { const z = tt * 60; const ball = (c) => { const d = Math.abs(z - c); return d < 12 ? Math.sqrt(144 - d * d) : 0; }; return Math.max(ball(12), ball(48), z > 6 && z < 54 ? 6 : 0, 0.05); }, 60, [0, 0, 1]);
+  const ring = K.drawnLoop(thick.positions, thick.indices, [[6, 0, 30], [0, 6, 30.5], [-6, 0, 30], [0, -6, 29.5]]);
+  const none = cfgOf({ type: 'none' }), anC = K.analyzeLoop(thick.positions, thick.indices, ring, none, 70), jmC = K.jointMarks(anC.base, 0, [], none, 7, { mirror: false });
+  const rc = K.cutAlongLoop(thick.positions, thick.indices, ring, { cfg: none, perLoop: [{ keys: [], marks: jmC.marks }] }), rc0 = K.cutAlongLoop(thick.positions, thick.indices, ring, { cfg: none, perLoop: [{ keys: [] }] });
+  check('a number engraved on a curved cut seals, and takes its strokes’ volume out of both pieces', !!jmC && jmC.marks.length === 3 && rc.parts.length === 2 && allClosed(rc.parts) && sumVol(rc.parts) < sumVol(rc0.parts) - 0.5, jmC && [jmC.marks.length, sumVol(rc0.parts) - sumVol(rc.parts)]);
+}
+
 console.log('split to fit the bed');
 {
   const box = (sx, sy, sz) => ({ min: [0, 0, 0], max: [sx, sy, sz], size: [sx, sy, sz], center: [sx / 2, sy / 2, sz / 2] });

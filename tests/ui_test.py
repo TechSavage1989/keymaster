@@ -981,6 +981,18 @@ with sync_playwright() as p:
     check('cutting makes three numbered pieces that all fit the bed, in one undo step', len([n for n in names if n.startswith('bar ')]) == 3 and 'all of which fit the bed' in pg.inner_text('#toast') and 'Too big' not in pg.inner_text('#partList'), (names, pg.inner_text('#toast')))
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     check('undo puts the bar back in one piece', pg.locator('#partList li[data-id]').count() == 1)
+    # joint numbers: with Number the joints ticked, a cut engraves the same number on both faces and says so
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(400)
+    check('the key settings offer Number the joints, off by default', pg.locator('input[data-cfg=numberJoints]').count() == 1 and not pg.is_checked('input[data-cfg=numberJoints]'))
+    pg.check('input[data-cfg=numberJoints]'); pg.wait_for_timeout(600)
+    pg.keyboard.press('x'); pg.wait_for_timeout(600)
+    pg.click('[data-act=cut]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length >= 2", timeout=20000)
+    check('the cut engraves joint number 1 and says so', 'joint numbered 1' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(300)
+    pg.uncheck('input[data-cfg=numberJoints]'); pg.wait_for_timeout(300)
+    pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
     for k, v in (('w', 220), ('d', 220), ('h', 250)):
         pg.fill(f'input[data-bed={k}]', str(v)); pg.press(f'input[data-bed={k}]', 'Tab'); pg.wait_for_timeout(100)
     # a tangled model: two blocks welded along one edge. Repair surface untangles it, and then it cuts
