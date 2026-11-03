@@ -338,7 +338,7 @@ with sync_playwright() as p:
     check('choosing resin explains what changed', 'Set up for resin' in pg.inner_text('#toast'))
     # shapes: a cube, a ball, a tube, a cone or a ring added as a part of its own, sized, turned and placed
     n_before = pg.locator('#partList li[data-id]').count()
-    check('the panel has an Edit the model row with Shapes and Boolean, and Sculpt waiting', pg.locator('[data-tool=shape]').count() == 1 and pg.is_disabled('[data-tool=sculpt]') and not pg.is_disabled('[data-tool=boolean]'))
+    check('the panel has an Edit the model row with Sculpt, Shapes and Boolean', pg.locator('[data-tool=shape]').count() == 1 and not pg.is_disabled('[data-tool=sculpt]') and not pg.is_disabled('[data-tool=boolean]'))
     pg.click('[data-tool=shape]'); pg.wait_for_timeout(200)
     check('the Shapes tool offers the five shapes', pg.locator('#shapePanel [data-act=shape-add]').count() == 5 and not pg.is_visible('#planeBar'))
     pg.click('#shapePanel [data-act=shape-add][data-value=cube]'); pg.wait_for_timeout(400)
@@ -393,6 +393,28 @@ with sync_playwright() as p:
         if pg.locator('#partList li[data-id]').count() == n_before: break
         pg.keyboard.press('Control+z'); pg.wait_for_timeout(150)
     check('undo takes the ball away again', pg.locator('#partList li[data-id]').count() == n_before)
+    pg.evaluate("KeymasterDebug.setTool('plane')"); pg.wait_for_timeout(200); pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
+    if pg.locator('[data-act=done]').count(): pg.click('[data-act=done]'); pg.wait_for_timeout(200)
+    # sculpting: smooth, inflate and flatten brushes, one undo step per stroke
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(300)
+    pg.click('[data-tool=sculpt]'); pg.wait_for_timeout(300)
+    check('the Sculpt tool shows its brushes, size and strength, and no cut plane or yellow button', pg.locator('[data-act=sculpt-mode]').count() == 3 and pg.locator('#sculptSize').count() == 1 and pg.locator('#sculptStrength').count() == 1 and not pg.is_visible('#planeBar') and pg.locator('#cutAction .btn.cut').count() == 0)
+    sc = pg.evaluate("KeymasterDebug.sculptAt(0, [30, 0, 24], { mode: 'inflate', size: 8, strength: 1, dabs: 6 })")
+    check('an inflate stroke on the knot moves vertices, grows it, keeps it sealed, and goes into the history', sc['moved'] > 20 and sc['closed'] and sc['tool'] == 'sculpt' and not pg.evaluate("document.querySelector('#undoBtn').disabled"), sc)
+    vol_in = sc['volume']
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    check('undo takes the stroke back', 'Undid the sculpting' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(200)
+    sd = pg.evaluate("KeymasterDebug.sculptAt(0, [30, 0, 24], { mode: 'inflate', size: 8, strength: 1, dabs: 6, reverse: true })")
+    check('with Shift the same stroke pushes the surface in', sd['volume'] < vol_in and sd['closed'], (sd['volume'], vol_in))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(200)
+    pg.click('[data-tool=sculpt]'); pg.wait_for_timeout(200)
+    pg.fill('#sculptSize', '12'); pg.press('#sculptSize', 'Tab'); pg.wait_for_timeout(200)
+    pg.evaluate("document.activeElement && document.activeElement.blur()"); pg.keyboard.press(']'); pg.wait_for_timeout(200)
+    check('the brush size is set from the box and grows with ]', pg.input_value('#sculptSize') == '15', pg.input_value('#sculptSize'))
+    pg.click('[data-act=sculpt-mode][data-value=flatten]'); pg.wait_for_timeout(200)
+    check('choosing Flatten says what it does', 'flat plane' in pg.inner_text('#sculptPanel'))
     pg.evaluate("KeymasterDebug.setTool('plane')"); pg.wait_for_timeout(200); pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
     if pg.locator('[data-act=done]').count(): pg.click('[data-act=done]'); pg.wait_for_timeout(200)
     # printer presets: a common printer sets the bed size and the type in one go
