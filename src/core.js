@@ -447,7 +447,7 @@ const KMCore = (() => {
   }
   function diag(b) { return Math.hypot(b.size[0], b.size[1], b.size[2]) || 1; }
 
-  function weld(P, I, tol) {
+  function weld(P, I, tol, f64 = false) {
     const n = P.length / 3;
     const inv = 1 / tol;
     const size = nextPow2(n * 2);
@@ -455,7 +455,7 @@ const KMCore = (() => {
     const table = new Int32Array(size).fill(-1);
     const remap = new Uint32Array(n);
     const qx = new Float64Array(n), qy = new Float64Array(n), qz = new Float64Array(n);
-    const out = new Float32Array(P.length);
+    const out = f64 ? new Float64Array(P.length) : new Float32Array(P.length);
     let m = 0;
     for (let i = 0; i < n; i++) {
       const x = Math.round(P[3 * i] * inv), y = Math.round(P[3 * i + 1] * inv), z = Math.round(P[3 * i + 2] * inv);
@@ -4556,22 +4556,559 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     return { below: lo.indices.length ? { positions: lo.positions, indices: lo.indices, capFrom: lo.capFrom } : null, above: hi.indices.length ? { positions: hi.positions, indices: hi.indices, capFrom: hi.capFrom } : null, shift, crossed: segA.length > 0 };
   }
   // A box as a closed mesh
+  /* ---------- booleans with a convex tool ----------
+     A part and a shape joined (union), the shape taken out of the part (difference), or only their overlap kept
+     (intersect), as the guide's Boolean tool. The tool is convex (a cube, a ball, a tube, a cone; a ring is cut
+     into convex sectors and taken one at a time), given as a closed mesh whose faces are flat.
+     The result's surface has two kinds of piece: the part's own triangles, each clipped by the tool's planes into
+     the bit inside the tool and the bits outside (clipInOut); and the tool's faces, each cut by the part's section
+     curves into regions that are inside or outside the part (faceRegions, a walk round a planar graph, with a
+     parity test along a line for the side). Every point where a part edge meets a tool plane, or a tool edge meets
+     a part triangle, is made once and shared by name, so the pieces meet exactly and nothing has to be sewn. */
+  // The distinct flat faces of a closed mesh as outward planes (a cube gives 6, a 24-sided tube 26), and which
+  // plane each triangle lies on
+  function facePlanesOf(P, I) {
+    const nt = I.length / 3, b = bounds(P), scale = diag(b), N = new Float64Array(nt * 3), area = new Float64Array(nt);
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], c = 3 * I[3 * t + 1], d = 3 * I[3 * t + 2];
+      const n = cross3([P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]], [P[d] - P[a], P[d + 1] - P[a + 1], P[d + 2] - P[a + 2]]);
+      const len = Math.hypot(n[0], n[1], n[2]); area[t] = len / 2;
+      if (len > 0) { N[3 * t] = n[0] / len; N[3 * t + 1] = n[1] / len; N[3 * t + 2] = n[2] / len; }
+    }
+    // neighbours across an edge with the same normal are one face (a box face's two triangles, a lathe's quads)
+    const parent = new Int32Array(nt); for (let t = 0; t < nt; t++) parent[t] = t;
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const byEdge = new Map();
+    for (let t = 0; t < nt; t++) for (let e = 0; e < 3; e++) {
+      const u = I[3 * t + e], w = I[3 * t + (e + 1) % 3], key = u < w ? u + '-' + w : w + '-' + u, o = byEdge.get(key);
+      if (o === undefined) { byEdge.set(key, t); continue; }
+      if (area[t] > 0 && area[o] > 0 && N[3 * t] * N[3 * o] + N[3 * t + 1] * N[3 * o + 1] + N[3 * t + 2] * N[3 * o + 2] > 1 - 5e-7) parent[find(t)] = find(o); // within a thousandth of a radian: float32 corners of a turned shape
+    }
+    const planes = [], of = new Int32Array(nt).fill(-1), index = new Map(), sum = [];
+    for (let t = 0; t < nt; t++) {
+      if (!(area[t] > scale * scale * 1e-14)) continue;
+      const r = find(t); let i = index.get(r);
+      if (i === undefined) { i = planes.length; index.set(r, i); planes.push(null); sum.push([0, 0, 0, 0, 0, 0, 0]); }
+      const s = sum[i], w = area[t], a = 3 * I[3 * t];
+      s[0] += N[3 * t] * w; s[1] += N[3 * t + 1] * w; s[2] += N[3 * t + 2] * w; s[3] += P[a] * w; s[4] += P[a + 1] * w; s[5] += P[a + 2] * w; s[6] += w;
+      of[t] = i;
+    }
+    for (let i = 0; i < planes.length; i++) { const s = sum[i]; planes[i] = { n: norm3([s[0], s[1], s[2]]), o: [s[3] / s[6], s[4] / s[6], s[5] / s[6]] }; }
+    return { planes, of };
+  }
+  function facePlanes(P, I) { return facePlanesOf(P, I).planes; }
+  // The tool moved as a whole by a few microns so that no vertex of the part sits on any of its planes (as the flat
+  // cut nudges its plane). Moving it whole keeps its corners exact: a ball's pole stays one point where its faces
+  // meet, which nudging each plane on its own would break into a cluster of slivers.
+  function toolShift(P, planes, scale, lo, hi) {
+    const nv = P.length / 3, W = scale * 2e-5, tol = scale * 1e-6, near = [];
+    for (let v = 0, j = 0; v < nv; v++, j += 3) if (P[j] >= lo[0] - W && P[j] <= hi[0] + W && P[j + 1] >= lo[1] - W && P[j + 1] <= hi[1] + W && P[j + 2] >= lo[2] - W && P[j + 2] <= hi[2] + W) near.push(v);
+    // along a direction, each vertex within tol of a plane forbids a short run of shifts; the shift is taken from
+    // the middle of the widest gap between the runs, and the best of a few directions wins
+    let best = [0, 0, 0], bestGap = -1;
+    for (const dir of [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.577, 0.577, 0.577], [-0.577, 0.577, 0.577], [0.577, -0.577, 0.577], [0.577, 0.577, -0.577]]) {
+      const runs = [];
+      for (const pl of planes) {
+        const n = pl.n, rate = n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2];
+        if (Math.abs(rate) < 1e-3) { // the direction runs along the plane: a vertex on it stays on it whatever the shift
+          for (const v of near) { const d = (P[3 * v] - pl.o[0]) * n[0] + (P[3 * v + 1] - pl.o[1]) * n[1] + (P[3 * v + 2] - pl.o[2]) * n[2]; if (d > -tol && d < tol) { runs.push([-W, W]); break; } }
+          continue;
+        }
+        const reach = W * Math.abs(rate) + tol;
+        for (const v of near) {
+          const d = (P[3 * v] - pl.o[0]) * n[0] + (P[3 * v + 1] - pl.o[1]) * n[1] + (P[3 * v + 2] - pl.o[2]) * n[2];
+          if (d < -reach || d > reach) continue;
+          const s0 = (d - tol) / rate, s1 = (d + tol) / rate; // shifts s with |d - s·rate| < tol
+          runs.push(s0 < s1 ? [s0, s1] : [s1, s0]);
+        }
+      }
+      runs.sort((x, y) => x[0] - y[0]);
+      let gap = 0, at = 0, edge = -W;
+      for (const r of runs) { if (r[0] > edge) { const g = Math.min(r[0], W) - edge; if (g > gap) { gap = g; at = edge + g / 2; } } if (r[1] > edge) edge = r[1]; }
+      if (W > edge) { const g = W - edge; if (g > gap) { gap = g; at = edge + g / 2; } }
+      if (gap > bestGap) { bestGap = gap; best = [dir[0] * at, dir[1] * at, dir[2] * at]; }
+      if (gap >= 2 * tol * 4) break; // a comfortable gap: good enough
+    }
+    return best;
+  }
+  // Edges shorter than minLen collapsed one into the other, where the collapse keeps the mesh a manifold (the two
+  // ends share only the two opposite corners of the edge's triangles, as reduceMesh checks), so a float32 copy of
+  // the result never has two vertices in one place. Positions stay float64.
+  function collapseShortEdges(P, I, minLen) {
+    const nv = P.length / 3, nt = I.length / 3, min2 = minLen * minLen;
+    const alias = new Int32Array(nv); for (let v = 0; v < nv; v++) alias[v] = v;
+    const find = (v) => { while (alias[v] !== v) { alias[v] = alias[alias[v]]; v = alias[v]; } return v; };
+    const nb = new Map(); // vertex -> Set of neighbours, by current ids
+    const link = (a, b) => { if (!nb.has(a)) nb.set(a, new Set()); nb.get(a).add(b); };
+    const short = [];
+    for (let t = 0; t < nt; t++) for (let e = 0; e < 3; e++) {
+      const a = I[3 * t + e], b = I[3 * t + (e + 1) % 3];
+      link(a, b); link(b, a);
+      if (a < b) { const dx = P[3 * a] - P[3 * b], dy = P[3 * a + 1] - P[3 * b + 1], dz = P[3 * a + 2] - P[3 * b + 2]; if (dx * dx + dy * dy + dz * dz < min2) short.push(a, b); }
+    }
+    if (!short.length) return { positions: P, indices: I };
+    for (let s = 0; s < short.length; s += 2) {
+      const a = find(short[s]), b = find(short[s + 1]);
+      if (a === b) continue;
+      const na = nb.get(a), nbb = nb.get(b); if (!na || !nbb || !na.has(b)) continue;
+      let shared = 0; for (const x of na) if (nbb.has(x)) shared++;
+      if (shared !== 2) continue; // not a plain edge of two triangles: leave it
+      // b goes into a
+      for (const x of nbb) { if (x === a) continue; const nx = nb.get(x); nx.delete(b); nx.add(a); na.add(x); }
+      na.delete(b); nb.delete(b); alias[b] = a;
+    }
+    const out = [];
+    for (let t = 0; t < nt; t++) { const a = find(I[3 * t]), b = find(I[3 * t + 1]), c = find(I[3 * t + 2]); if (a !== b && b !== c && a !== c) out.push(a, b, c); }
+    return { positions: P, indices: new Uint32Array(out) };
+  }
+  // Is a point inside a closed mesh: the parity of the crossings of a line up from it, from a grid of the triangles
+  function insideTester(P, I) {
+    const b = bounds(P), N = 48, sx = b.size[0] / N || 1, sy = b.size[1] / N || 1, bins = new Map();
+    const cell = (x, y) => `${Math.floor((x - b.min[0]) / sx)},${Math.floor((y - b.min[1]) / sy)}`;
+    for (let t = 0; t < I.length; t += 3) {
+      const a = 3 * I[t], c = 3 * I[t + 1], d = 3 * I[t + 2];
+      const x0 = Math.min(P[a], P[c], P[d]), x1 = Math.max(P[a], P[c], P[d]), y0 = Math.min(P[a + 1], P[c + 1], P[d + 1]), y1 = Math.max(P[a + 1], P[c + 1], P[d + 1]);
+      const i0 = Math.floor((x0 - b.min[0]) / sx), i1 = Math.floor((x1 - b.min[0]) / sx), j0 = Math.floor((y0 - b.min[1]) / sy), j1 = Math.floor((y1 - b.min[1]) / sy);
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const k = `${i},${j}`; if (!bins.has(k)) bins.set(k, []); bins.get(k).push(t); }
+    }
+    return (x0, y0, z) => {
+      const x = x0 + sx * 0.0137, y = y0 + sy * 0.0291; // off any edge the sample might sit on
+      if (x < b.min[0] || x > b.max[0] || y < b.min[1] || y > b.max[1] || z > b.max[2]) return false;
+      const list = bins.get(cell(x, y)); if (!list) return false;
+      let hits = 0;
+      for (const t of list) {
+        const a = 3 * I[t], c = 3 * I[t + 1], d = 3 * I[t + 2];
+        const ax = P[a] - x, ay = P[a + 1] - y, bx = P[c] - x, by = P[c + 1] - y, cx = P[d] - x, cy = P[d + 1] - y;
+        const s1 = ax * by - ay * bx, s2 = bx * cy - by * cx, s3 = cx * ay - cy * ax;
+        if ((s1 < 0 || s2 < 0 || s3 < 0) && (s1 > 0 || s2 > 0 || s3 > 0)) continue;
+        const sum = s1 + s2 + s3; if (sum === 0) continue;
+        const zz = (s2 * P[a + 2] + s3 * P[c + 2] + s1 * P[d + 2]) / sum;
+        if (zz > z) hits++;
+      }
+      return (hits & 1) === 1;
+    };
+  }
+  // The tool as flat faces: its triangles grouped by plane, each group's outline chained (facing out), with the
+  // plane across each outline edge
+  function toolFaces(C, planes, of) {
+    const I = C.indices, faces = planes.map(() => []), across = new Map();
+    for (let t = 0; t < I.length; t += 3) { const i = of[t / 3]; if (i < 0) continue; faces[i].push(I[t], I[t + 1], I[t + 2]); for (let e = 0; e < 3; e++) across.set(I[t + (e + 1) % 3] + '>' + I[t + e], i); }
+    return faces.map((tris, i) => {
+      if (!tris.length) return null;
+      const cnt = new Map();
+      for (let k = 0; k < tris.length; k += 3) for (let e = 0; e < 3; e++) { const u = tris[k + e], w = tris[k + (e + 1) % 3]; cnt.set(u + '>' + w, (cnt.get(u + '>' + w) || 0) + 1); }
+      const next = new Map();
+      for (const [key] of cnt) { const [u, w] = key.split('>').map(Number); if (!cnt.has(w + '>' + u)) next.set(u, w); }
+      if (!next.size) return null;
+      const start = next.keys().next().value, ring = [start]; let cur = next.get(start), guard = 0;
+      while (cur !== start && guard++ < next.size + 2) { ring.push(cur); cur = next.get(cur); }
+      const other = ring.map((u, e) => { const w = ring[(e + 1) % ring.length], j = across.get(u + '>' + w); return j === undefined ? -1 : j; });
+      return { plane: i, ring, other };
+    });
+  }
+  // The tool is one convex solid, or several convex cells that share faces (a ring is its sectors): every cell
+  // is a closed mesh whose faces are flat. Cells share a global list of planes, so a seam point on a shared plane
+  // has one name whichever cell made it, and a plane two cells share (with opposite normals) is inside the tool
+  // and gets no cap.
+  function booleanWith(P, I, tool, op) {
+    const pb = bounds(P), scale = diag(pb);
+    const dist = (pl, q) => (q[0] - pl.o[0]) * pl.n[0] + (q[1] - pl.o[1]) * pl.n[1] + (q[2] - pl.o[2]) * pl.n[2];
+    const planes = [], cellPlanes = [], cells = [], cellFaces = []; // planes[g] = { n, o }; cellPlanes[k][local] = { g, sign }
+    if (tool.cells) { // cells given as signed planes from one exact list: their meshes are built here
+      for (const pl of tool.planes) planes.push({ n: pl.n.slice(), o: pl.o.slice() });
+      for (const cell of tool.cells) {
+        const local = cell.map(({ g, sign }) => ({ n: sign > 0 ? planes[g].n : planes[g].n.map(x => -x), o: planes[g].o }));
+        const hull = hullMesh(local);
+        if (!hull.indices.length) continue;
+        // which plane each hull triangle lies on
+        const of = new Int32Array(hull.indices.length / 3).fill(-1), tol = scale * 1e-6;
+        for (let q = 0; q < of.length; q++) {
+          const a = hull.indices[3 * q], b = hull.indices[3 * q + 1], c = hull.indices[3 * q + 2];
+          for (let l = 0; l < local.length && of[q] < 0; l++) { const pl = local[l]; let on = true; for (const v of [a, b, c]) if (Math.abs(dist(pl, [hull.positions[3 * v], hull.positions[3 * v + 1], hull.positions[3 * v + 2]])) > tol) { on = false; break; } if (on) of[q] = l; }
+        }
+        cells.push(hull); cellPlanes.push(cell.map(({ g, sign }) => ({ g, sign }))); cellFaces.push(toolFaces(hull, local, of));
+      }
+      if (!cells.length) throw new Error('The shape has no inside to work with.');
+    } else { // one convex mesh (every face flat, no two meeting at a reflex edge): its planes are read off its faces
+      const fp = facePlanesOf(tool.positions, tool.indices);
+      if (!fp.planes.length) throw new Error('The shape has no inside to work with.');
+      for (const pl of fp.planes) planes.push({ n: pl.n.slice(), o: pl.o.slice() });
+      cells.push(tool); cellPlanes.push(fp.planes.map((pl, g) => ({ g, sign: 1 }))); cellFaces.push(toolFaces(tool, fp.planes, fp.of));
+    }
+    const k = planes.length, signs = new Set();
+    for (const cp of cellPlanes) for (const { g, sign } of cp) signs.add(g * 2 + (sign > 0 ? 0 : 1));
+    const internal = new Uint8Array(k); for (let g = 0; g < k; g++) if (signs.has(g * 2) && signs.has(g * 2 + 1)) internal[g] = 1;
+    // the tool moved whole by a few microns so no part vertex sits on a plane; its corners welded across cells
+    const allC = []; for (const c of cells) for (let i = 0; i < c.positions.length; i++) allC.push(c.positions[i]);
+    const tb0 = bounds(allC), pad = Math.max(diag(tb0) * 0.02, 0.05);
+    const shift = toolShift(P, planes, scale, tb0.min.map(v => v - pad), tb0.max.map(v => v + pad));
+    for (const pl of planes) { pl.o[0] += shift[0]; pl.o[1] += shift[1]; pl.o[2] += shift[2]; }
+    const nA = P.length / 3, nt = I.length / 3;
+    // the shared vertex table: the part's vertices, then the tool's corners, then every seam point by name
+    const V = new F64List(P.length + allC.length + 1024);
+    for (let i = 0; i < P.length; i++) V.a[i] = P[i]; V.n = P.length;
+    const cBase = nA, cornerIds = new Map(), cellMap = [], ctol = scale * 1e-8;
+    const cornerAt = (x, y, z) => { // the tool corner already at this spot, if any (cells share corners)
+      const cx = Math.floor(x / ctol), cy = Math.floor(y / ctol), cz = Math.floor(z / ctol);
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let l = -1; l <= 1; l++) { const list = cornerIds.get(`${cx + i},${cy + j},${cz + l}`); if (list) for (const id of list) if (Math.abs(V.a[3 * id] - x) < ctol && Math.abs(V.a[3 * id + 1] - y) < ctol && Math.abs(V.a[3 * id + 2] - z) < ctol) return id; }
+      return -1;
+    };
+    for (const c of cells) {
+      const map = new Int32Array(c.positions.length / 3);
+      for (let v = 0; v < map.length; v++) {
+        const x = c.positions[3 * v] + shift[0], y = c.positions[3 * v + 1] + shift[1], z = c.positions[3 * v + 2] + shift[2];
+        let id = cornerAt(x, y, z);
+        if (id < 0) { id = V.push3(x, y, z); const key = `${Math.floor(x / ctol)},${Math.floor(y / ctol)},${Math.floor(z / ctol)}`; if (!cornerIds.has(key)) cornerIds.set(key, []); cornerIds.get(key).push(id); }
+        map[v] = id;
+      }
+      cellMap.push(map);
+    }
+    // the facets to cap: each cell's faces on planes the tool doesn't share inside itself
+    const facets = [], facetOf = new Map();
+    for (let c = 0; c < cells.length; c++) for (const f of cellFaces[c]) {
+      if (!f) continue;
+      const { g, sign } = cellPlanes[c][f.plane]; if (internal[g]) continue;
+      facetOf.set(c * k + g, facets.length);
+      facets.push({ g, sign, cell: c, ring: f.ring.map(v => cellMap[c][v]), other: f.other.map(j => (j >= 0 ? cellPlanes[c][j].g : -1)) });
+    }
+    const named = new Map();
+    const pointOn = (key, make) => { let id = named.get(key); if (id === undefined) { const q = make(); id = typeof q === 'number' ? q : V.push3(q[0], q[1], q[2]); named.set(key, id); } return id; };
+    const pos = (id) => [V.a[3 * id], V.a[3 * id + 1], V.a[3 * id + 2]];
+    // only triangles whose box meets the tool's can touch it
+    const lo = tb0.min.map(v => v - pad + shift[0]), hi = tb0.max.map(v => v + pad + shift[0]);
+    const vdCache = new Map(); // part vertex -> its distances to every plane
+    const vdOf = (v) => { let d = vdCache.get(v); if (!d) { d = new Float64Array(k); const q = [P[3 * v], P[3 * v + 1], P[3 * v + 2]]; for (let i = 0; i < k; i++) d[i] = dist(planes[i], q); vdCache.set(v, d); } return d; };
+    const edgeKey = (a, b) => (a < b ? a * nA + b : b * nA + a);
+    const inside = insideTester(P, I);
+    const outTris = [], inTris = []; // the part's own surface, split
+    const chains = facets.map(() => []); // per facet: the directed seam edges of the inside pieces, as [idA, idB]
+    const onEdgeC = new Map(); // tool edge (i-j) -> seam corners on it
+    const onEdge = new Map(); // part edge -> seam points on it, so the triangle across the edge splits there too
+    const eps0 = scale * 1e-9; // a seam point this close to a plane lies on it (a tool edge through a part edge, a tool corner on a part face)
+    const eps1 = scale * 1e-8; // two seam corners this close are one
+    const registerOn = (v) => { for (let x = 0; x < v.on.length; x++) for (let y = x + 1; y < v.on.length; y++) { const ek = `${Math.min(v.on[x], v.on[y])}-${Math.max(v.on[x], v.on[y])}`; if (!onEdgeC.has(ek)) onEdgeC.set(ek, new Set()); onEdgeC.get(ek).add(v.id); } };
+    // seam points by position, so a corner that three planes share (a ring's radial face meeting two wall facets
+    // along one edge) or one on a part edge is made once however many plane pairs give it
+    const cellsBy = new Map(), cellKey = (x, y, z) => `${Math.floor(x / eps1)},${Math.floor(y / eps1)},${Math.floor(z / eps1)}`;
+    const noteSeam = (id) => { const q = pos(id), key = cellKey(q[0], q[1], q[2]); if (!cellsBy.has(key)) cellsBy.set(key, []); cellsBy.get(key).push(id); };
+    const seamNear = (q, i, j) => { // an existing corner at q that lies on both planes: the same point by another pair
+      const cx = Math.floor(q[0] / eps1), cy = Math.floor(q[1] / eps1), cz = Math.floor(q[2] / eps1);
+      for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) { const list = cellsBy.get(`${cx + x},${cy + y},${cz + z}`); if (list) for (const o of list) { const r = pos(o); if (Math.abs(r[0] - q[0]) < eps1 && Math.abs(r[1] - q[1]) < eps1 && Math.abs(r[2] - q[2]) < eps1 && Math.abs(dist(planes[i], r)) < eps0 && Math.abs(dist(planes[j], r)) < eps0) return o; } }
+      return -1;
+    };
+    const whole = []; // triangles left whole, with where they go
+    const clipped = []; // triangles cut by the tool's planes: their pieces
+    // a polygon piece clipped by one cell: the piece inside it (or null) and the pieces outside
+    const clipByCell = (piece, cp, t, tpl, dOf, vtx) => {
+      let { poly, labels } = piece; const outs = [];
+      for (let q = 0; q < cp.length && poly.length >= 3; q++) {
+        const { g: i, sign } = cp[q];
+        const ds = poly.map(v => { const d = sign * dOf(v, i); return d > -eps0 && d < eps0 ? 0 : d; });
+        for (let e = 0; e < poly.length; e++) if (ds[e] === 0 && !poly[e].on.includes(i)) { poly[e].on.push(i); registerOn(poly[e]); }
+        if (ds.every(d => d <= 0)) continue; // all inside this plane
+        if (ds.every(d => d >= 0)) { outs.push({ poly, labels }); poly = []; break; } // all outside: the rest is outside the cell
+        const inP = [], inL = [], outP = [], outL = [];
+        const m = poly.length, onI = { plane: i };
+        for (let e = 0; e < m; e++) {
+          const u = poly[e], w = poly[(e + 1) % m], du = ds[e], dw = ds[(e + 1) % m], lab = labels[e];
+          // a ring's label list runs beside its vertices: labels[e] is the edge leaving vertex e
+          if (du < 0) { inP.push(u); inL.push(lab); }
+          else if (du > 0) { outP.push(u); outL.push(lab); }
+          else { inP.push(u); inL.push(dw > 0 ? onI : lab); outP.push(u); outL.push(dw < 0 ? onI : lab); }
+          if ((du < 0 && dw > 0) || (du > 0 && dw < 0)) {
+            let id;
+            if (lab.edge !== undefined) { // on an edge of the part: the same point whichever triangle asks
+              const [p0, q0] = lab.ends.slice().sort((x, y) => x - y);
+              id = pointOn(`e${lab.edge}p${i}`, () => { const x = pos(p0), y = pos(q0), dp = vdOf(p0)[i], dq = vdOf(q0)[i], s = dp / (dp - dq); if (!onEdge.has(lab.edge)) onEdge.set(lab.edge, []); onEdge.get(lab.edge).push(V.n / 3); return [x[0] + s * (y[0] - x[0]), x[1] + s * (y[1] - x[1]), x[2] + s * (y[2] - x[2])]; });
+            } else { // on a seam of plane lab.plane cut by plane i: a corner where the tool's edge passes through the triangle
+              const j = lab.plane, key = `c${Math.min(i, j)}-${Math.max(i, j)}t${t}`;
+              id = pointOn(key, () => {
+                const x = pos(u.id), y = pos(w.id), s = du / (du - dw), q2 = [x[0] + s * (y[0] - x[0]), x[1] + s * (y[1] - x[1]), x[2] + s * (y[2] - x[2])];
+                const near = seamNear(q2, i, j); if (near >= 0) return near;
+                const nid = V.push3(q2[0], q2[1], q2[2]); noteSeam(nid); return nid;
+              });
+            }
+            const nvx = vtx(id, lab.edge !== undefined ? [i] : [lab.plane, i]);
+            registerOn(nvx);
+            // leaving the cell: the inside ring closes along the plane from here, the outside ring carries on along the edge
+            if (du < 0) { inP.push(nvx); inL.push(onI); outP.push(nvx); outL.push(lab); }
+            else { outP.push(nvx); outL.push(onI); inP.push(nvx); inL.push(lab); }
+          }
+        }
+        const dedupe = (ring, labs) => { const r = [], l = []; for (let e = 0; e < ring.length; e++) { if (ring[e].id === ring[(e + 1) % ring.length].id) continue; r.push(ring[e]); l.push(labs[e]); } return [r, l]; };
+        const [inRing, inLabs] = dedupe(inP, inL), [outRing, outLabs] = dedupe(outP, outL);
+        if (outRing.length >= 3) outs.push({ poly: outRing, labels: outLabs });
+        poly = inRing; labels = inLabs;
+      }
+      return { inside: poly.length >= 3 ? { poly, labels } : null, outs };
+    };
+    // first pass: clip every triangle near the tool by its cells
+    for (let t = 0; t < nt; t++) {
+      const a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
+      let out = false;
+      for (let ax = 0; ax < 3 && !out; ax++) { const x0 = P[3 * a + ax], x1 = P[3 * b + ax], x2 = P[3 * c + ax]; if ((x0 < lo[ax] && x1 < lo[ax] && x2 < lo[ax]) || (x0 > hi[ax] && x1 > hi[ax] && x2 > hi[ax])) out = true; }
+      if (out) { whole.push(a, b, c, 0); continue; }
+      const da = vdOf(a), db = vdOf(b), dc = vdOf(c);
+      // which cells the triangle can touch; whole inside one, or outside every one, needs no clipping
+      const touch = []; let allIn = false;
+      for (let cc = 0; cc < cells.length && !allIn; cc++) {
+        let inAll = true, outOne = false;
+        for (const { g: i, sign } of cellPlanes[cc]) { const x = sign * da[i], y = sign * db[i], z = sign * dc[i]; if (x > 0 || y > 0 || z > 0) inAll = false; if (x > 0 && y > 0 && z > 0) { outOne = true; break; } }
+        if (inAll) allIn = true; else if (!outOne) touch.push(cc);
+      }
+      if (allIn) { whole.push(a, b, c, 1); continue; }
+      if (!touch.length) { whole.push(a, b, c, 0); continue; }
+      // the triangle's plane, for the corners where tool edges pass through it
+      const pa = pos(a), pb2 = pos(b), pc = pos(c), tn = norm3(cross3([pb2[0] - pa[0], pb2[1] - pa[1], pb2[2] - pa[2]], [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]])), tpl = { n: tn, o: pa };
+      const dOf = (v, i) => (v.orig !== undefined ? vdOf(v.orig)[i] : v.on.includes(i) ? 0 : dist(planes[i], pos(v.id)));
+      // the polygon: vertices { id, on: planes it lies on }, one object per point within the triangle, edges
+      // labelled by what they lie on (a part edge or a plane)
+      const objs = new Map();
+      const vtx = (id, on) => { let o = objs.get(id); if (!o) { o = { id, on: [] }; objs.set(id, o); } for (const i of on) if (!o.on.includes(i)) o.on.push(i); return o; };
+      let pieces = [{ poly: [{ id: a, orig: a, on: [] }, { id: b, orig: b, on: [] }, { id: c, orig: c, on: [] }], labels: [{ edge: edgeKey(a, b), ends: [a, b] }, { edge: edgeKey(b, c), ends: [b, c] }, { edge: edgeKey(c, a), ends: [c, a] }] }];
+      const insides = [];
+      for (const cc of touch) {
+        const next = [];
+        for (const piece of pieces) { const r = clipByCell(piece, cellPlanes[cc], t, tpl, dOf, vtx); if (r.inside) insides.push({ ...r.inside, cell: cc }); for (const o of r.outs) next.push(o); }
+        pieces = next;
+      }
+      // the seam edges of the inside pieces, per facet
+      for (const ip of insides) for (let e = 0; e < ip.poly.length; e++) { const lab = ip.labels[e]; if (lab.plane === undefined) continue; const f = facetOf.get(ip.cell * k + lab.plane); if (f !== undefined) chains[f].push([ip.poly[e].id, ip.poly[(e + 1) % ip.poly.length].id]); }
+      clipped.push({ pieces, insides });
+    }
+    // second pass: every edge of every piece is split at the seam points on it (the other pieces' points on a seam
+    // plane, the points the triangle across a part edge made on it), then fanned
+    const paramsOn = (u, w, ids, skipA, skipB) => {
+      const x = pos(u), y = pos(w), dx = y[0] - x[0], dy = y[1] - x[1], dz = y[2] - x[2], L2 = dx * dx + dy * dy + dz * dz, mids = [];
+      if (!(L2 > 0)) return mids;
+      for (const id of ids) { if (id === skipA || id === skipB) continue; const z = pos(id), s = ((z[0] - x[0]) * dx + (z[1] - x[1]) * dy + (z[2] - x[2]) * dz) / L2; if (s > 1e-9 && s < 1 - 1e-9 && !mids.some(m => m[1] === id)) mids.push([s, id]); }
+      mids.sort((p1, p2) => p1[0] - p2[0]);
+      return mids;
+    };
+    const fan = (ring, into) => {
+      if (ring.length === 3) { into.push(ring[0], ring[1], ring[2]); return; }
+      let cx = 0, cy = 0, cz = 0; for (const id of ring) { cx += V.a[3 * id]; cy += V.a[3 * id + 1]; cz += V.a[3 * id + 2]; }
+      const ctr = V.push3(cx / ring.length, cy / ring.length, cz / ring.length);
+      for (let e = 0; e < ring.length; e++) into.push(ring[e], ring[(e + 1) % ring.length], ctr);
+    };
+    for (let q = 0; q < whole.length; q += 4) {
+      const a = whole[q], b = whole[q + 1], c = whole[q + 2], into = whole[q + 3] ? inTris : outTris;
+      const ring = [];
+      for (const [u, w] of [[a, b], [b, c], [c, a]]) { ring.push(u); const ids = onEdge.get(edgeKey(u, w)); if (ids) for (const m of paramsOn(u, w, ids, -1, -1)) ring.push(m[1]); }
+      fan(ring, into);
+    }
+    for (const { pieces, insides } of clipped) {
+      const allPts = [];
+      for (const pc of pieces) for (const v of pc.poly) allPts.push(v);
+      for (const pc of insides) for (const v of pc.poly) allPts.push(v);
+      const sewn = (pc) => {
+        const ring = [];
+        for (let e = 0; e < pc.poly.length; e++) {
+          const u = pc.poly[e], w = pc.poly[(e + 1) % pc.poly.length], lab = pc.labels[e];
+          ring.push(u.id);
+          const ids = lab.plane !== undefined ? allPts.filter(v => v.on.includes(lab.plane)).map(v => v.id) : onEdge.get(lab.edge);
+          if (ids) for (const m of paramsOn(u.id, w.id, ids, u.id, w.id)) ring.push(m[1]);
+        }
+        return ring;
+      };
+      for (const pc of pieces) fan(sewn(pc), outTris);
+      for (const pc of insides) fan(sewn(pc), inTris);
+    }
+    // the tool's facets, each cut by the seam chains into regions that are inside or outside the part
+    const regs = [];
+    for (let fi = 0; fi < facets.length; fi++) {
+      const face = facets[fi], i = face.g, nOut = face.sign > 0 ? planes[i].n : planes[i].n.map(x => -x), F = frameFromNormal(nOut, planes[i].o);
+      const xy = (id) => { const q = pos(id), dx = q[0] - F.o[0], dy = q[1] - F.o[1], dz = q[2] - F.o[2]; return [dx * F.u[0] + dy * F.u[1] + dz * F.u[2], dx * F.v[0] + dy * F.v[1] + dz * F.v[2]]; };
+      // nodes: the facet's corners and the seam corners on its edges, in order round the outline
+      const ringIds = face.ring, m = ringIds.length, outline = [];
+      for (let e = 0; e < m; e++) {
+        const u = ringIds[e], w = ringIds[(e + 1) % m], j = face.other[e];
+        const pu = pos(u), pw = pos(w), pts = [];
+        if (j >= 0) { const set = onEdgeC.get(`${Math.min(i, j)}-${Math.max(i, j)}`); if (set) for (const id of set) pts.push(id); }
+        const dx = pw[0] - pu[0], dy = pw[1] - pu[1], dz = pw[2] - pu[2], L2 = dx * dx + dy * dy + dz * dz;
+        const ordered = pts.map(id => { const q = pos(id); return [((q[0] - pu[0]) * dx + (q[1] - pu[1]) * dy + (q[2] - pu[2]) * dz) / L2, id]; }).filter(x => x[0] > 1e-9 && x[0] < 1 - 1e-9).sort((p1, p2) => p1[0] - p2[0]);
+        outline.push(u); for (const o of ordered) if (!outline.includes(o[1])) outline.push(o[1]);
+      }
+      // the planar graph: the outline runs anticlockwise (facing out) and the seam chains run as the part's surface
+      // gives them; faces are found by walking, turning as far left as possible
+      const adj = new Map(), addEdge = (u, w) => { if (u === w) return; if (!adj.has(u)) adj.set(u, []); if (!adj.has(w)) adj.set(w, []); adj.get(u).push(w); adj.get(w).push(u); };
+      for (let e = 0; e < outline.length; e++) addEdge(outline[e], outline[(e + 1) % outline.length]);
+      const chainSet = new Set();
+      for (const [u, w] of chains[fi]) { addEdge(u, w); chainSet.add(u + '>' + w); }
+      const nodes = [...adj.keys()], XY = new Map(nodes.map(id => [id, xy(id)]));
+      for (const [u, list] of adj) { const [ux, uy] = XY.get(u); const uniq = [...new Set(list)]; uniq.sort((p1, p2) => Math.atan2(XY.get(p1)[1] - uy, XY.get(p1)[0] - ux) - Math.atan2(XY.get(p2)[1] - uy, XY.get(p2)[0] - ux)); adj.set(u, uniq); }
+      const used = new Set(), loops = [];
+      for (const [u, list] of adj) for (const w of list) {
+        const k0 = u + '>' + w; if (used.has(k0)) continue;
+        const loop = [u]; let cur = u, nxt = w, guard = 0;
+        while (guard++ < 100000) {
+          used.add(cur + '>' + nxt); loop.push(nxt);
+          const nb = adj.get(nxt), idx = nb.indexOf(cur), after = nb[(idx - 1 + nb.length) % nb.length]; // the edge just clockwise of the way back: the leftmost turn
+          cur = nxt; nxt = after;
+          if (cur === u && nxt === w) break;
+        }
+        loop.pop();
+        if (loop.length >= 3) loops.push(loop);
+      }
+      // signed area in the facet's frame: anticlockwise loops are regions, clockwise ones holes; the loop round the
+      // outside of the facet runs the outline backwards
+      const area = (loop) => { let s = 0; for (let e = 0; e < loop.length; e++) { const p1 = XY.get(loop[e]), p2 = XY.get(loop[(e + 1) % loop.length]); s += p1[0] * p2[1] - p2[0] * p1[1]; } return s / 2; };
+      const hasEdge = (loop, u, w) => loop.some((x, e) => x === u && loop[(e + 1) % loop.length] === w);
+      const regions = loops.filter(l => area(l) > 0), holes = loops.filter(l => area(l) < 0 && !hasEdge(l, outline[1], outline[0]));
+      const inRing = (loop, px, py) => { let ins = false; for (let e = 0, f = loop.length - 1; e < loop.length; f = e++) { const [x1, y1] = XY.get(loop[e]), [x2, y2] = XY.get(loop[f]); if ((y1 > py) !== (y2 > py) && px < ((x2 - x1) * (py - y1)) / (y2 - y1) + x1) ins = !ins; } return ins; };
+      // a point just inside a hole: off the middle of its first edge, to the right (the hole lies on the right of a clockwise loop)
+      const holePoint = (h) => { const [x1, y1] = XY.get(h[0]), [x2, y2] = XY.get(h[1]), dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1; return [(x1 + x2) / 2 + (dy / L) * L * 1e-6, (y1 + y2) / 2 - (dx / L) * L * 1e-6]; };
+      for (const reg of regions) {
+        const regArea = area(reg), myHoles = [];
+        for (const h of holes) { if (hasEdge(h, reg[1], reg[0])) continue; const [hx, hy] = holePoint(h); if (Math.abs(area(h)) < regArea * (1 + 1e-9) && inRing(reg, hx, hy)) { let best = true; for (const r2 of regions) if (r2 !== reg && area(r2) < regArea && area(r2) > Math.abs(area(h)) && !hasEdge(r2, h[1], h[0]) && inRing(r2, hx, hy)) { best = false; break; } if (best) myHoles.push(h); } }
+        const flat = [], ids = [], hIdx = [];
+        for (const id of reg) { ids.push(id); const q = XY.get(id); flat.push(q[0], q[1]); }
+        for (const h of myHoles) { hIdx.push(ids.length); for (const id of h) { ids.push(id); const q = XY.get(id); flat.push(q[0], q[1]); } }
+        const loc = earcut(flat, hIdx);
+        if (!loc.length) continue;
+        const tris = []; for (let e = 0; e < loc.length; e += 3) tris.push(ids[loc[e]], ids[loc[e + 1]], ids[loc[e + 2]]);
+        for (const r of [reg, ...myHoles]) fixTJunctions(tris, r);
+        // which side of the part: a region runs with the facet on its left, and the part's inside piece lies on the
+        // left of each seam edge, so a region whose boundary runs against a seam edge is inside the part
+        let votes = 0;
+        const keys = [];
+        for (const r of [reg, ...myHoles]) for (let e = 0; e < r.length; e++) { const p1 = r[e], p2 = r[(e + 1) % r.length]; if (chainSet.has(p2 + '>' + p1)) votes++; else if (chainSet.has(p1 + '>' + p2)) votes--; else keys.push(p1 + '>' + p2); }
+        regs.push({ tris, votes, keys, nOut });
+      }
+    }
+    // a region with no seam on its boundary takes its side from its neighbours: across a tool edge with no seam
+    // point on it the regions on both facets are on the same side of the part; only a tool nowhere near a seam
+    // (wholly in or out of the part) is tested with a line through the model
+    const byKey = new Map(), rParent = new Int32Array(regs.length);
+    for (let r = 0; r < regs.length; r++) { rParent[r] = r; for (const key of regs[r].keys) byKey.set(key, r); }
+    const rFind = (x) => { while (rParent[x] !== x) { rParent[x] = rParent[rParent[x]]; x = rParent[x]; } return x; };
+    for (let r = 0; r < regs.length; r++) for (const key of regs[r].keys) { const [u, w] = key.split('>'); const o = byKey.get(w + '>' + u); if (o !== undefined) rParent[rFind(r)] = rFind(o); }
+    const compVotes = new Map();
+    for (let r = 0; r < regs.length; r++) { const c = rFind(r); compVotes.set(c, (compVotes.get(c) || 0) + regs[r].votes); }
+    const capIn = [], capOut = [];
+    for (let r = 0; r < regs.length; r++) {
+      const { tris, nOut } = regs[r]; let v = compVotes.get(rFind(r)), isIn;
+      if (v !== 0) isIn = v > 0;
+      else {
+        const q0 = pos(tris[0]), q1 = pos(tris[1]), q2 = pos(tris[2]), mx = (q0[0] + q1[0] + q2[0]) / 3, my = (q0[1] + q1[1] + q2[1]) / 3, mz = (q0[2] + q1[2] + q2[2]) / 3;
+        const nudge = nOut.map(x => -x * scale * 1e-4); // just inside the tool, off the plane
+        isIn = inside(mx + nudge[0], my + nudge[1], mz + nudge[2]);
+        compVotes.set(rFind(r), isIn ? 1 : -1);
+      }
+      const dest = isIn ? capIn : capOut; for (const id of tris) dest.push(id);
+    }
+    // assemble by operation: the caps face out of the tool (anticlockwise in the facet frame)
+    const idx = [];
+    const pushCap = (list, flip) => { for (let e = 0; e < list.length; e += 3) { if (flip) idx.push(list[e], list[e + 2], list[e + 1]); else idx.push(list[e], list[e + 1], list[e + 2]); } };
+    if (op === 'intersect') { pushCap(inTris, false); pushCap(capIn, false); }
+    else if (op === 'difference') { pushCap(outTris, false); pushCap(capIn, true); }
+    else { pushCap(outTris, false); pushCap(capOut, false); }
+    if (!idx.length) throw new Error(op === 'intersect' ? 'The shape and the part don’t overlap, so there is nothing to keep.' : 'The shape covers the whole part, so nothing would be left.');
+    // seam points already share ids, so the weld only folds exact doubles. Slivers thinner than a float32 step
+    // (a plane passing within microns of a vertex) are collapsed first, so no two vertices land on one float32
+    // position: the next boolean, or a cut, would trip over them.
+    const short = collapseShortEdges(V.a.subarray(0, V.n), new Uint32Array(idx), scale * 1e-6);
+    const w = weld(short.positions, short.indices, Math.max(scale * 1e-12, 1e-12)), rep = edgeReport(w.indices);
+    if (!rep.closed) throw new Error(`The result isn’t sealed where the shape meets the part (${rep.openEdges} open and ${rep.badEdges} tangled edges). Move the shape a little and try again.`);
+    if (volume(w.positions, w.indices) < 0) flipAll(w.indices);
+    return { positions: w.positions, indices: w.indices };
+  }
+  // A ring is not convex: it is taken as its sectors, each the prism of the ring's profile over one step round,
+  // convex cells that share their radial faces and the flat top and bottom. One list of planes serves every
+  // sector (a shared plane is one object, used with either sign), so neighbouring cells agree exactly.
+  function ringSectors(s) {
+    const n = Math.max(8, Math.min(256, Math.round(s.segments || 64))), r = s.w / 2, ri = Math.max(0.01, Math.min(s.inner / 2, r - 0.01)), h = s.h;
+    const prof = shapedCorners([[ri, -h / 2], [r, -h / 2], [r, h / 2], [ri, h / 2]], true, s.edge || 'sharp', s.edgeSize || 0);
+    let cr = 0, cz = 0; for (const [pr, pz] of prof) { cr += pr; cz += pz; } cr /= prof.length; cz /= prof.length;
+    const planes = [], flat = new Map(), radial = [];
+    for (let i = 0; i < n; i++) { const a0 = (2 * Math.PI * i) / n; radial.push(planes.length); planes.push({ n: [Math.sin(a0), -Math.cos(a0), 0], o: [0, 0, 0] }); }
+    const cells = [];
+    for (let i = 0; i < n; i++) {
+      const a0 = (2 * Math.PI * i) / n, a1 = (2 * Math.PI * (i + 1)) / n, am = (a0 + a1) / 2, centre = [cr * Math.cos(am), cr * Math.sin(am), cz];
+      const cell = [{ g: radial[i], sign: 1 }, { g: radial[(i + 1) % n], sign: -1 }];
+      for (let q = 0; q < prof.length; q++) {
+        const [r0, z0] = prof[q], [r1, z1] = prof[(q + 1) % prof.length];
+        if (Math.abs(z1 - z0) < 1e-9) { // flat: one plane for every sector
+          if (!flat.has(q)) { flat.set(q, planes.length); planes.push({ n: [0, 0, z0 > cz ? 1 : -1], o: [0, 0, z0] }); }
+          cell.push({ g: flat.get(q), sign: 1 }); continue;
+        }
+        const A = [r0 * Math.cos(a0), r0 * Math.sin(a0), z0], B = [r1 * Math.cos(a0), r1 * Math.sin(a0), z1], C = [r0 * Math.cos(a1), r0 * Math.sin(a1), z0];
+        const u = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], v = [C[0] - A[0], C[1] - A[1], C[2] - A[2]], nn = norm3(cross3(u, v));
+        if (!(Math.hypot(nn[0], nn[1], nn[2]) > 0.5)) continue;
+        if ((centre[0] - A[0]) * nn[0] + (centre[1] - A[1]) * nn[1] + (centre[2] - A[2]) * nn[2] > 0) { nn[0] = -nn[0]; nn[1] = -nn[1]; nn[2] = -nn[2]; }
+        cell.push({ g: planes.length, sign: 1 }); planes.push({ n: nn, o: A });
+      }
+      cells.push(cell);
+    }
+    return { planes, cells };
+  }
+  // The shape, placed as the app places it (turned X then Y then Z in degrees, then moved), applied to the part
+  function booleanShape(P, I, sp, op) {
+    const R = (() => { const [x, y, z] = sp.rot.map(v => (v * Math.PI) / 180), a = Math.cos(x), b2 = Math.sin(x), c = Math.cos(y), d = Math.sin(y), e = Math.cos(z), f = Math.sin(z); return [[c * e, -c * f, d], [a * f + b2 * e * d, a * e - b2 * f * d, -b2 * c], [b2 * f - a * e * d, b2 * e + a * f * d, a * c]]; })();
+    const place = (p) => [R[0][0] * p[0] + R[0][1] * p[1] + R[0][2] * p[2] + sp.pos[0], R[1][0] * p[0] + R[1][1] * p[1] + R[1][2] * p[2] + sp.pos[1], R[2][0] * p[0] + R[2][1] * p[1] + R[2][2] * p[2] + sp.pos[2]];
+    const turn = (n) => [R[0][0] * n[0] + R[0][1] * n[1] + R[0][2] * n[2], R[1][0] * n[0] + R[1][1] * n[1] + R[1][2] * n[2], R[2][0] * n[0] + R[2][1] * n[1] + R[2][2] * n[2]];
+    if (sp.kind === 'ring') {
+      const rs = ringSectors(sp);
+      return booleanWith(P, I, { planes: rs.planes.map(pl => ({ n: turn(pl.n), o: place(pl.o) })), cells: rs.cells }, op);
+    }
+    const m = shapeMesh(sp), placed = new Float64Array(m.positions.length);
+    for (let i = 0; i < m.positions.length; i += 3) { const q = place([m.positions[i], m.positions[i + 1], m.positions[i + 2]]); placed[i] = q[0]; placed[i + 1] = q[1]; placed[i + 2] = q[2]; }
+    return booleanWith(P, I, { positions: placed, indices: m.indices }, op);
+  }
+
   function boxMesh(min, max) {
     const [x0, y0, z0] = min, [x1, y1, z1] = max;
-    const P = new Float32Array([x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1]);
+    const P = new Float64Array([x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1]);
     const I = new Uint32Array([0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7]);
     return { positions: P, indices: I };
   }
   // The solid inside every plane {o, n} (n pointing out), as a mesh: a box round the planes, clipped by each in turn
-  function polytopeMesh(planes, box) {
-    let m = boxMesh(box.min, box.max);
-    for (const pl of planes) {
-      const r = clipMesh(m.positions, m.indices, pl);
-      if (!r.below) return { positions: new Float32Array(0), indices: new Uint32Array(0) };
-      m = r.below;
+  // The convex solid inside a set of outward planes, built face by face: each plane's face is a big square
+  // clipped by every other plane, so a corner where three planes meet is one shared vertex and every face is
+  // exactly flat. Closed, facing out; empty when the planes leave nothing.
+  function hullMesh(planes) {
+    const m = planes.length, pos = [], idx = [], corner = new Map();
+    let R = 0; for (const pl of planes) R = Math.max(R, Math.hypot(pl.o[0], pl.o[1], pl.o[2])); R = R * 4 + 1;
+    const eps = R * 1e-9;
+    const dist = (pl, q) => (q[0] - pl.o[0]) * pl.n[0] + (q[1] - pl.o[1]) * pl.n[1] + (q[2] - pl.o[2]) * pl.n[2];
+    const meet = (p1, p2, p3) => {
+      const n1 = p1.n, n2 = p2.n, n3 = p3.n, d1 = n1[0] * p1.o[0] + n1[1] * p1.o[1] + n1[2] * p1.o[2], d2 = n2[0] * p2.o[0] + n2[1] * p2.o[1] + n2[2] * p2.o[2], d3 = n3[0] * p3.o[0] + n3[1] * p3.o[1] + n3[2] * p3.o[2];
+      const c23 = cross3(n2, n3), c31 = cross3(n3, n1), c12 = cross3(n1, n2), det = n1[0] * c23[0] + n1[1] * c23[1] + n1[2] * c23[2];
+      if (Math.abs(det) < 1e-6) return null; // the three planes share a line (a chamfer that just touches a corner)
+      return [(d1 * c23[0] + d2 * c31[0] + d3 * c12[0]) / det, (d1 * c23[1] + d2 * c31[1] + d3 * c12[1]) / det, (d1 * c23[2] + d2 * c31[2] + d3 * c12[2]) / det];
+    };
+    // a corner is shared by the three planes through it; where more planes meet at one point the copies are welded
+    const idOf = (i, j, l, q) => {
+      const key = [i, j, l].sort((x, y) => x - y).join(','); let id = corner.get(key);
+      if (id === undefined) { let e = meet(planes[i], planes[j], planes[l]); if (!e || Math.hypot(e[0] - q[0], e[1] - q[1], e[2] - q[2]) > R * 1e-6) e = q; id = pos.length / 3; pos.push(e[0], e[1], e[2]); corner.set(key, id); }
+      return id;
+    };
+    for (let i = 0; i < m; i++) {
+      const F = frameFromNormal(planes[i].n, planes[i].o);
+      let poly = [[-R, -R], [R, -R], [R, R], [-R, R]].map(([x, y]) => ({ q: [F.o[0] + F.u[0] * x + F.v[0] * y, F.o[1] + F.u[1] * x + F.v[1] * y, F.o[2] + F.u[2] * x + F.v[2] * y], on: -1 })); // on: the plane of the edge leaving the vertex
+      for (let j = 0; j < m && poly.length >= 3; j++) {
+        if (j === i) continue;
+        const ds = poly.map(v => { const d = dist(planes[j], v.q); return d > -eps && d < eps ? 0 : d; }), next = [];
+        for (let e = 0; e < poly.length; e++) {
+          const u = poly[e], w = poly[(e + 1) % poly.length], du = ds[e], dw = ds[(e + 1) % poly.length];
+          if (du < 0) next.push(u);
+          else if (du === 0) next.push(dw > 0 ? { q: u.q, on: j } : u); // on the plane: the face turns along it where the edge would leave
+          if ((du < 0 && dw > 0) || (du > 0 && dw < 0)) { const s = du / (du - dw), q = [u.q[0] + s * (w.q[0] - u.q[0]), u.q[1] + s * (w.q[1] - u.q[1]), u.q[2] + s * (w.q[2] - u.q[2])]; next.push(du < 0 ? { q, on: j } : { q, on: u.on }); }
+        }
+        poly = next;
+      }
+      if (poly.length < 3 || poly.some(v => v.on < 0)) continue;
+      const ids = poly.map((v, e) => idOf(i, poly[(e - 1 + poly.length) % poly.length].on, v.on, v.q));
+      for (let e = 1; e + 1 < ids.length; e++) if (ids[0] !== ids[e] && ids[e] !== ids[e + 1] && ids[0] !== ids[e + 1]) idx.push(ids[0], ids[e], ids[e + 1]);
     }
-    const w = weld(m.positions, m.indices, 1e-9);
+    if (!idx.length) return { positions: new Float32Array(0), indices: new Uint32Array(0) };
+    const w = weld(new Float64Array(pos), new Uint32Array(idx), R * 1e-8, true);
     return { positions: w.positions, indices: w.indices };
+  }
+  function polytopeMesh(planes, box) {
+    const bp = [];
+    for (let ax = 0; ax < 3; ax++) { const n0 = [0, 0, 0], n1 = [0, 0, 0]; n0[ax] = -1; n1[ax] = 1; bp.push({ n: n0, o: box.min.slice() }, { n: n1, o: box.max.slice() }); }
+    return hullMesh([...planes, ...bp]);
   }
   // A profile of (r, z) points turned round the z axis in n steps. An open profile runs from the axis to the axis
   // (a ball, a tube, a cone); a closed one (closed: true) is a loop off the axis (a ring). Closed solid, facing out.
@@ -4597,7 +5134,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     };
     for (let k = 0; k + 1 < m; k++) quad(k, k + 1);
     if (closed) quad(m - 1, 0);
-    const P = new Float32Array(pos), I = new Uint32Array(idx);
+    const P = new Float64Array(pos), I = new Uint32Array(idx);
     if (volume(P, I) < 0) flipAll(I);
     return { positions: P, indices: I };
   }
@@ -4638,10 +5175,13 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       }
       for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
         const p00 = base + i * (N + 1) + j, p10 = p00 + N + 1, p01 = p00 + 1, p11 = p10 + 1;
-        if (s > 0) idx.push(p00, p10, p11, p00, p11, p01); else idx.push(p00, p11, p10, p00, p01, p11);
+        // the shorter diagonal keeps the surface convex (the longer one would fold in at a rounded edge)
+        const d2 = (a, b) => (pos[3 * a] - pos[3 * b]) ** 2 + (pos[3 * a + 1] - pos[3 * b + 1]) ** 2 + (pos[3 * a + 2] - pos[3 * b + 2]) ** 2;
+        if (d2(p00, p11) <= d2(p10, p01)) { if (s > 0) idx.push(p00, p10, p11, p00, p11, p01); else idx.push(p00, p11, p10, p00, p01, p11); }
+        else if (s > 0) idx.push(p00, p10, p01, p10, p11, p01); else idx.push(p00, p01, p10, p10, p01, p11);
       }
     }
-    const m = weld(new Float32Array(pos), new Uint32Array(idx), 1e-9);
+    const m = weld(new Float64Array(pos), new Uint32Array(idx), 1e-9, true);
     if (volume(m.positions, m.indices) < 0) flipAll(m.indices);
     return m;
   }
@@ -4685,7 +5225,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, loopFrame, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, sphereTriangles, snapSelectionToRegions, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
-    clipMesh, boxMesh, polytopeMesh, latheMesh, shapeMesh,
+    clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;

@@ -702,6 +702,49 @@ console.log('shapes and plane clips');
   check('a plane that misses the mesh leaves one side whole and the other empty', miss.below && !miss.above && !miss.crossed && near(K.volume(miss.below.positions, miss.below.indices), knot.report.volume, 1e-9));
 }
 
+console.log('booleans');
+{
+  const near = (a, b, pct) => Math.abs(a - b) <= Math.abs(b) * pct;
+  const res = (r) => ({ closed: K.edgeReport(r.indices).closed, vol: K.volume(r.positions, r.indices), tris: r.indices.length / 3 });
+  const A = K.boxMesh([-10, -10, -10], [10, 10, 10]), C = K.boxMesh([5, 5, 5], [15, 15, 15]);
+  const inter = res(K.booleanWith(A.positions, A.indices, C, 'intersect')), diff = res(K.booleanWith(A.positions, A.indices, C, 'difference')), uni = res(K.booleanWith(A.positions, A.indices, C, 'union'));
+  check('two boxes overlapping at a corner: the overlap is the 5 mm cube', inter.closed && near(inter.vol, 125, 1e-9), inter);
+  check('the difference is the box less that corner, sealed', diff.closed && near(diff.vol, 8000 - 125, 1e-9), diff);
+  check('the union is both boxes less the overlap, sealed', uni.closed && near(uni.vol, 8000 + 1000 - 125, 1e-9), uni);
+  // the tool's edges run exactly through the part's face diagonals here (the boxes share a corner line): still sealed
+  const knot = K.prepareMesh(K.torusKnot()), kv = knot.report.volume, b = K.bounds(knot.positions);
+  const shapes = {
+    ball: { kind: 'ball', w: 30, h: 30, pos: [b.center[0] + 20, b.center[1], b.center[2]], rot: [0, 0, 0], segments: 32 },
+    cube: { kind: 'cube', w: 40, d: 40, h: 20, pos: [b.center[0], b.center[1], b.min[2] + 5], rot: [10, 20, 30], edge: 'chamfer', edgeSize: 3 },
+    round: { kind: 'cube', w: 30, d: 32, h: 36, pos: [42, -18, 44], rot: [180, 316, 345], edge: 'round', edgeSize: 2, segments: 33 },
+    tube: { kind: 'tube', w: 12, h: 200, pos: b.center, rot: [0, 0, 0], segments: 32, edge: 'round', edgeSize: 1 },
+    cone: { kind: 'cone', w: 34, d: 29, h: 27, pos: [-37, 8.7, 31], rot: [59, 219, 276], segments: 26, edge: 'chamfer', edgeSize: 3 },
+    ring: { kind: 'ring', w: 40, inner: 25, h: 8, pos: b.center, rot: [10, 0, 0], segments: 24, edge: 'round', edgeSize: 1 },
+  };
+  for (const [name, sp] of Object.entries(shapes)) {
+    const m = K.shapeMesh(sp), sv = K.volume(m.positions, m.indices);
+    const i = res(K.booleanShape(knot.positions, knot.indices, sp, 'intersect')), d = res(K.booleanShape(knot.positions, knot.indices, sp, 'difference')), u = res(K.booleanShape(knot.positions, knot.indices, sp, 'union'));
+    check(`a ${name} on the knot: overlap, difference and union all sealed, and the volumes add up`, i.closed && d.closed && u.closed && i.vol > 0 && near(i.vol + d.vol, kv, 1e-6) && near(u.vol, kv + sv - i.vol, 1e-6), { name, i, d, u, kv, sv });
+  }
+  // a chain of booleans, then a cut through the result
+  let cur = { positions: knot.positions, indices: knot.indices };
+  for (const [op, sp] of [['union', shapes.cube], ['difference', shapes.ball], ['difference', shapes.ring]]) cur = K.booleanShape(cur.positions, cur.indices, sp, op);
+  const chain = res(cur), cut = K.cutMesh(cur.positions, cur.indices, { o: K.bounds(cur.positions).center, n: [0, 0, 1], u: [1, 0, 0], v: [0, 1, 0] }, [], { type: 'peg' });
+  check('a cube added, a ball and a ring taken out, one after the other: sealed, and the result cuts into sealed pieces', chain.closed && cut.parts.length >= 2 && cut.parts.every(q => K.edgeReport(q.indices).closed), { chain, parts: cut.parts.length });
+  // special placements
+  const far = { kind: 'ball', w: 10, h: 10, pos: [b.max[0] + 50, 0, 0], rot: [0, 0, 0] }, huge = { kind: 'cube', w: 300, d: 300, h: 300, pos: b.center, rot: [0, 0, 0] };
+  let msg = ''; try { K.booleanShape(knot.positions, knot.indices, far, 'intersect'); } catch (e) { msg = e.message; }
+  check('a shape that misses the part: the overlap is refused in plain words', /don’t overlap/.test(msg), msg);
+  const farU = res(K.booleanShape(knot.positions, knot.indices, far, 'union')), farD = res(K.booleanShape(knot.positions, knot.indices, far, 'difference'));
+  check('… its union is both solids and its difference leaves the part as it was', farU.closed && near(farU.vol, kv + K.volume(K.shapeMesh(far).positions, K.shapeMesh(far).indices), 1e-6) && farD.closed && near(farD.vol, kv, 1e-9), { farU, farD });
+  msg = ''; try { K.booleanShape(knot.positions, knot.indices, huge, 'difference'); } catch (e) { msg = e.message; }
+  const hugeI = res(K.booleanShape(knot.positions, knot.indices, huge, 'intersect'));
+  check('a shape that swallows the part: the difference is refused, the overlap is the part', /covers the whole part/.test(msg) && hugeI.closed && near(hugeI.vol, kv, 1e-9), { msg, hugeI });
+  // the result is float32-safe: no two vertices on one position (the next boolean, or a cut, would trip on them)
+  const seen = new Set(); let dup = 0; for (let v = 0; v < cur.positions.length / 3; v++) { const k = cur.positions[3 * v] + ',' + cur.positions[3 * v + 1] + ',' + cur.positions[3 * v + 2]; if (seen.has(k)) dup++; else seen.add(k); }
+  check('no two vertices of a result share a position', dup === 0, dup);
+}
+
 console.log('split to fit the bed');
 {
   const box = (sx, sy, sz) => ({ min: [0, 0, 0], max: [sx, sy, sz], size: [sx, sy, sz], center: [sx / 2, sy / 2, sz / 2] });

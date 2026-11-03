@@ -338,7 +338,7 @@ with sync_playwright() as p:
     check('choosing resin explains what changed', 'Set up for resin' in pg.inner_text('#toast'))
     # shapes: a cube, a ball, a tube, a cone or a ring added as a part of its own, sized, turned and placed
     n_before = pg.locator('#partList li[data-id]').count()
-    check('the panel has an Edit the model row with Shapes, and Sculpt and Boolean waiting', pg.locator('[data-tool=shape]').count() == 1 and pg.is_disabled('[data-tool=sculpt]') and pg.is_disabled('[data-tool=boolean]'))
+    check('the panel has an Edit the model row with Shapes and Boolean, and Sculpt waiting', pg.locator('[data-tool=shape]').count() == 1 and pg.is_disabled('[data-tool=sculpt]') and not pg.is_disabled('[data-tool=boolean]'))
     pg.click('[data-tool=shape]'); pg.wait_for_timeout(200)
     check('the Shapes tool offers the five shapes', pg.locator('#shapePanel [data-act=shape-add]').count() == 5 and not pg.is_visible('#planeBar'))
     pg.click('#shapePanel [data-act=shape-add][data-value=cube]'); pg.wait_for_timeout(400)
@@ -365,6 +365,34 @@ with sync_playwright() as p:
         if pg.locator('#partList li[data-id]').count() == n_before: break
         pg.keyboard.press('Control+z'); pg.wait_for_timeout(150)
     check('undo all the way takes the shape away again', pg.locator('#partList li[data-id]').count() == n_before, pg.locator('#partList li[data-id]').count())
+    pg.evaluate("KeymasterDebug.setTool('plane')"); pg.wait_for_timeout(200); pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
+    if pg.locator('[data-act=done]').count(): pg.click('[data-act=done]'); pg.wait_for_timeout(200)
+    # booleans: a shape joined to the part, cut out of it, or only the overlap kept, as one undo step
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(300)
+    pg.click('[data-tool=boolean]'); pg.wait_for_timeout(300)
+    check('with no shape yet the Boolean tool says to add one, and offers the shapes', 'Add a shape first' in pg.inner_text('#booleanPanel') and pg.locator('#booleanPanel [data-act=shape-add]').count() == 5 and pg.locator('#cutAction .btn.cut:disabled').count() == 1 and not pg.is_visible('#planeBar'))
+    pg.click('#booleanPanel [data-act=shape-add][data-value=ball]'); pg.wait_for_timeout(500)
+    bs = pg.evaluate("KeymasterDebug.setShape({ w: 24, h: 24, pos: [20, 0, 24] })")  # into the knot's tube, so the overlap is real
+    pg.click('[data-tool=boolean]'); pg.wait_for_timeout(300)
+    check('adding a ball from there opens the Shapes tool on it; Boolean then takes the ball as the shape and the model as the part', pg.locator('#booleanPanel select[data-bool=shape]').count() == 1 and 'Ball' in pg.inner_text('#booleanPanel select[data-bool=shape]') and 'Cut out' in pg.inner_text('#booleanPanel') and 'Cut the shape out' in pg.inner_text('#cutAction'), pg.inner_text('#booleanPanel'))
+    n_parts = pg.locator('#partList li[data-id]').count()
+    r = pg.evaluate("KeymasterDebug.boolean('difference')")
+    check('Cut the shape out takes the ball out of the model: one part fewer, sealed, smaller, back on the Plane tool', r.get('closed') and r['parts'] == n_parts - 1 and r['tool'] == 'plane' and 'Cut the ball out of' in pg.inner_text('#toast'), r)
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(400)
+    check('undo brings the ball and the whole model back', pg.locator('#partList li[data-id]').count() == n_parts and 'Undid cutting the shape out' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
+    r2 = pg.evaluate("KeymasterDebug.boolean('union')")
+    check('Add the shape joins the ball to the model, sealed, in one piece', r2.get('closed') and r2['parts'] == n_parts - 1 and r2['volume'] > bs['volume'] and 'Added the ball to' in pg.inner_text('#toast'), r2)
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
+    r3 = pg.evaluate("KeymasterDebug.boolean('intersect')")
+    check('Keep the overlap leaves only what was inside the ball', r3.get('closed') and r3['parts'] == n_parts - 1 and r3['volume'] < bs['volume'] and r3['volume'] > 0, r3)
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    for i in range(6):
+        if pg.locator('#partList li[data-id]').count() == n_before: break
+        pg.keyboard.press('Control+z'); pg.wait_for_timeout(150)
+    check('undo takes the ball away again', pg.locator('#partList li[data-id]').count() == n_before)
     pg.evaluate("KeymasterDebug.setTool('plane')"); pg.wait_for_timeout(200); pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
     if pg.locator('[data-act=done]').count(): pg.click('[data-act=done]'); pg.wait_for_timeout(200)
     # printer presets: a common printer sets the bed size and the type in one go

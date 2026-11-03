@@ -382,6 +382,13 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .shape-panel .num-wrap { padding-right: 6px; }
 .shape-panel .inline { margin-top: 6px; }
 .shape-panel .btn-row { margin-top: 8px; }
+.bool-panel .inline { margin-top: 6px; }
+.bool-panel .sel { width: 100%; margin-top: 2px; }
+.bool-panel .lbl { min-width: 48px; }
+.bool-panel .part-pick { font-size: 13px; }
+.bool-panel .part-pick strong { font-weight: 600; }
+.bool-panel .kinds { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 6px; }
+.bool-panel .kinds .btn { padding: 4px 2px; font-size: 12.5px; }
 .tool-panel .suggest { padding: 0; border: 0; }
 .tool-panel .suggest .btn { margin-top: 8px; margin-right: 4px; }
 .tool-panel .suggest-list { margin-top: 8px; }
@@ -586,10 +593,11 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
   <div class="tool-grid edit-grid" role="group" aria-label="Edit the model">
     <button type="button" class="tool" data-tool="sculpt" aria-pressed="false" disabled title="Smooth, inflate and flatten brushes: in the next update"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15c3-6 6-9 11-11l2 2c-2 5-5 8-11 11z" fill="currentColor" opacity=".35"/><path d="M3 15c3-6 6-9 11-11l2 2c-2 5-5 8-11 11zM3 17l2-2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span>Sculpt</span></button>
     <button type="button" class="tool" data-tool="shape" aria-pressed="false" title="Add a cube, ball, tube, cone or ring: material to add, or a shape to cut with"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="9.5" width="8" height="8" rx="1" fill="currentColor" opacity=".35"/><rect x="2.5" y="9.5" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="13.5" cy="6.5" r="4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span>Shapes</span></button>
-    <button type="button" class="tool" data-tool="boolean" aria-pressed="false" disabled title="Join, cut or keep the overlap of a part and a shape: in the next update"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="10" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="10" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 5.2a5.5 5.5 0 0 1 0 9.6a5.5 5.5 0 0 1 0-9.6z" fill="currentColor" opacity=".45"/></svg><span>Boolean</span></button>
+    <button type="button" class="tool" data-tool="boolean" aria-pressed="false" title="Join a shape to a part, cut it out of the part, or keep only where they overlap"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="10" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="10" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 5.2a5.5 5.5 0 0 1 0 9.6a5.5 5.5 0 0 1 0-9.6z" fill="currentColor" opacity=".45"/></svg><span>Boolean</span></button>
   </div>
   <p class="tool-help muted" id="toolHelp"></p>
   <div id="shapePanel" hidden></div>
+  <div id="booleanPanel" hidden></div>
   <div id="suggestPanel" hidden></div>
   <div id="bedPanel" hidden></div>
   <div class="regions-panel" id="regionsPanel" hidden>
