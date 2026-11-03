@@ -101,7 +101,7 @@
     setAttribute(n, a) { this.attributes[n] = a; return this; }
     setIndex(i) { this.index = i; return this; }
     setFromPoints(p) { this.points = p; return this; }
-    computeBoundingSphere() {} computeBoundingBox() {}
+    computeBoundingSphere() {} translate() { return this; } computeBoundingBox() {}
     rotateX() { return this; } rotateY() { return this; } rotateZ() { return this; }
     dispose() { this.disposed = true; }
   }

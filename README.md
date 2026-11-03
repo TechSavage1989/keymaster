@@ -15,6 +15,7 @@
 
 ## Features
 
+- **Shapes.** Add a cube, ball, tube, cone or ring with sharp, chamfered or rounded edges, size it, turn it and place it with handles or numbers. A shape is a part like any other: cut it, export it, or (next) join it to the model.
 - **Make room.** Drag the edge of either side panel to resize it (double-click puts it back), and press ? for the list of mouse and keyboard shortcuts.
 - **Look from any side, light or dark.** A View from list turns the view to the front, back, a side, the top or the bottom of the part, and a sun button in the top bar switches between light and dark.
 - **Your printer, in one pick.** Choose a common printer (Bambu Lab, Prusa, Creality, Elegoo, Anycubic, Phrozen, Formlabs) and the bed size and the filament or resin settings follow; or type your own size. **Start over** brings the model back as it was opened, in one undoable step.
@@ -83,6 +84,7 @@
 ### Model tools
 
 <table>
+<tr><td width="50%" valign="top"><b>Shapes: a rounded cube added as a base under the pawn, sized and placed from the panel</b><br><img src="docs/images/shapes-cube.png" alt="Shapes: a rounded cube added as a base under the pawn, sized and placed from the panel" width="440"></td><td width="50%" valign="top"><b>A ring on top, with the handles set to turn it</b><br><img src="docs/images/shapes-ring.png" alt="A ring on top, with the handles set to turn it" width="440"></td></tr>
 <tr><td width="50%" valign="top"><b>Repair: a tangled model is untangled as it opens</b><br><img src="docs/images/repair-surface.png" alt="Repair: a tangled model is untangled as it opens" width="440"></td><td width="50%" valign="top"><b>Reduce detail: the pawn at an eighth of its triangles, still within 0.1 mm</b><br><img src="docs/images/reduce-detail.png" alt="Reduce detail: the pawn at an eighth of its triangles, still within 0.1 mm" width="440"></td></tr>
 </table>
 
