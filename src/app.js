@@ -30,7 +30,7 @@
     cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, numberJoints: false },
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
-  state.regions = { on: false, angle: 60, fold: 15, hover: null };
+  state.regions = { on: false, by: 'form', ratio: 1.35, angle: 60, fold: 15, hover: null }; // by: 'form' (the thickness under the surface) or 'folds' (where it turns inward)
   state.tool = 'plane'; // the cut tool in the right panel: plane, regions, paint, draw, suggest or bed; or shape (editing the model)
   state.shapeMode = 'move'; // what the gizmo does to a chosen shape: move, turn or size
   state.bool = { shapeId: null, op: 'difference' }; // the Boolean tool: which shape works on the chosen part, and how
@@ -1438,7 +1438,7 @@
     if (after >= before) { toast('Nothing to take out at this setting: the model is already as light as it gets within that tolerance. Try Strong.'); return; }
     commit(parts, 'the reduction');
     state.selectedId = null; endSeamEdit(); clearPick(); state.regions.last = null;
-    regionCache.clear(); lineCache.clear();
+    regionCache.clear(); lineCache.clear(); sdfCache.clear();
     syncScene(); renderPick(); updateHint();
     toast(`Reduced from ${fmtInt(before)} to ${fmtInt(after)} triangles (${Math.round(100 - 100 * after / before)}% fewer), keeping the surface within ${tol} mm. Ctrl+Z puts the detail back.`);
   }
@@ -2277,7 +2277,7 @@
     const q = { ...p, positions: st.P, bbox: K.bounds(st.P), volume: K.volume(st.P, p.indices), joints: p.joints };
     const idx = state.parts.indexOf(p);
     commit(state.parts.slice(0, idx).concat([q], state.parts.slice(idx + 1)), 'the sculpting');
-    regionCache.delete(p.id); lineCache.clear(); suggestCache.delete(p.id);
+    regionCache.clear(); lineCache.clear(); suggestCache.delete(p.id); sdfCache.delete(p.id);
     if (state.suggest && state.suggest.partId === p.id) { state.suggest = null; renderSuggestPins(); } // the suggestions were found on the surface as it was
     refreshView(p.id); syncScene(); updateChrome(); renderParts();
   }
@@ -2670,7 +2670,7 @@
       state.tool = tool;
       selectPartSplitPreview(); updatePreview(); attachGizmo(); placeAreaTags(); renderInspector(); updateHint(); markDirty();
     };
-    if ((tool === 'regions' || tool === 'paint' || tool === 'draw') && !state.regions.on) { busy('Finding surface regions'); setTimeout(() => { go(); busy(null); }, 30); }
+    if ((tool === 'regions' || tool === 'paint' || tool === 'draw') && !state.regions.on) { busy(state.regions.by === 'form' ? 'Finding the parts' : 'Finding surface regions'); setTimeout(() => { go(); busy(null); }, 30); }
     else go();
   }
   toolPanel.addEventListener('click', (e) => {
@@ -3050,6 +3050,7 @@
       case 'shape-ground': { const p = selectedPart(); if (p && p.shape) { const others = state.parts.filter(q => q !== p); const b = others.length ? K.bounds(K.mergeMeshes(others).positions) : modelBounds(); const sp = p.shape; setShape({ pos: [sp.pos[0], sp.pos[1], b.min[2] + p.shape.h / 2] }, 'moving the shape'); } break; }
       case 'shape-remove': removeShape(); break;
       case 'bool-op': state.bool.op = val; renderInspector(); updateHint(); break;
+      case 'regions-by': if (state.regions.by !== val) { state.regions.by = val; renderRegionsBy(); if (state.regions.on) { clearPick(); state.regions.last = null; busy(val === 'form' ? 'Finding the parts' : 'Finding surface regions'); setTimeout(() => { applyRegions(); busy(null); }, 30); } } break;
       case 'sculpt-mode': state.sculpt.mode = val; renderInspector(); updateHint(); break;
       case 'boolean': doBoolean(); break;
       case 'export-one': exportParts(state.selectedId); break;
@@ -3215,15 +3216,22 @@
      with dark lines on the borders. The cut preview steps aside while they show; results are kept per part
      and threshold. */
   const regionCache = new Map();
+  const regionsKey = (p) => (state.regions.by === 'form' ? `${p.id}:form:${state.regions.ratio}` : `${p.id}:${state.regions.angle}:${state.regions.fold}`);
+  const sdfCache = new Map(); // the thickness under each part's surface, the slow half of finding its form, kept while the part stands
   function regionsFor(p) {
-    const key = `${p.id}:${state.regions.angle}:${state.regions.fold}`;
-    if (!regionCache.has(key)) regionCache.set(key, K.segmentSurface(p.positions, p.indices, { angle: state.regions.angle, fold: state.regions.fold }));
+    const key = regionsKey(p);
+    if (!regionCache.has(key)) {
+      if (state.regions.by === 'form') {
+        if (!sdfCache.has(p.id)) sdfCache.set(p.id, K.shapeDiameter(p.positions, p.indices, {}));
+        regionCache.set(key, K.segmentForm(p.positions, p.indices, { sdf: sdfCache.get(p.id), ratio: state.regions.ratio }));
+      } else regionCache.set(key, K.segmentSurface(p.positions, p.indices, { angle: state.regions.angle, fold: state.regions.fold }));
+    }
     return regionCache.get(key);
   }
   // Cut lines: each part's closed region borders and outlines, worked out with its regions.
   const lineCache = new Map();
   function linesFor(p) {
-    const key = `${p.id}:${state.regions.angle}:${state.regions.fold}`;
+    const key = regionsKey(p);
     if (!lineCache.has(key)) lineCache.set(key, K.cutLines(p.positions, p.indices, regionsFor(p)));
     return lineCache.get(key);
   }
@@ -3590,7 +3598,7 @@
     markDirty();
   }
   $('#regionsBtn').addEventListener('click', () => {
-    if (!state.regions.on) { busy('Finding surface regions'); setTimeout(() => { setRegions(true); busy(null); }, 30); }
+    if (!state.regions.on) { busy(state.regions.by === 'form' ? 'Finding the parts' : 'Finding surface regions'); setTimeout(() => { setRegions(true); busy(null); }, 30); }
     else setRegions(false);
   });
   $('#regionsAngle').addEventListener('input', (e) => { $('#regionsAngleOut').textContent = `${e.target.value}°`; });
@@ -3598,10 +3606,22 @@
     state.cfg.sink = Math.max(0, +e.target.value || 0); e.target.value = state.cfg.sink;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
   });
+  function renderRegionsBy() {
+    for (const b of document.querySelectorAll('[data-act=regions-by]')) b.setAttribute('aria-pressed', b.dataset.value === state.regions.by ? 'true' : 'false');
+    const fold = document.querySelector('.rp-fold'), ratio = document.querySelector('.rp-ratio');
+    if (fold) fold.hidden = state.regions.by !== 'folds'; if (ratio) ratio.hidden = state.regions.by !== 'form';
+  }
+  renderRegionsBy();
+  $('#regionsRatio').addEventListener('input', (e) => { $('#regionsRatioOut').textContent = `${e.target.value}%`; });
+  $('#regionsRatio').addEventListener('change', (e) => {
+    state.regions.ratio = 1 + parseFloat(e.target.value) / 100;
+    if (!state.regions.on) return;
+    busy('Finding the parts'); setTimeout(() => { applyRegions(); if (state.regions.last) replayPick(selectedPart()); busy(null); }, 30);
+  });
   $('#regionsAngle').addEventListener('change', (e) => {
     state.regions.fold = +e.target.value;
     clearPick();
-    busy('Finding surface regions'); setTimeout(() => { applyRegions(); busy(null); }, 30);
+    busy(state.regions.by === 'form' ? 'Finding the parts' : 'Finding surface regions'); setTimeout(() => { applyRegions(); busy(null); }, 30);
   });
 
   function setFlat(on) {

@@ -774,6 +774,31 @@ console.log('sculpting');
   check('refreshing the view arrays after a stroke matches rebuilding them', dpos < 1e-6 && dnor < 1e-5, { dpos, dnor });
 }
 
+console.log('form: the parts of a figure by thickness');
+{
+  // a stick figure from booleans: a rounded torso, a neck, a head, two arms, two legs
+  const torso = K.shapeMesh({ kind: 'cube', w: 18, d: 10, h: 26, edge: 'round', edgeSize: 3, segments: 30 });
+  let f = { positions: torso.positions, indices: torso.indices };
+  for (const sp of [{ kind: 'tube', w: 5, h: 10, pos: [0, 0, 16], rot: [0, 0, 0], segments: 20 }, { kind: 'ball', w: 12, h: 12, pos: [0, 0, 23], rot: [0, 0, 0], segments: 28 }, { kind: 'tube', w: 5, h: 24, pos: [15, 0, 8], rot: [0, 90, 0], segments: 20 }, { kind: 'tube', w: 5, h: 24, pos: [-15, 0, 8], rot: [0, 90, 0], segments: 20 }, { kind: 'tube', w: 6.5, h: 24, pos: [4.5, 0, -22], rot: [0, 0, 0], segments: 20 }, { kind: 'tube', w: 6.5, h: 24, pos: [-4.5, 0, -22], rot: [0, 0, 0], segments: 20 }]) f = K.booleanShape(f.positions, f.indices, sp, 'union');
+  const before = f.indices.length / 3; f = K.subdivideMesh(f.positions, f.indices, { maxEdge: 3 }); // the limbs' long quads read as if they were all one place
+  const P = f.positions, I = f.indices, nt = I.length / 3;
+  check('the figure is one sealed solid, and splitting its long edges keeps it so', K.edgeReport(I).closed && K.separateShells(P, I).length === 0 && nt > before * 2 && Math.abs(K.volume(P, I) - K.volume(f.positions, f.indices)) < 1e-6, { shells: K.separateShells(P, I).length, before, nt });
+  // thickness: a tube reads about its diameter, a ball less than its diameter, and a thicker tube more than a thin one
+  const rng = (m) => { const s = K.shapeDiameter(m.positions, m.indices, {}); let mn = Infinity, mx = -Infinity; for (const x of s) { mn = Math.min(mn, x); mx = Math.max(mx, x); } return [mn, mx]; };
+  const t5 = rng(K.shapeMesh({ kind: 'tube', w: 5, h: 24, segments: 20 })), t12 = rng(K.shapeMesh({ kind: 'tube', w: 12, h: 40, segments: 24 })), b12 = rng(K.shapeMesh({ kind: 'ball', w: 12, h: 12, segments: 28 }));
+  check('the thickness under a surface: a 5 mm tube reads 5 to 7, a 12 mm tube about twice that, a 12 mm ball between, all even all round', t5[0] > 4.5 && t5[1] < 7.5 && t12[0] / t5[1] > 1.8 && b12[0] > t5[1] && b12[1] < t12[0] && t5[1] - t5[0] < 0.5 && b12[1] - b12[0] < 0.5, { t5, t12, b12 });
+  const partOf = (t) => { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2], x = (P[a] + P[b] + P[c]) / 3, y = (P[a + 1] + P[b + 1] + P[c + 1]) / 3, z = (P[a + 2] + P[b + 2] + P[c + 2]) / 3; if (Math.hypot(x, y, z - 23) < 6.3) return 'head'; if (Math.hypot(x, y) < 2.7 && z > 12.5 && z < 18) return 'neck'; if (Math.abs(x) > 9.2 && Math.abs(z - 8) < 3) return x > 0 ? 'arm R' : 'arm L'; if (z < -13.2) return x > 0 ? 'leg R' : 'leg L'; return 'torso'; };
+  const seg = K.segmentForm(P, I, {});
+  const area = (t) => { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2], u = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], w = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]; return Math.hypot(u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]) / 2; };
+  const byRegion = []; for (let t = 0; t < nt; t++) { const g = seg.groupOf[t]; if (!byRegion[g]) byRegion[g] = new Map(); const n = partOf(t); byRegion[g].set(n, (byRegion[g].get(n) || 0) + area(t)); }
+  const share = (name) => { let best = 0, total = 0, pure = 0; for (const m of byRegion) { const a = m.get(name) || 0; total += a; let all = 0; for (const x of m.values()) all += x; if (a > best) { best = a; pure = a / all; } } return { held: best / total, pure }; };
+  const parts = ['head', 'arm R', 'arm L', 'leg R', 'leg L', 'torso'].map(n => [n, share(n)]);
+  check('the head, each arm, each leg and the torso each come out as a region of their own: most of each part in one region, and that region mostly that part', seg.count >= 6 && seg.count <= 10 && parts.every(([, s]) => s.held > 0.8 && s.pure > 0.8), { count: seg.count, parts: parts.map(([n, s]) => `${n} ${(100 * s.held).toFixed(0)}%/${(100 * s.pure).toFixed(0)}%`) });
+  const knot = K.prepareMesh(K.torusKnot()), ks = K.segmentForm(knot.positions, knot.indices, {});
+  check('a knot, the same thickness all along, is one region', ks.count === 1, ks.count);
+  check('the result has the shape the regions code expects', seg.groupOf.length === nt && seg.areas.length === seg.count && seg.borders.length % 4 === 0 && seg.levels.length >= 2, { levels: seg.levels });
+}
+
 console.log('split to fit the bed');
 {
   const box = (sx, sy, sz) => ({ min: [0, 0, 0], max: [sx, sy, sz], size: [sx, sy, sz], center: [sx / 2, sy / 2, sz / 2] });

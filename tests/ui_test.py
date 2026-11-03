@@ -738,6 +738,12 @@ with sync_playwright() as p:
     check('the pins stay on the model while regions show', not pg.evaluate("document.querySelector('#suggestPins').hidden"))
     rc = pg.evaluate("KeymasterDebug.regionColours()")
     check('regions are outlined, not coloured: the part keeps its colour (plus the picked tint) with its border lines', rc['colours'] <= 2 and rc['borders'] and rc['vertexColors'], rc)
+    check('the regions panel finds parts by form by default, with the thickness slider, and offers folds', pg.get_attribute('[data-act=regions-by][data-value=form]', 'aria-pressed') == 'true' and pg.is_visible('#regionsRatio') and not pg.is_visible('#regionsAngle'))
+    n_form = pg.inner_text('#regionsCount')
+    pg.click('[data-act=regions-by][data-value=folds]'); pg.wait_for_timeout(1500)
+    check('switching to folds shows the fold slider and finds regions its own way', pg.is_visible('#regionsAngle') and not pg.is_visible('#regionsRatio') and 'region' in pg.inner_text('#regionsCount'), pg.inner_text('#regionsCount'))
+    # the rest of the suite works the fold borders it was written for
+    pg.locator('#suggestPins .suggest-pin').nth(reg).click(); pg.wait_for_timeout(1500)  # the switch cleared the pick: pick the suggestion again for the steps below
     pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
     pg.click('#regionsBtn'); pg.wait_for_selector('#tiltOut'); pg.wait_for_timeout(300)
     pg.keyboard.press('z'); pg.wait_for_timeout(300)  # level the cut again, so moving it to the bar shows
