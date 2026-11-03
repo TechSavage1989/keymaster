@@ -31,7 +31,8 @@
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, angle: 60, fold: 15 };
-  state.here = { on: false }; // Cut at a spot: the next click on the part finds the narrowest cut through it
+  state.here = { on: false };
+  state.split = { planes: null, counts: [null, null, null] }; // split to fit the bed: the planned planes ({axis, pos}), and counts set by hand // Cut at a spot: the next click on the part finds the narrowest cut through it
   state.draw = { on: false, points: [] }; // a cut line drawn by hand: points clicked on the chosen part
   state.edit = null; // the picked lines as draggable handles: { partId, loops: [{ pts, base }], smooth, snap }
   state.paint = { on: false, partId: null, sel: null, erase: false, size: 3, sized: false }; // a painted selection to split off, like a face selection in Meshmixer
@@ -735,9 +736,10 @@
   }
 
   /* ---------------- selection ---------------- */
+  function selectPartSplitPreview() { splitGroup.visible = !state.selectedId; markDirty(); }
   function selectPart(id) {
     if (id === state.selectedId) return;
-    state.selectedId = id;
+    state.selectedId = id; selectPartSplitPreview();
     const p = selectedPart();
     if (p) {
       state.cut.center = p.bbox.center.slice();
@@ -1314,7 +1316,7 @@
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { seamEdit() { startSeamEdit(); return state.edit ? state.edit.loops.map(l => l.pts.length) : null; }, seamDrag(li, i, point) { moveHandle(li, i, point); ptr.handle = { li, i }; endHandle(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', length: pk.loops.reduce((s, l) => s + l.length, 0), handle: state.edit.loops[li].pts[i] } : null; }, seamSmooth(passes) { smoothSeam(passes); const pk = state.regions.pick; return pk ? { ok: !!pk.result, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, cutHereAt(partIndex, point) { const part = state.parts[partIndex]; const it = K.cutHere(part.positions, part.indices, point, K.diag(part.bbox)); if (!it) return null; addHereSuggestion(part, it); return { width: it.width, freed: it.freed, areas: it.areas.length, normal: it.normal }; }, explodeOffsets() { return state.parts.map(p => { const v = views.get(p.id); return { pull: p.pull, at: v ? [v.mesh.position.x - v.offset.x, v.mesh.position.y - v.offset.y, v.mesh.position.z - v.offset.z] : null }; }); }, regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintLetGo() { previewPainted(); const pk = state.regions.pick; return pk ? { preview: !!pk.preview, loops: pk.loops.length, error: pk.error || '' } : null; }, paintDone() { pickPainted(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { splitPlan() { planSplit(null); const b = modelBounds(); return state.split.planes ? { planes: state.split.planes.map(q => [q.axis, +q.pos.toFixed(2)]), ...K.bedFit(b, state.split.planes, state.bed, SPLIT_MARGIN) } : null; }, seamEdit() { startSeamEdit(); return state.edit ? state.edit.loops.map(l => l.pts.length) : null; }, seamDrag(li, i, point) { moveHandle(li, i, point); ptr.handle = { li, i }; endHandle(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', length: pk.loops.reduce((s, l) => s + l.length, 0), handle: state.edit.loops[li].pts[i] } : null; }, seamSmooth(passes) { smoothSeam(passes); const pk = state.regions.pick; return pk ? { ok: !!pk.result, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, cutHereAt(partIndex, point) { const part = state.parts[partIndex]; const it = K.cutHere(part.positions, part.indices, point, K.diag(part.bbox)); if (!it) return null; addHereSuggestion(part, it); return { width: it.width, freed: it.freed, areas: it.areas.length, normal: it.normal }; }, explodeOffsets() { return state.parts.map(p => { const v = views.get(p.id); return { pull: p.pull, at: v ? [v.mesh.position.x - v.offset.x, v.mesh.position.y - v.offset.y, v.mesh.position.z - v.offset.z] : null }; }); }, regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintLetGo() { previewPainted(); const pk = state.regions.pick; return pk ? { preview: !!pk.preview, loops: pk.loops.length, error: pk.error || '' } : null; }, paintDone() { pickPainted(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -2088,10 +2090,107 @@
         ${['w', 'd', 'h'].map(k => `<label class="num"><span>${{ w: 'Width', d: 'Depth', h: 'Height' }[k]}</span><span class="num-wrap"><input type="number" data-bed="${k}" value="${state.bed[k]}" min="10" step="1"><em>mm</em></span></label>`).join('')}
       </div>
     </div>
+    ${splitSection(b)}
     ${state.parts.length > 1 ? `<div class="ins-section">
       <h3>Exploded view</h3>
       <input type="range" id="explode" min="0" max="1" step="0.01" value="${state.explode}" aria-label="Spread parts apart">
     </div>` : ''}`;
+  }
+  // Split to fit the bed: flat cuts across X, Y and Z that make every piece fit the printer, worked out from the bed
+  // size (or set by count), each plane shown in the view and movable by its position, then all cut at once with the
+  // keys from the settings.
+  function splitSection(b) {
+    const tooBig = state.parts.filter(p => !fitsBed(p)).length, sp = state.split;
+    const plan = sp.planes ? K.bedFit(b, sp.planes, state.bed, SPLIT_MARGIN) : null;
+    const axisName = ['X', 'Y', 'Z'];
+    let body;
+    if (!sp.planes) {
+      body = `<p class="muted small">${tooBig ? `${tooBig === 1 ? 'A part is' : `${tooBig} parts are`} too big for the bed. Keymaster can work out the straight cuts that make every piece fit, keeping ${SPLIT_MARGIN} mm clear at each edge.` : 'Every part fits the bed. You can still cut the model into even sections across X, Y and Z.'}</p>
+        <div class="row tight"><button class="btn" data-act="split-plan">${tooBig ? 'Work out the cuts' : 'Cut into sections'}</button></div>`;
+    } else {
+      const counts = [0, 1, 2].map(ax => sp.planes.filter(q => q.axis === ax).length);
+      const list = sp.planes.map((q, i) => `<label class="num"><span>${axisName[q.axis]} at</span><span class="num-wrap"><input type="number" data-split-pos="${i}" value="${fmt(q.pos)}" step="1"><em>mm</em></span></label>`).join('');
+      body = `<div class="row three">${[0, 1, 2].map(ax => `<label class="num"><span>Across ${axisName[ax]}</span><span class="num-wrap"><input type="number" data-split-count="${ax}" value="${counts[ax]}" min="0" max="20" step="1"><em>cuts</em></span></label>`).join('')}</div>
+        ${sp.planes.length ? `<div class="row three split-list">${list}</div>` : ''}
+        <p class="status ${plan.fits ? 'ok' : 'warn'}">${plan.fits ? ICONS.check : ICONS.alert}<span>${sp.planes.length ? `${sp.planes.length === 1 ? 'One cut' : `${sp.planes.length} cuts`}, ${plan.pieces} pieces, the biggest ${plan.biggest.map(v => fmt(v)).join(' × ')} mm${plan.fits ? ': every piece fits the bed.' : ': too big for the bed. Add a cut.'}` : 'No cuts: the model stays as it is.'}</span></p>
+        <div class="row tight"><button class="btn cut" data-act="split-cut" ${sp.planes.length ? '' : 'disabled'}>${ICONS.cut}<span>Cut into ${plan.pieces} pieces</span></button><button class="btn" data-act="split-clear">Clear</button></div>`;
+    }
+    return `<div class="ins-section split"><h3>Split to fit the bed</h3>${body}</div>`;
+  }
+  const SPLIT_MARGIN = 5;
+  function planSplit(counts) {
+    const b = modelBounds();
+    const plan = K.planBedCuts(b, state.bed, SPLIT_MARGIN, counts);
+    state.split.planes = plan.planes;
+    renderInspector(); renderSplitPlanes();
+  }
+  function clearSplit() { state.split.planes = null; state.split.counts = [null, null, null]; renderInspector(); renderSplitPlanes(); }
+  const splitGroup = new THREE.Group();
+  scene.add(splitGroup);
+  function renderSplitPlanes() {
+    clearGroup(splitGroup);
+    const planes = state.split.planes;
+    if (!planes || !planes.length || !state.parts.length) { markDirty(); return; }
+    const b = modelBounds(), pad = 1.08;
+    for (const q of planes) {
+      const size = [0, 1, 2].filter(a => a !== q.axis).map(a => b.size[a] * pad);
+      const geo = new THREE.PlaneGeometry(size[0], size[1]);
+      const mat = new THREE.MeshBasicMaterial({ color: 0xf2b705, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
+      const m = new THREE.Mesh(geo, mat);
+      const c = b.center.slice(); c[q.axis] = q.pos;
+      m.position.set(c[0], c[1], c[2]);
+      if (q.axis === 0) m.rotation.y = Math.PI / 2; else if (q.axis === 1) m.rotation.x = Math.PI / 2;
+      splitGroup.add(m);
+      // its outline, so the sheet reads as a cut even where it's seen edge on
+      const [a1, a2] = [0, 1, 2].filter(a => a !== q.axis), corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s, u]) => { const v = c.slice(); v[a1] += s * size[0] / 2; v[a2] += u * size[1] / 2; return new THREE.Vector3(v[0], v[1], v[2]); });
+      splitGroup.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(corners), new THREE.LineBasicMaterial({ color: 0xf2b705 })));
+    }
+    markDirty();
+  }
+  // Cut every part the planned planes cross, plane by plane, with keys from the settings; thin areas are cut anyway
+  // (the piece has to fit the bed). One undo step for the lot.
+  async function cutToFit() {
+    const planes = state.split.planes;
+    if (!planes || !planes.length) return;
+    busy('Cutting to fit the bed');
+    await nextFrame();
+    let parts = state.parts.slice(), keys = 0, warnings = 0, cuts = 0;
+    const originals = new Map(parts.map(p => [p.id, p.name]));
+    const baseOf = new Map(parts.map(p => [p.id, p.name]));
+    for (const q of planes) {
+      const next = [];
+      for (const p of parts) {
+        if (p.kind === 'pin' || !(q.pos > p.bbox.min[q.axis] + 0.5 && q.pos < p.bbox.max[q.axis] - 0.5)) { next.push(p); continue; }
+        const n = [0, 0, 0]; n[q.axis] = 1;
+        const o = p.bbox.center.slice(); o[q.axis] = q.pos;
+        const F = K.frameFromNormal(n, o), cfg = coreCfg(), scale = K.diag(p.bbox);
+        let res = null;
+        try {
+          const an = K.analyzePlane(p.positions, p.indices, F, cfg, scale);
+          if (an.base.error || !an.base.regions.length) { next.push(p); continue; }
+          const ks = pointKeys() ? (state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, cfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, cfg, state.cfg.perArea, new Set())) : [];
+          const plugs = state.cfg.type === 'plug' ? K.planPlugs(an, cfg).filter(x => x.ok) : [];
+          res = K.cutMesh(p.positions, p.indices, F, { scale, cfg, keys: ks, plugs, skip: new Set(), minThickness: minWall(), force: true });
+          keys += ks.length + plugs.length;
+          warnings += (res.warnings || []).length;
+        } catch (err) { next.push(p); continue; } // a cut that only cracks the part, or can't seal: the part stays whole here
+        cuts++;
+        const base = baseOf.get(p.id) || p.name;
+        for (const c of res.parts) { const np = makePart({ name: base, color: p.color, positions: c.positions, indices: c.indices, pull: c.side === 'below' ? [-n[0], -n[1], -n[2]] : c.side === 'above' ? n.slice() : null }); baseOf.set(np.id, base); next.push(np); }
+        for (const pin of res.pins || []) next.push(makePart({ name: `${base} pin`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' }));
+        await nextFrame();
+      }
+      parts = next;
+    }
+    // number the pieces of each original part
+    const counter = new Map();
+    for (const p of parts) { if (originals.has(p.id)) continue; const base = baseOf.get(p.id) || p.name; if (p.kind === 'pin') continue; const k = (counter.get(base) || 0) + 1; counter.set(base, k); p.name = `${base} ${k}`; }
+    const pieces = parts.filter(p => p.kind !== 'pin').length, fit = parts.filter(p => p.kind !== 'pin' && fitsBed(p)).length;
+    commit(parts, 'the split to fit the bed');
+    state.split.planes = null; state.selectedId = null;
+    busy(null);
+    syncScene(); renderSplitPlanes();
+    toast(cuts ? `Cut into ${pieces} pieces${fit === pieces ? ', all of which fit the bed' : `, ${fit} of which fit the bed`}${keys ? `, with ${keys} keys` : ''}.${warnings ? ` ${warnings === 1 ? 'One cut' : `${warnings} cuts`} left a thin piece; check ${warnings === 1 ? 'it' : 'them'} before printing.` : ''}` : 'None of the planned cuts could be made. Move them and try again.', cuts ? '' : 'error');
   }
   function cutPanel(p) {
     const c = state.cfg;
@@ -2236,6 +2335,9 @@
       case 'cut': doCut(); break;
       case 'export-one': exportParts(state.selectedId); break;
       case 'fill-holes': busy('Repairing the surface'); setTimeout(() => { repairSurface(); busy(null); }, 30); break;
+      case 'split-plan': planSplit(null); break;
+      case 'split-cut': cutToFit(); break;
+      case 'split-clear': clearSplit(); break;
       case 'rotate': rotateAll(val); break;
       case 'scale': scaleAll(+val); break;
       case 'scale-custom': scaleAll((+$('#scalePct').value || 100) / 100); break;
@@ -2265,7 +2367,14 @@
       savePrefs(); scheduleAnalysis(0); renderInspector();
     } else if (t.dataset.bed) {
       const v = parseFloat(t.value);
-      if (isFinite(v) && v > 0) { state.bed[t.dataset.bed] = v; savePrefs(); renderParts(); }
+      if (isFinite(v) && v > 0) { state.bed[t.dataset.bed] = v; savePrefs(); renderParts(); if (!selectedPart()) renderInspector(); }
+    } else if (t.dataset.splitCount !== undefined) {
+      const ax = +t.dataset.splitCount, v = Math.max(0, Math.min(20, Math.round(parseFloat(t.value) || 0)));
+      const counts = [0, 1, 2].map(a => (a === ax ? v : state.split.planes.filter(q => q.axis === a).length));
+      planSplit(counts);
+    } else if (t.dataset.splitPos !== undefined) {
+      const i = +t.dataset.splitPos, v = parseFloat(t.value);
+      if (isFinite(v) && state.split.planes && state.split.planes[i]) { state.split.planes[i].pos = v; renderInspector(); renderSplitPlanes(); }
     } else if (t.dataset.area !== undefined) {
       const i = +t.dataset.area;
       if (t.checked === state.cut.skip.has(i)) toggleArea(i);

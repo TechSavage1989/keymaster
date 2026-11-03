@@ -583,6 +583,24 @@ console.log('cut suggestions');
   check('a single solid has no separate pieces', K.separateShells(uvSphere(10, 24, 16).positions, uvSphere(10, 24, 16).indices).length === 0);
 }
 
+console.log('split to fit the bed');
+{
+  const box = (sx, sy, sz) => ({ min: [0, 0, 0], max: [sx, sy, sz], size: [sx, sy, sz], center: [sx / 2, sy / 2, sz / 2] });
+  const bed = { w: 220, d: 220, h: 250 };
+  const bar = K.planBedCuts(box(300, 50, 50), bed, 5);
+  check('a 300 mm bar on a 220 mm bed needs one cut across its length, in the middle, giving two pieces that fit', bar.counts.join() === '1,0,0' && bar.planes.length === 1 && bar.planes[0].axis === 0 && Math.abs(bar.planes[0].pos - 150) < 1e-9 && bar.pieces === 2 && bar.fits, bar);
+  const slab = K.planBedCuts(box(500, 500, 40), bed, 5);
+  check('a 500 mm slab needs two cuts each way: nine pieces that fit', slab.counts.join() === '2,2,0' && slab.pieces === 9 && slab.fits && slab.biggest.every((v, i) => Math.abs(v - [500 / 3, 500 / 3, 40][i]) < 1e-9), slab);
+  const tall = K.planBedCuts(box(60, 60, 600), bed, 5);
+  check('a tall post lies down on the bed: its 600 mm goes across the 250 mm height, two cuts', tall.counts.join() === '0,0,2' && tall.fits, tall);
+  check('a model that fits needs no cuts', K.planBedCuts(box(100, 100, 100), bed, 5).planes.length === 0 && K.planBedCuts(box(100, 100, 100), bed, 5).fits);
+  const byCount = K.planBedCuts(box(300, 50, 50), bed, 5, [0, 0, 3]);
+  check('counts set by hand override the plan: three even cuts across Z', byCount.counts.join() === '0,0,3' && byCount.planes.map(q => q.pos.toFixed(1)).join() === '12.5,25.0,37.5' && !byCount.fits, byCount);
+  const uneven = K.bedFit(box(300, 50, 50), [{ axis: 0, pos: 20 }, { axis: 0, pos: 280 }], bed, 5);
+  check('uneven planes leave a 260 mm middle piece, too big for the bed even lying along its height', uneven.pieces === 3 && Math.abs(uneven.biggest[0] - 260) < 1e-9 && !uneven.fits, uneven);
+  check('a plane outside the model counts for nothing', K.bedFit(box(300, 50, 50), [{ axis: 0, pos: 400 }], bed, 5).pieces === 1);
+}
+
 console.log('surface regions');
 {
   const lathe = (radius, len, seg = 48, rings = 160) => {

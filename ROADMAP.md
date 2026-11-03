@@ -24,6 +24,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
+- Split to fit the bed (1.35): straight cuts across X, Y and Z worked out from the printer's bed size (or set by count), shown in the view, movable, then all cut at once with keys; roadmap item 13.
 - Cut at a spot (1.33): click where the cut should go round and Keymaster finds the narrowest cut through that spot for the piece it frees, puts the cut plane there and cuts just that piece.
 - Suggested cuts judged by what they free (1.32): narrow points and joins (shoulders, hips, a head under hair) scored by the piece they free and how narrow the cut is for it, each cutting only the areas that free the piece; regions to split off along their outline (an arm, a head, a backpack) suggested too; pins on thumbs, base edges and slices through both legs gone.
 - Models with gaps or tangles are repaired as they open (1.31), so region picks and cuts on them work straight away.
@@ -58,7 +59,6 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 10. **Seam-hiding cut shapes.** Zigzag, stepped and dovetail cuts so seams are less visible and pieces can't slide.
 11. **Hollowing and drain holes.** Shell a part to a chosen wall thickness, with drain holes placed for resin printing.
 12. **Part labels.** Emboss a small part number on a hidden face of each piece.
-13. **Split to fit the bed.** Suggest cuts that make every piece fit the printer bed.
 14. **3MF export** with all parts in one file, already arranged.
 15. **Measure tool.** Click two points to read a distance.
 
