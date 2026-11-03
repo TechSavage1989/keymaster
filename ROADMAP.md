@@ -24,6 +24,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
+- Projects, 3MF and an assembly sheet (1.39): save and reopen a project with every part, its joints and your settings; export all parts as one 3MF; export the STLs with an assembly sheet that pairs the pieces by joint; roadmap items 9 and 14.
 - Reduce detail (1.38): a lighter model within 0.02 to 0.1 mm of the original, so dense sculpts paint and cut faster; one undo step.
 - Engraved joint numbers (1.37): Number the joints engraves the same number on both faces of each cut, clear of the keys, so the pieces of a big kit pair up; roadmap item 12.
 - Inlay cut (1.36): any painted, picked or drawn area becomes a pocket in the body and a matching inlay pulled in by the fit, with a flat floor to print on, for details in another colour.
@@ -58,10 +59,8 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 6. **Snap-fit pegs.** Split-tip pegs with a barb that clicks into a groove in the socket. Needs test prints from the owner to tune the fit.
 7. **Cuts in a background thread.** Move `KMCore` into a Web Worker so the screen never freezes on dense models. Show progress. `core.js` already has no dependencies, so it should move unchanged.
 8. **Faster picking and display on huge meshes.** Use a bounding-volume hierarchy for clicks and a lighter display mesh above about 2 million triangles, keeping the full mesh for cutting.
-9. **Save and reopen projects.** A `.keymaster` file holding the parts, names, colors and settings.
 10. **Seam-hiding cut shapes.** Zigzag, stepped and dovetail cuts so seams are less visible and pieces can't slide.
 11. **Hollowing and drain holes.** Shell a part to a chosen wall thickness, with drain holes placed for resin printing.
-14. **3MF export** with all parts in one file, already arranged.
 15. **Measure tool.** Click two points to read a distance.
 
 ## Ideas to weigh later

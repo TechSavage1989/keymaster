@@ -286,6 +286,8 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .inline-num { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .inline-num input { width: 52px; }
 .paint-tools { margin-top: 4px; }
+.export-group { display: inline-flex; align-items: center; gap: 6px; }
+.export-group select { font: inherit; font-size: 12px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--ink); }
 #seamSmooth { width: 90px; }
 .regions-panel .btn[aria-pressed="true"] { background: var(--focus); color: #fff; border-color: var(--focus); }
 .status + .btn { margin-top: 8px; }
@@ -416,7 +418,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.38, build ab2613. After an update, refresh the page and check this changes.">v1.38 · ab2613</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.39, build 4e4a44. After an update, refresh the page and check this changes.">v1.39 · 4e4a44</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -425,7 +427,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <button class="icon-btn" id="redoBtn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 9H8a4.5 4.5 0 0 0 0 9h2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
       </div>
     </div>
-    <button class="btn primary" id="exportBtn" disabled title="Save every part as an STL, bundled in a ZIP">Export parts</button>
+    <div class="export-group"><select id="exportFormat" aria-label="Export format" title="What to save"><option value="zip">STLs in a ZIP</option><option value="3mf">One 3MF</option><option value="sheet">STLs + assembly sheet</option></select><button class="btn primary" id="exportBtn" disabled title="Save every part">Export parts</button></div>
   </header>
   <main class="layout">
     <aside class="parts-panel" aria-label="Parts">
@@ -491,7 +493,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
     <aside class="inspector" id="inspector" aria-label="Settings"></aside>
   </main>
 </div>
-<input type="file" id="fileInput" accept=".stl,.obj" hidden>
+<input type="file" id="fileInput" accept=".stl,.obj,.zip" hidden>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/TransformControls.js"></script>
@@ -4754,6 +4756,88 @@ const KMCore = (() => {
     for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
     return (c ^ 0xFFFFFFFF) >>> 0;
   }
+  // Read a ZIP of stored entries (the ones Keymaster writes, and most tools' uncompressed ones): [{ name, data }].
+  // Compressed entries are reported by name with `compressed: true` and no data, since core has no inflater.
+  function readZip(buf) {
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), dec = new TextDecoder();
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 70000); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error('This isn’t a ZIP file.');
+    const count = dv.getUint16(eocd + 10, true), cd = dv.getUint32(eocd + 16, true), out = [];
+    let o = cd;
+    for (let k = 0; k < count; k++) {
+      if (dv.getUint32(o, true) !== 0x02014b50) break;
+      const method = dv.getUint16(o + 10, true), size = dv.getUint32(o + 20, true), full = dv.getUint32(o + 24, true), nl = dv.getUint16(o + 28, true), el = dv.getUint16(o + 30, true), cl = dv.getUint16(o + 32, true), off = dv.getUint32(o + 42, true);
+      const name = dec.decode(u8.subarray(o + 46, o + 46 + nl));
+      const lnl = dv.getUint16(off + 26, true), lel = dv.getUint16(off + 28, true), start = off + 30 + lnl + lel;
+      out.push(method === 0 ? { name, data: u8.slice(start, start + size) } : { name, compressed: true, size: full });
+      o += 46 + nl + el + cl;
+    }
+    return out;
+  }
+  // Every part in one 3MF (a ZIP of XML, as slicers open directly), each a named, coloured object, in millimetres.
+  function make3MF(parts) {
+    const enc = new TextEncoder(), esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const colours = parts.map(p => (p.color || '#9aa0a6').replace(/^#?/, '#').slice(0, 7));
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n<resources>\n';
+    xml += `<basematerials id="1">${colours.map((c, i) => `<base name="${esc(parts[i].name || 'part')}" displaycolor="${esc(c)}"/>`).join('')}</basematerials>\n`;
+    parts.forEach((p, i) => {
+      const P = p.positions, I = p.indices, parts2 = [];
+      parts2.push(`<object id="${i + 2}" name="${esc(p.name || 'part')}" type="model" pid="1" pindex="${i}"><mesh><vertices>`);
+      for (let v = 0; v < P.length; v += 3) parts2.push(`<vertex x="${+P[v].toFixed(4)}" y="${+P[v + 1].toFixed(4)}" z="${+P[v + 2].toFixed(4)}"/>`);
+      parts2.push('</vertices><triangles>');
+      for (let t = 0; t < I.length; t += 3) parts2.push(`<triangle v1="${I[t]}" v2="${I[t + 1]}" v3="${I[t + 2]}"/>`);
+      parts2.push('</triangles></mesh></object>\n');
+      xml += parts2.join('');
+    });
+    xml += '</resources>\n<build>' + parts.map((p, i) => `<item objectid="${i + 2}"/>`).join('') + '</build>\n</model>\n';
+    const types = '<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>';
+    const rels = '<?xml version="1.0" encoding="UTF-8"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>';
+    return makeZip([{ name: '[Content_Types].xml', data: enc.encode(types) }, { name: '_rels/.rels', data: enc.encode(rels) }, { name: '3D/3dmodel.model', data: enc.encode(xml) }]);
+  }
+  // An assembly sheet: a page listing every part with its size, volume and joints, and which parts each joint
+  // pairs with, so a kit can be put together from the printed pieces. `meta` is { name, bed, date }.
+  function assemblySheet(parts, meta = {}) {
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const fmt1 = (v) => (Math.round(v * 10) / 10).toString();
+    const byJoint = new Map();
+    parts.forEach((p, i) => { for (const j of p.joints || []) { if (!byJoint.has(j.id)) byJoint.set(j.id, []); byJoint.get(j.id).push(i); } });
+    const kindName = { peg: 'pegs', dowel: 'dowels', magnet: 'magnets', plug: 'plug', none: 'no keys' };
+    const rows = parts.map((p, i) => {
+      const b = bounds(p.positions), joints = (p.joints || []).map(j => { const others = (byJoint.get(j.id) || []).filter(k => k !== i).map(k => esc(parts[k].name)); return `${j.number != null ? `<b>№ ${esc(j.number)}</b> ` : ''}${others.length ? 'with ' + others.join(', ') : 'with another part'}${j.type ? ` (${kindName[j.type] || esc(j.type)}${j.keys ? `, ${j.keys}` : ''})` : ''}`; });
+      return `<tr><td>${i + 1}</td><td><span class="sw" style="background:${esc(p.color || '#999')}"></span>${esc(p.name)}${p.kind === 'pin' ? ' <em>(printed pin)</em>' : ''}</td><td>${fmt1(b.size[0])} × ${fmt1(b.size[1])} × ${fmt1(b.size[2])} mm</td><td>${fmt1((p.volume != null ? p.volume : volume(p.positions, p.indices)) / 1000)} cm³</td><td>${joints.length ? joints.join('<br>') : '—'}</td></tr>`;
+    });
+    const jointRows = [...byJoint.entries()].sort((a, b) => a[0] - b[0]).map(([id, idx]) => { const j = (parts[idx[0]].joints || []).find(x => x.id === id) || {}; return `<tr><td>${j.number != null ? '№ ' + esc(j.number) : esc(id)}</td><td>${idx.map(k => esc(parts[k].name)).join(' + ')}</td><td>${j.type ? kindName[j.type] || esc(j.type) : ''}${j.keys ? ` × ${j.keys}` : ''}</td></tr>`; });
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(meta.name || 'Model')} — assembly</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font:14px/1.45 system-ui,sans-serif;margin:24px;color:#222}h1{font-size:22px;margin:0 0 4px}p.meta{color:#666;margin:0 0 18px}table{border-collapse:collapse;width:100%;margin-bottom:22px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;vertical-align:top}th{background:#f3f3f3;font-weight:600}.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px;border:1px solid rgba(0,0,0,.2)}em{color:#777}@media print{body{margin:12mm}}</style></head><body>
+<h1>${esc(meta.name || 'Model')}: assembly sheet</h1>
+<p class="meta">${parts.length} ${parts.length === 1 ? 'part' : 'parts'} from Keymaster${meta.date ? ', ' + esc(meta.date) : ''}${meta.bed ? `. Printer bed ${esc(meta.bed.w)} × ${esc(meta.bed.d)} × ${esc(meta.bed.h)} mm` : ''}. Units are millimetres. Pegs go into their sockets; dowel pins and magnets go into the pockets on both faces; a plug presses into its pocket. ${byJoint.size ? 'Engraved numbers on the cut faces match the joint numbers below.' : ''}</p>
+<table><thead><tr><th>#</th><th>Part</th><th>Size</th><th>Volume</th><th>Joints</th></tr></thead><tbody>${rows.join('')}</tbody></table>
+${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><th>Joint</th><th>Parts</th><th>Keys</th></tr></thead><tbody>${jointRows.join('')}</tbody></table>` : ''}
+</body></html>`;
+  }
+  // A project: every part's geometry as STL plus project.json (names, colours, pulls, joints, settings) in one ZIP,
+  // so work can be saved and picked up later. `meta` is kept as given.
+  function packProject(parts, meta = {}) {
+    const enc = new TextEncoder(), files = [];
+    const json = { app: 'Keymaster', format: 1, ...meta, parts: parts.map((p, i) => ({ name: p.name, color: p.color, kind: p.kind || 'part', pull: p.pull || null, joints: p.joints || [], file: `parts/${i}.stl` })) };
+    files.push({ name: 'project.json', data: enc.encode(JSON.stringify(json)) });
+    parts.forEach((p, i) => files.push({ name: `parts/${i}.stl`, data: new Uint8Array(writeSTL(p.positions, p.indices, p.name)) }));
+    return makeZip(files);
+  }
+  function unpackProject(buf) {
+    const entries = readZip(buf), byName = new Map(entries.map(e => [e.name, e]));
+    const pj = byName.get('project.json');
+    if (!pj || !pj.data) throw new Error('This ZIP isn’t a Keymaster project: it has no project.json.');
+    const json = JSON.parse(new TextDecoder().decode(pj.data));
+    if (json.app !== 'Keymaster') throw new Error('This ZIP isn’t a Keymaster project.');
+    const parts = (json.parts || []).map(meta => {
+      const e = byName.get(meta.file);
+      if (!e || !e.data) throw new Error(`The project is missing ${meta.file}.`);
+      const m = prepareMesh(parseSTL(e.data.buffer.slice(e.data.byteOffset, e.data.byteOffset + e.data.byteLength)));
+      return { ...meta, positions: m.positions, indices: m.indices, report: m.report };
+    });
+    return { ...json, parts };
+  }
   function makeZip(files) {
     const enc = new TextEncoder();
     const d = new Date();
@@ -4822,7 +4906,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
@@ -4866,6 +4950,7 @@ const KMCore = (() => {
   state.regions = { on: false, angle: 60, fold: 15 };
   state.here = { on: false };
   state.joint = 1; // the next joint number to engrave, when Number the joints is on
+  state.cutId = 0; // every cut gets an id, so the assembly sheet can pair the pieces it made
   state.reduce = 0.02; // Reduce detail: the surface may move this far (mm)
   state.split = { planes: null, counts: [null, null, null] }; // split to fit the bed: the planned planes ({axis, pos}), and counts set by hand // Cut at a spot: the next click on the part finds the narrowest cut through it
   state.draw = { on: false, points: [] }; // a cut line drawn by hand: points clicked on the chosen part
@@ -4886,9 +4971,11 @@ const KMCore = (() => {
     window.claude.use('downloads').then(d => { downloads = d; }).catch(() => { downloads = null; });
   }
 
-  function makePart({ name, color, positions, indices, kind, pull }) {
-    return { id: uid++, name, color, positions, indices, bbox: K.bounds(positions), tris: indices.length / 3, volume: K.volume(positions, indices), kind: kind || 'part', pull: pull || null };
+  function makePart({ name, color, positions, indices, kind, pull, joints }) {
+    return { id: uid++, name, color, positions, indices, bbox: K.bounds(positions), tris: indices.length / 3, volume: K.volume(positions, indices), kind: kind || 'part', pull: pull || null, joints: joints || [] };
   }
+  // The joints a cut made, kept on each piece for the assembly sheet: { id, type, keys, number }
+  function jointOf(p, extra) { return [...(p.joints || []), { id: ++state.cutId, ...extra }]; }
   const selectedPart = () => state.parts.find(p => p.id === state.selectedId) || null;
   const fmt = (n) => (Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(1));
   const fmtInt = (n) => n.toLocaleString('en-US');
@@ -5798,11 +5885,12 @@ const KMCore = (() => {
   const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 16)));
   async function loadFile(file) {
     const ext = (file.name.split('.').pop() || '').toLowerCase();
-    if (ext !== 'stl' && ext !== 'obj') { toast('Keymaster opens STL and OBJ files. Export your model in one of those formats, then open it here.', 'error'); return; }
+    if (ext !== 'stl' && ext !== 'obj' && ext !== 'zip') { toast('Keymaster opens STL and OBJ files, and its own saved projects (.keymaster.zip). Export your model in one of those formats, then open it here.', 'error'); return; }
     busy('Opening ' + file.name);
     await nextFrame();
     try {
       const buf = await file.arrayBuffer();
+      if (ext === 'zip') { openProject(buf, file.name); return; }
       const raw = ext === 'stl' ? K.parseSTL(buf) : K.parseOBJ(new TextDecoder().decode(buf));
       setModel(file.name.replace(/\.[^.]+$/, ''), K.prepareMesh(raw));
     } catch (err) {
@@ -5827,7 +5915,7 @@ const KMCore = (() => {
   }
   function setModel(name, m) {
     state.model = { name, report: m.report, tris: m.indices.length / 3 };
-    state.nextColor = 1; state.joint = 1;
+    state.nextColor = 1; state.joint = 1; state.cutId = 0;
     state.parts = [makePart({ name, color: PALETTE[0], positions: m.positions, indices: m.indices })];
     history.past = []; history.future = [];
     state.selectedId = null; state.hidden.clear(); state.explode = 0;
@@ -5917,10 +6005,11 @@ const KMCore = (() => {
     const made = [];
     const label = (side, i, count) => side === 'both' ? p.name : `${p.name} ${side === 'below' ? 'A' : 'B'}${count > 1 ? i + 1 : ''}`;
     let first = true;
+    const joints = jointOf(p, { type: state.cfg.type, keys: res.keysUsed || 0, number: numbered.length && !unmarked ? numbered[0] : null });
     for (const side of ['both', 'below', 'above']) {
       groups[side].sort((a, b) => b.volume - a.volume);
       groups[side].forEach((c, i) => {
-        made.push(makePart({ name: label(side, i, groups[side].length), color: first ? p.color : nextColor(), positions: c.positions, indices: c.indices, pull: side === 'below' ? [-nrm[0], -nrm[1], -nrm[2]] : side === 'above' ? nrm.slice() : null }));
+        made.push(makePart({ name: label(side, i, groups[side].length), color: first ? p.color : nextColor(), positions: c.positions, indices: c.indices, pull: side === 'below' ? [-nrm[0], -nrm[1], -nrm[2]] : side === 'above' ? nrm.slice() : null, joints }));
         first = false;
       });
     }
@@ -6025,9 +6114,17 @@ const KMCore = (() => {
   }
   /* ---------------- export ---------------- */
   function safeName(s) { return (s || 'part').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'part'; }
-  async function exportParts(onlyId) {
+  // Export: every part as an STL in a ZIP (the default), all parts in one 3MF, or the STLs with an assembly sheet.
+  async function exportParts(onlyId, format) {
     const list = onlyId ? state.parts.filter(p => p.id === onlyId) : state.parts;
     if (!list.length) return;
+    const fmt3 = format || ($('#exportFormat') ? $('#exportFormat').value : 'zip');
+    const base = safeName(state.model ? state.model.name : 'model') + (onlyId ? '-' + safeName(list[0].name) : '-parts');
+    if (fmt3 === '3mf') {
+      const data = K.make3MF(list), filename = base + '.3mf';
+      if (await saveFile(filename, new Blob([data], { type: 'model/3mf' }), false)) toast(`Saved ${filename} with ${list.length} ${list.length === 1 ? 'part' : 'parts'} in one file.`);
+      return;
+    }
     const used = new Set();
     const files = list.map(p => {
       let n = safeName(p.name), k = 2;
@@ -6035,17 +6132,16 @@ const KMCore = (() => {
       used.add(n);
       return { name: n + '.stl', data: new Uint8Array(K.writeSTL(p.positions, p.indices, p.name)) };
     });
-    const zip = K.makeZip(files);
-    const filename = safeName(state.model ? state.model.name : 'model') + (onlyId ? '-' + safeName(list[0].name) : '-parts') + '.zip';
-    const blob = new Blob([zip], { type: 'application/zip' });
-    if (downloads) {
-      try {
-        await downloads.save({ filename, data: blob });
-        toast(`Saved ${filename} with ${files.length} STL ${files.length === 1 ? 'file' : 'files'}.`);
-        return;
-      } catch (err) {
-        if (err && err.code === 'declined') return;
-        if (err && err.code === 'rate_limited') { toast('A save is already waiting for your answer.', 'warn'); return; }
+    if (fmt3 === 'sheet') files.push({ name: 'assembly.html', data: new TextEncoder().encode(K.assemblySheet(list, { name: state.model ? state.model.name : 'Model', bed: state.bed, date: new Date().toLocaleDateString() })) });
+    const zip = K.makeZip(files), filename = base + '.zip';
+    if (await saveFile(filename, new Blob([zip], { type: 'application/zip' }), true)) toast(`Saved ${filename} with ${list.length} STL ${list.length === 1 ? 'file' : 'files'}${fmt3 === 'sheet' ? ' and the assembly sheet' : ''}.`);
+  }
+  // Save a file: through the downloads capability when it's there and the kind is allowed (ZIP), else a plain link
+  async function saveFile(filename, blob, allowed) {
+    if (downloads && allowed) {
+      try { await downloads.save({ filename, data: blob }); return true; } catch (err) {
+        if (err && err.code === 'declined') return false;
+        if (err && err.code === 'rate_limited') { toast('A save is already waiting for your answer.', 'warn'); return false; }
       }
     }
     const a = document.createElement('a');
@@ -6053,7 +6149,32 @@ const KMCore = (() => {
     a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-    toast(`Saved ${filename} with ${files.length} STL ${files.length === 1 ? 'file' : 'files'}.`);
+    return true;
+  }
+  // Projects: every part with its name, colour, pull and joints, plus the settings, in one ZIP to open later.
+  async function saveProject() {
+    if (!state.parts.length) return;
+    const name = state.model ? state.model.name : 'model';
+    const data = K.packProject(state.parts, { name, bed: state.bed, cfg: state.cfg, joint: state.joint, cutId: state.cutId, reduce: state.reduce, saved: new Date().toISOString() });
+    const filename = safeName(name) + '.keymaster.zip';
+    if (await saveFile(filename, new Blob([data], { type: 'application/zip' }), true)) toast(`Saved the project as ${filename}: ${state.parts.length} ${state.parts.length === 1 ? 'part' : 'parts'} and your settings. Open it here any time to carry on.`);
+  }
+  function openProject(buf, filename) {
+    const pr = K.unpackProject(buf);
+    const parts = pr.parts.map(q => makePart({ name: q.name, color: q.color || nextColor(), positions: q.positions, indices: q.indices, kind: q.kind, pull: q.pull, joints: q.joints }));
+    const open = pr.parts.reduce((s, q) => s + (q.report ? q.report.openEdges + q.report.badEdges : 0), 0);
+    state.model = { name: pr.name || filename.replace(/\.keymaster\.zip$|\.zip$/i, ''), report: { closed: open === 0, openEdges: open, badEdges: 0 }, tris: parts.reduce((s, q) => s + q.tris, 0) };
+    state.nextColor = parts.length + 1;
+    state.parts = parts;
+    if (pr.bed) Object.assign(state.bed, pr.bed);
+    if (pr.cfg) Object.assign(state.cfg, pr.cfg);
+    state.joint = pr.joint || 1; state.cutId = pr.cutId || 0; if (pr.reduce) state.reduce = pr.reduce;
+    history.past = []; history.future = [];
+    state.selectedId = null; state.hidden.clear(); state.explode = 0; state.split.planes = null;
+    $('#empty').hidden = true;
+    savePrefs();
+    syncScene(); frameAll(); updateChrome();
+    toast(`Opened the project: ${parts.length} ${parts.length === 1 ? 'part' : 'parts'}, with the settings as saved.`);
   }
 
   /* ---------------- pointer interaction ---------------- */
@@ -6938,6 +7059,11 @@ const KMCore = (() => {
       ${health}
     </div>
     <div class="ins-section">
+      <h3>Project</h3>
+      <p class="muted small">Save the parts, their names and colours, the joints and your settings in one file, and open it here later to carry on.</p>
+      <div class="row tight"><button class="btn" data-act="save-project">Save project</button><button class="btn" data-act="open-project">Open project</button></div>
+    </div>
+    <div class="ins-section">
       <h3>Reduce detail</h3>
       <p class="muted small">A lighter model paints and cuts faster. Light keeps the surface within 0.02 mm, Strong within 0.1 mm; the shape and the volume stay. Ctrl+Z puts the detail back.</p>
       <div class="row tight">
@@ -7057,7 +7183,8 @@ const KMCore = (() => {
         } catch (err) { next.push(p); continue; } // a cut that only cracks the part, or can't seal: the part stays whole here
         cuts++;
         const base = baseOf.get(p.id) || p.name;
-        for (const c of res.parts) { const np = makePart({ name: base, color: p.color, positions: c.positions, indices: c.indices, pull: c.side === 'below' ? [-n[0], -n[1], -n[2]] : c.side === 'above' ? n.slice() : null }); baseOf.set(np.id, base); next.push(np); }
+        const joints = jointOf(p, { type: state.cfg.type, keys: res.keysUsed || 0, number: null });
+        for (const c of res.parts) { const np = makePart({ name: base, color: p.color, positions: c.positions, indices: c.indices, pull: c.side === 'below' ? [-n[0], -n[1], -n[2]] : c.side === 'above' ? n.slice() : null, joints }); baseOf.set(np.id, base); next.push(np); }
         for (const pin of res.pins || []) next.push(makePart({ name: `${base} pin`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' }));
         await nextFrame();
       }
@@ -7218,6 +7345,8 @@ const KMCore = (() => {
       case 'export-one': exportParts(state.selectedId); break;
       case 'fill-holes': busy('Repairing the surface'); setTimeout(() => { repairSurface(); busy(null); }, 30); break;
       case 'reduce': reduceModel(); break;
+      case 'save-project': saveProject(); break;
+      case 'open-project': fileInput.click(); break;
       case 'split-plan': planSplit(null); break;
       case 'split-cut': cutToFit(); break;
       case 'split-clear': clearSplit(); break;
@@ -7564,7 +7693,9 @@ const KMCore = (() => {
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);
     if (!p || !pick.result) return;
-    const made = pick.result.parts.map((c, i) => makePart({ name: `${p.name} ${String.fromCharCode(65 + i)}`, color: i ? nextColor() : p.color, positions: c.positions, indices: c.indices, pull: c.pull || null }));
+    const numberedHere = pick.perLoop.some(per => per.marks && per.marks.length) ? state.joint : null;
+    const joints = jointOf(p, { type: state.cfg.type, keys: pick.keys.length + pick.plugs.length, number: numberedHere });
+    const made = pick.result.parts.map((c, i) => makePart({ name: `${p.name} ${String.fromCharCode(65 + i)}`, color: i ? nextColor() : p.color, positions: c.positions, indices: c.indices, pull: c.pull || null, joints }));
     (pick.result.pins || []).forEach((pin, i) => made.push(makePart({ name: `${p.name} pin ${i + 1}`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' })));
     const idx = state.parts.indexOf(p);
     clearPick();

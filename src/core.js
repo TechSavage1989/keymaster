@@ -4256,6 +4256,88 @@ const KMCore = (() => {
     for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
     return (c ^ 0xFFFFFFFF) >>> 0;
   }
+  // Read a ZIP of stored entries (the ones Keymaster writes, and most tools' uncompressed ones): [{ name, data }].
+  // Compressed entries are reported by name with `compressed: true` and no data, since core has no inflater.
+  function readZip(buf) {
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), dec = new TextDecoder();
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 70000); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error('This isn’t a ZIP file.');
+    const count = dv.getUint16(eocd + 10, true), cd = dv.getUint32(eocd + 16, true), out = [];
+    let o = cd;
+    for (let k = 0; k < count; k++) {
+      if (dv.getUint32(o, true) !== 0x02014b50) break;
+      const method = dv.getUint16(o + 10, true), size = dv.getUint32(o + 20, true), full = dv.getUint32(o + 24, true), nl = dv.getUint16(o + 28, true), el = dv.getUint16(o + 30, true), cl = dv.getUint16(o + 32, true), off = dv.getUint32(o + 42, true);
+      const name = dec.decode(u8.subarray(o + 46, o + 46 + nl));
+      const lnl = dv.getUint16(off + 26, true), lel = dv.getUint16(off + 28, true), start = off + 30 + lnl + lel;
+      out.push(method === 0 ? { name, data: u8.slice(start, start + size) } : { name, compressed: true, size: full });
+      o += 46 + nl + el + cl;
+    }
+    return out;
+  }
+  // Every part in one 3MF (a ZIP of XML, as slicers open directly), each a named, coloured object, in millimetres.
+  function make3MF(parts) {
+    const enc = new TextEncoder(), esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const colours = parts.map(p => (p.color || '#9aa0a6').replace(/^#?/, '#').slice(0, 7));
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n<resources>\n';
+    xml += `<basematerials id="1">${colours.map((c, i) => `<base name="${esc(parts[i].name || 'part')}" displaycolor="${esc(c)}"/>`).join('')}</basematerials>\n`;
+    parts.forEach((p, i) => {
+      const P = p.positions, I = p.indices, parts2 = [];
+      parts2.push(`<object id="${i + 2}" name="${esc(p.name || 'part')}" type="model" pid="1" pindex="${i}"><mesh><vertices>`);
+      for (let v = 0; v < P.length; v += 3) parts2.push(`<vertex x="${+P[v].toFixed(4)}" y="${+P[v + 1].toFixed(4)}" z="${+P[v + 2].toFixed(4)}"/>`);
+      parts2.push('</vertices><triangles>');
+      for (let t = 0; t < I.length; t += 3) parts2.push(`<triangle v1="${I[t]}" v2="${I[t + 1]}" v3="${I[t + 2]}"/>`);
+      parts2.push('</triangles></mesh></object>\n');
+      xml += parts2.join('');
+    });
+    xml += '</resources>\n<build>' + parts.map((p, i) => `<item objectid="${i + 2}"/>`).join('') + '</build>\n</model>\n';
+    const types = '<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>';
+    const rels = '<?xml version="1.0" encoding="UTF-8"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>';
+    return makeZip([{ name: '[Content_Types].xml', data: enc.encode(types) }, { name: '_rels/.rels', data: enc.encode(rels) }, { name: '3D/3dmodel.model', data: enc.encode(xml) }]);
+  }
+  // An assembly sheet: a page listing every part with its size, volume and joints, and which parts each joint
+  // pairs with, so a kit can be put together from the printed pieces. `meta` is { name, bed, date }.
+  function assemblySheet(parts, meta = {}) {
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const fmt1 = (v) => (Math.round(v * 10) / 10).toString();
+    const byJoint = new Map();
+    parts.forEach((p, i) => { for (const j of p.joints || []) { if (!byJoint.has(j.id)) byJoint.set(j.id, []); byJoint.get(j.id).push(i); } });
+    const kindName = { peg: 'pegs', dowel: 'dowels', magnet: 'magnets', plug: 'plug', none: 'no keys' };
+    const rows = parts.map((p, i) => {
+      const b = bounds(p.positions), joints = (p.joints || []).map(j => { const others = (byJoint.get(j.id) || []).filter(k => k !== i).map(k => esc(parts[k].name)); return `${j.number != null ? `<b>№ ${esc(j.number)}</b> ` : ''}${others.length ? 'with ' + others.join(', ') : 'with another part'}${j.type ? ` (${kindName[j.type] || esc(j.type)}${j.keys ? `, ${j.keys}` : ''})` : ''}`; });
+      return `<tr><td>${i + 1}</td><td><span class="sw" style="background:${esc(p.color || '#999')}"></span>${esc(p.name)}${p.kind === 'pin' ? ' <em>(printed pin)</em>' : ''}</td><td>${fmt1(b.size[0])} × ${fmt1(b.size[1])} × ${fmt1(b.size[2])} mm</td><td>${fmt1((p.volume != null ? p.volume : volume(p.positions, p.indices)) / 1000)} cm³</td><td>${joints.length ? joints.join('<br>') : '—'}</td></tr>`;
+    });
+    const jointRows = [...byJoint.entries()].sort((a, b) => a[0] - b[0]).map(([id, idx]) => { const j = (parts[idx[0]].joints || []).find(x => x.id === id) || {}; return `<tr><td>${j.number != null ? '№ ' + esc(j.number) : esc(id)}</td><td>${idx.map(k => esc(parts[k].name)).join(' + ')}</td><td>${j.type ? kindName[j.type] || esc(j.type) : ''}${j.keys ? ` × ${j.keys}` : ''}</td></tr>`; });
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(meta.name || 'Model')} — assembly</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font:14px/1.45 system-ui,sans-serif;margin:24px;color:#222}h1{font-size:22px;margin:0 0 4px}p.meta{color:#666;margin:0 0 18px}table{border-collapse:collapse;width:100%;margin-bottom:22px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;vertical-align:top}th{background:#f3f3f3;font-weight:600}.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px;border:1px solid rgba(0,0,0,.2)}em{color:#777}@media print{body{margin:12mm}}</style></head><body>
+<h1>${esc(meta.name || 'Model')}: assembly sheet</h1>
+<p class="meta">${parts.length} ${parts.length === 1 ? 'part' : 'parts'} from Keymaster${meta.date ? ', ' + esc(meta.date) : ''}${meta.bed ? `. Printer bed ${esc(meta.bed.w)} × ${esc(meta.bed.d)} × ${esc(meta.bed.h)} mm` : ''}. Units are millimetres. Pegs go into their sockets; dowel pins and magnets go into the pockets on both faces; a plug presses into its pocket. ${byJoint.size ? 'Engraved numbers on the cut faces match the joint numbers below.' : ''}</p>
+<table><thead><tr><th>#</th><th>Part</th><th>Size</th><th>Volume</th><th>Joints</th></tr></thead><tbody>${rows.join('')}</tbody></table>
+${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><th>Joint</th><th>Parts</th><th>Keys</th></tr></thead><tbody>${jointRows.join('')}</tbody></table>` : ''}
+</body></html>`;
+  }
+  // A project: every part's geometry as STL plus project.json (names, colours, pulls, joints, settings) in one ZIP,
+  // so work can be saved and picked up later. `meta` is kept as given.
+  function packProject(parts, meta = {}) {
+    const enc = new TextEncoder(), files = [];
+    const json = { app: 'Keymaster', format: 1, ...meta, parts: parts.map((p, i) => ({ name: p.name, color: p.color, kind: p.kind || 'part', pull: p.pull || null, joints: p.joints || [], file: `parts/${i}.stl` })) };
+    files.push({ name: 'project.json', data: enc.encode(JSON.stringify(json)) });
+    parts.forEach((p, i) => files.push({ name: `parts/${i}.stl`, data: new Uint8Array(writeSTL(p.positions, p.indices, p.name)) }));
+    return makeZip(files);
+  }
+  function unpackProject(buf) {
+    const entries = readZip(buf), byName = new Map(entries.map(e => [e.name, e]));
+    const pj = byName.get('project.json');
+    if (!pj || !pj.data) throw new Error('This ZIP isn’t a Keymaster project: it has no project.json.');
+    const json = JSON.parse(new TextDecoder().decode(pj.data));
+    if (json.app !== 'Keymaster') throw new Error('This ZIP isn’t a Keymaster project.');
+    const parts = (json.parts || []).map(meta => {
+      const e = byName.get(meta.file);
+      if (!e || !e.data) throw new Error(`The project is missing ${meta.file}.`);
+      const m = prepareMesh(parseSTL(e.data.buffer.slice(e.data.byteOffset, e.data.byteOffset + e.data.byteLength)));
+      return { ...meta, positions: m.positions, indices: m.indices, report: m.report };
+    });
+    return { ...json, parts };
+  }
   function makeZip(files) {
     const enc = new TextEncoder();
     const d = new Date();
@@ -4324,7 +4406,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
