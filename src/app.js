@@ -939,8 +939,12 @@
     syncScene();
     frameAll();
     const specks = m.report.specks ? ` Removed ${m.report.specks} loose ${m.report.specks === 1 ? 'speck' : 'specks'} too small to print.` : '';
+    if (!m.report.closed) { // a surface with gaps or tangles can't be cut: repair it now, rather than refuse later
+      repairSurface(`This model’s surface had ${m.report.badEdges ? 'tangles' : 'gaps'}, so Keymaster repaired it.`);
+      history.past = []; history.future = []; updateChrome();
+      return;
+    }
     if (m.report.flipped) toast('The model was inside out, so Keymaster flipped it to print correctly.' + specks);
-    else if (!m.report.closed) toast(`This model’s surface has ${m.report.badEdges ? 'tangles' : 'gaps'}. Press Repair surface in the model panel before cutting.`, 'warn');
     else if (state.model.tris > 3e6) toast('This is a very dense model. Cuts may take a few seconds.' + specks, 'warn');
     else if (specks) toast(specks.trim());
   }
@@ -1059,7 +1063,7 @@
   }
   // Repair every part's surface: faces stored twice, parts welded along a seam, patches facing the wrong way,
   // loose slivers, pinched vertices and holes, in that order. Says what it did, and what it couldn't.
-  function repairSurface() {
+  function repairSurface(lead = '') {
     const sum = { duplicates: 0, untangled: 0, pinched: 0, flipped: 0, slivers: 0, filled: 0 };
     let open = 0, bad = 0;
     const parts = state.parts.map(p => {
@@ -1080,7 +1084,8 @@
     if (sum.filled) did.push(`filled ${sum.filled} ${sum.filled === 1 ? 'hole' : 'holes'}`);
     const what = did.length ? did[0].charAt(0).toUpperCase() + did[0].slice(1) + (did.length > 1 ? ', ' + did.slice(1).join(', ') : '') + '.' : 'Nothing needed repairing.';
     const closed = open === 0 && bad === 0;
-    toast(closed ? `${what} The model is closed now.` : `${what} ${fmtInt(open + bad)} ${open + bad === 1 ? 'edge is' : 'edges are'} still open or tangled; that needs Blender or Meshmixer. Cuts away from them still work.`, closed ? '' : 'warn');
+    const head = lead ? lead + ' ' : '';
+    toast(closed ? `${head}${what} The model is closed now.` : `${head}${what} ${fmtInt(open + bad)} ${open + bad === 1 ? 'edge is' : 'edges are'} still open or tangled; that needs Blender or Meshmixer. Cuts away from them still work.`, closed ? '' : 'warn');
   }
 
   /* ---------------- export ---------------- */
