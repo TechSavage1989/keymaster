@@ -2,6 +2,7 @@ const K = require('../src/core.js');
 const fs = require('fs');
 const { execSync } = require('child_process');
 let fails = 0, passes = 0;
+let voxelsG; // a closed mesh from filled cubes, defined in the printability section and used after it
 function check(name, cond, extra) {
   if (cond) { passes++; console.log('  ok  ' + name); }
   else { fails++; console.log('  FAIL ' + name + (extra !== undefined ? '  ' + JSON.stringify(extra) : '')); }
@@ -926,7 +927,8 @@ console.log('file round trips');
 console.log('cuts that can be printed and put together');
 {
   // a closed mesh from filled cubes of size h: a face wherever a filled cube meets an empty one
-  const voxels = (fill, nx, ny, nz, h = 0.5) => {
+  const voxels = (fill, nx, ny, nz, h = 0.5) => voxelsG(fill, nx, ny, nz, h); // (shared with later sections)
+  voxelsG = (fill, nx, ny, nz, h = 0.5) => {
     const pos = [], idx = [], vid = new Map();
     const v = (i, j, k) => { const key = (i * (ny + 1) + j) * (nz + 1) + k; let id = vid.get(key); if (id === undefined) { id = pos.length / 3; vid.set(key, id); pos.push(i * h, j * h, k * h); } return id; };
     const f = (i, j, k) => i >= 0 && j >= 0 && k >= 0 && i < nx && j < ny && k < nz && fill((i + 0.5) * h, (j + 0.5) * h, (k + 0.5) * h);
@@ -1152,6 +1154,13 @@ console.log('plugs');
   check('on a rounded part the plug is pulled further in, so it can go deep', plW[0].depth >= 9.9, plW[0].depth);
   const pcW2 = plugCfg({ clearance: 0.1, plugSlope: 8 }), plW2 = K.planPlugs(K.analyzeLoop(spP.positions, spP.indices, lW, pcW2, 40), pcW2);
   check('…and with a gap and sloping sides it’s sealed too', allClosed(K.cutAlongLoop(spP.positions, spP.indices, lW, { cfg: pcW2, plugs: plW2, minThickness: 1.2 }).parts));
+  // a plus-shaped section has concave corners: with steep sides the plug's top would fold over at the corners, so the
+  // plug is made shallower instead of refused (a goblin's shoulder did this)
+  const plus = voxelsG((x, y, z) => (Math.abs(x - 15) < 7 || Math.abs(y - 15) < 7) && z < 40, 30, 30, 40), Fplus = K.frameFromNormal([0, 0, 1], [15, 15, 20]);
+  const pcPlus = plugCfg({ plugSlope: 30, plugDepthMode: 'set', plugDepth: 10, pegSide: 'above' }), anPlus = K.analyzePlane(plus.positions, plus.indices, Fplus, pcPlus, 50), plPlus = K.planPlugs(anPlus, pcPlus);
+  check('a plug on a plus-shaped face with steep sides is made shallower rather than refused', plPlus.length === 1 && plPlus[0].ok && plPlus[0].depth < 10 && plPlus[0].depth >= 1 && plPlus[0].short, plPlus.map(q => (q.ok ? q.depth : q.reason)));
+  const rPlus = K.cutMesh(plus.positions, plus.indices, Fplus, { scale: 50, cfg: pcPlus, plugs: plPlus });
+  check('…and the cut with it is sealed', allClosed(rPlus.parts), rPlus.parts.map(q => K.edgeReport(q.indices)));
   // a real outline that once left a plug's flat ends with flipped slivers: a block far from the origin, cut at a tilt
   for (const { defect, xy, frame } of JSON.parse(fs.readFileSync(__dirname + '/fixtures/sculpt-outlines.json', 'utf8')).plugOutlines) {
     let ring = []; for (let i = 0; i < xy.length; i += 2) ring.push([xy[i], xy[i + 1]]);

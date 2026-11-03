@@ -724,6 +724,23 @@ with sync_playwright() as p:
     infoD = pg.inner_text('#cutLineInfo')
     print('    drawn line:', resD, infoD.replace('\n', ' ')[:150])
     check('closing the drawn line picks it: two pieces, drawing off', resD['ok'] and resD['pieces'] == 2 and not resD['drawing'] and 'Cut along this line' in infoD and pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'false', (resD, infoD))
+    # a second drawn line adds to the pick, so several drawn lines cut together
+    pg.click('#drawLineBtn'); pg.wait_for_timeout(100)
+    check('drawing again keeps the picked line and says the next will be cut with it', 'cut together with the line' in pg.inner_text('#cutLineInfo'), pg.inner_text('#cutLineInfo'))
+    rb2 = math.sqrt(144 - 64)
+    for a in (0, 90, 180, 270):
+        q2 = [ax[k] * 44 + u[k] * rb2 * math.cos(a * math.pi / 180) + vv[k] * rb2 * math.sin(a * math.pi / 180) for k in range(3)]
+        pg.evaluate(f"KeymasterDebug.drawPoint(0, {q2})")
+    resD2 = pg.evaluate("KeymasterDebug.closeDrawing()"); pg.wait_for_timeout(200)
+    check('two drawn lines: cut along both, three pieces', resD2['ok'] and resD2['loops'] == 2 and resD2['pieces'] == 3 and 'Cut along these lines' in pg.inner_text('#cutLineInfo'), (resD2, pg.inner_text('#cutLineInfo')[:120]))
+    pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
+    for a in (0, 90, 180, 270):
+        qq = [ax[k] * 20 + u[k] * rb * math.cos(a * math.pi / 180) + vv[k] * rb * math.sin(a * math.pi / 180) for k in range(3)]
+        pg.evaluate(f"KeymasterDebug.drawPoint(0, {qq})")
+    resD = pg.evaluate("KeymasterDebug.closeDrawing()"); pg.wait_for_timeout(200)
+    check('after Esc a new drawn line starts afresh', resD.get('ok') and resD['loops'] == 1 and resD['pieces'] == 2, (resD, pg.inner_text('#toast'), pg.inner_text('#cutLineInfo')[:120]))
+    # with regions showing, the pegs-on choice names the piece being split off, not the halves of a flat cut
+    check('with regions showing, Pegs on reads This piece / Other piece', 'This piece' in pg.inner_text('#inspector') and 'Other piece' in pg.inner_text('#inspector'), pg.inner_text('#inspector')[:200])
     pg.click('[data-act=cut-line]')
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
     check('cutting along the drawn line gives two pieces', pg.locator('#partList li[data-id]').count() == 2)
