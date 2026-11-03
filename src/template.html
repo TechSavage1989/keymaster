@@ -70,7 +70,24 @@ button, input, select { font: inherit; color: inherit; }
 .bar-mid { display: flex; align-items: center; gap: 10px; margin-left: 18px; flex: 1; }
 .hist { display: flex; gap: 2px; }
 
-.layout { display: grid; grid-template-columns: 252px minmax(0, 1fr) 340px; min-height: 0; }
+.layout { --left-w: 252px; --right-w: 340px; display: grid; grid-template-columns: var(--left-w) minmax(0, 1fr) var(--right-w); min-height: 0; }
+/* the edges of the side panels can be dragged to resize them */
+.divider { position: absolute; top: 0; bottom: 0; width: 8px; z-index: 6; cursor: col-resize; touch-action: none; }
+.divider.left { left: 0; } .divider.right { right: 0; }
+.divider::after { content: ""; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--focus); opacity: 0; transition: opacity .12s; }
+.divider.left::after { left: 0; } .divider.right::after { right: 0; }
+.divider:hover::after, .divider.is-dragging::after { opacity: .7; }
+body.is-resizing { cursor: col-resize; user-select: none; }
+/* the keyboard reference */
+.keys-dialog { border: 0; border-radius: 12px; padding: 0; width: min(92vw, 700px); background: var(--panel); color: var(--ink); box-shadow: 0 18px 50px rgba(0,0,0,.3); }
+.keys-dialog::backdrop { background: rgba(20,22,24,.45); }
+.keys-dialog .kd-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 8px; }
+.keys-dialog .kd-body { padding: 0 18px 16px; display: grid; grid-template-columns: 1fr 1.15fr; gap: 0 28px; }
+.keys-dialog h3 { margin: 10px 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.keys-dialog dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13.5px; align-items: baseline; }
+.keys-dialog dt { white-space: nowrap; } .keys-dialog dd { margin: 0; color: var(--muted); }
+.keys-dialog kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--field); font: inherit; font-size: 12px; font-weight: 600; text-align: center; }
+@media (max-width: 600px) { .keys-dialog .kd-body { grid-template-columns: 1fr; } }
 .parts-panel, .inspector { background: var(--panel); min-height: 0; overflow: auto; }
 .parts-panel { border-right: 1px solid var(--line); display: flex; flex-direction: column; }
 .inspector { border-left: 1px solid var(--line); }
@@ -450,7 +467,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
 .cut-action .key-status .status + .status { margin-top: 6px; }
 .cut-action .key-status .btn.small { margin-top: 6px; }
 @media (max-width: 860px) { .plane-bar { position: static; margin: 8px; } .hint { bottom: 16px; } }
-@media (max-width: 1080px) { .layout { grid-template-columns: 220px minmax(0, 1fr) 312px; } }
+@media (max-width: 1080px) { .layout { --left-w: 220px; --right-w: 312px; } }
 @media (max-width: 860px) {
   body { overflow: auto; }
   .app { height: auto; min-height: 100%; }
@@ -458,6 +475,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
   .bar-mid { margin-left: 4px; gap: 4px; }
   .brand span { display: none; }
   .layout { grid-template-columns: minmax(0, 1fr); }
+  .divider { display: none; }
   .stage { height: 58vh; min-height: 320px; order: 0; }
   .inspector { order: 1; border-left: 0; overflow: visible; }
   .parts-panel { order: 2; border-right: 0; border-top: 1px solid var(--line); overflow: visible; }
@@ -485,6 +503,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <button class="icon-btn" id="redoBtn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 9H8a4.5 4.5 0 0 0 0 9h2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
       </div>
     </div>
+    <button class="icon-btn" id="keysBtn" aria-label="Mouse and keyboard" title="Mouse and keyboard (?)"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7.6 8a2.4 2.4 0 1 1 3.4 2.2c-.7.4-1 .8-1 1.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.2" r=".9" fill="currentColor"/></svg></button>
     <button class="icon-btn" id="themeBtn" aria-label="Switch between light and dark" aria-pressed="false" title="Light or dark"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
     <div class="export-group"><select id="exportFormat" aria-label="Export format" title="What to save"><option value="zip">STLs in a ZIP</option><option value="3mf">One 3MF</option><option value="sheet">STLs + assembly sheet</option></select><button class="btn primary" id="exportBtn" disabled title="Save every part">Export parts</button></div>
   </header>
@@ -496,6 +515,8 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
       <p class="tip muted small">Double-click a name to rename it. Parts are checked against your printer bed size.</p>
     </aside>
     <section class="stage" id="stage">
+      <div class="divider left" id="dividerLeft" title="Drag to resize the parts panel; double-click to reset"></div>
+      <div class="divider right" id="dividerRight" title="Drag to resize the settings panel; double-click to reset"></div>
       <div class="empty" id="empty">
         <div class="empty-card">
           <svg viewBox="0 0 168 120" aria-hidden="true">
@@ -567,6 +588,41 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
   </div>
 </div>
 </div>
+<dialog class="keys-dialog" id="keysDialog" aria-label="Mouse and keyboard">
+  <div class="kd-head"><h2>Mouse and keyboard</h2><button class="btn small" id="keysClose">Close</button></div>
+  <div class="kd-body">
+    <div>
+      <h3>Cutting</h3>
+      <dl><dt><kbd>Enter</kbd></dt><dd>Cut: the plane, the picked region or line, or close the line being drawn</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Step back: stop painting or drawing, drop the pick, let the part go</dd>
+      <dt><kbd>X</kbd> <kbd>Y</kbd> <kbd>Z</kbd></dt><dd>Turn the cut plane square to that axis</dd>
+      <dt><kbd>Delete</kbd></dt><dd>Remove the chosen key</dd>
+      <dt><kbd>Backspace</kbd></dt><dd>Take the last drawn point back</dd>
+      <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Smaller or bigger brush</dd>
+      <dt><kbd>Shift</kbd> + click</dt><dd>Add a region or line to the pick</dd>
+      <dt><kbd>Shift</kbd> + drag</dt><dd>Erase paint; tilt the plane in 5° steps</dd></dl>
+      <h3>Everything else</h3>
+      <dl><dt><kbd>Ctrl</kbd> <kbd>Z</kbd></dt><dd>Undo</dd>
+      <dt><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Z</kbd></dt><dd>Redo</dd>
+      <dt><kbd>Ctrl</kbd> <kbd>O</kbd></dt><dd>Open a model or project</dd>
+      <dt><kbd>F</kbd></dt><dd>Frame the model, or the chosen part</dd>
+      <dt><kbd>?</kbd></dt><dd>This list</dd></dl>
+    </div>
+    <div>
+      <h3>Mouse</h3>
+      <dl><dt>Drag</dt><dd>Orbit; on the cut plane, tip it; with Paint on, paint</dd>
+      <dt>Right drag</dt><dd>Pan</dd>
+      <dt>Wheel</dt><dd>Zoom</dd>
+      <dt><kbd>Alt</kbd> + drag</dt><dd>Orbit from anywhere, even over the plane</dd>
+      <dt>Arrow</dt><dd>Slide the cut plane</dd>
+      <dt>Rings</dt><dd>Tilt the cut plane</dd>
+      <dt>Click the cut face</dt><dd>Add a key; click a key to set it up on its own</dd>
+      <dt>Click a region or line</dt><dd>With Regions on, pick it to split off or cut along</dd>
+      <dt>Double-click a part's name</dt><dd>Rename it</dd>
+      <dt>Panel edges</dt><dd>Drag to resize a panel; double-click to reset</dd></dl>
+    </div>
+  </div>
+</dialog>
 <input type="file" id="fileInput" accept=".stl,.obj,.zip" hidden>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>

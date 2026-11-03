@@ -25,6 +25,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
 - Pictures on the assembly sheet (1.48): each part beside its row, and the pieces spread apart along their cuts at the top.
+- Resizable side panels and a mouse and keyboard reference (1.51).
 - View from a side and a light/dark switch (1.50).
 - Printer presets and Start over (1.49): common printers' build volumes set the bed and the type in one pick; Start over brings back the model as opened.
 - Pictures on the assembly sheet (1.45): each part beside its row, and the pieces spread apart along their cuts at the top.
