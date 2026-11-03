@@ -524,6 +524,8 @@ with sync_playwright() as p:
     ds = dls.value; zs = zipfile.ZipFile(io.BytesIO(open(ds.path(), 'rb').read()))
     sheet = zs.read('assembly.html').decode('utf-8') if 'assembly.html' in zs.namelist() else ''
     check('STLs + assembly sheet adds assembly.html naming the parts and their joints', 'assembly.html' in zs.namelist() and 'Torso' in sheet and 'with' in sheet, zs.namelist())
+    n_parts_now = pg.locator('#partList li[data-id]').count()
+    check('the sheet shows a picture of every part and one of the pieces spread apart', sheet.count('<img src="data:image/png;base64,') == n_parts_now + 1 and 'spread apart' in sheet, (sheet.count('<img'), n_parts_now))
     pg.select_option('#exportFormat', 'zip')
     # save the project and open it again
     pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
