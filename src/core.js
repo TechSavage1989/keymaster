@@ -2668,11 +2668,12 @@ const KMCore = (() => {
       let clash = keep.length < n;
       for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) if (surf.has(ek(cap[i + k], cap[i + (k + 1) % 3]))) { clash = true; break; }
       const per = opts.perLoop ? opts.perLoop[li] || {} : opts, into2 = wantCCW ? 1 : -1;
+      const lcfg = per.pegSide && per.pegSide !== cfg.pegSide ? { ...cfg, pegSide: per.pegSide } : cfg; // which piece the pegs or plug stand on, per line
       // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
       // keys and its checks then all work on the sunk ring
       const sunk = opts.sink > 0 ? sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8) : null;
       const faceOf = (fxy, fh) => { const sec = { loops: [makeLoop(ring, [], fxy)] }; sec.regions = buildRegions(sec.loops); return { xy: fxy, h: fh, sec, step: capStep(fxy), H: capHeight(fxy, fh) }; };
-      const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
+      const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, cfg: lcfg, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
       c.use = (which) => { const f = which === 'sunk' && c.sunkFace ? c.sunkFace : c.plain; Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0 }); c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length; };
       c.use('sunk');
       return c;
@@ -2686,7 +2687,7 @@ const KMCore = (() => {
       let src = pos;
       caps.forEach((c, li) => {
         const { ring, n, F, xy, wantCCW, cap, sunk } = c;
-        if (c.joined) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys, cfg, surf, ek, c.plugs, sunk); src = r.V; pins.push(...r.pins); }
+        if (c.joined) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys, c.cfg, surf, ek, c.plugs, sunk); src = r.V; pins.push(...r.pins); }
         else {
           const xyMap = new Map([[extra + 2 * li, null]]);
           // the new points on the face that follows the line, each with a copy for the other piece
@@ -2798,7 +2799,7 @@ const KMCore = (() => {
         }
       }
       const mid = [p1, p2].map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
-      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(cfg, c.keys, c.plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
+      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(c.cfg, c.keys, c.plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
         const wedged = L > 1 && caps.filter(d => { const [a, b] = pair(d); return a === p1 && b === p2; }).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
         refuse(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
@@ -3323,7 +3324,9 @@ const KMCore = (() => {
     };
     // one try at a plug pulled in by `inset`: its outline and how deep its pocket can go
     const attempt = (ri, inset) => {
-      const sh = plugShape(sec, ri, inset, round);
+      let sh = plugShape(sec, ri, inset, round);
+      if (!sh.reason && !ringOk(sh.ring)) sh = plugShape(sec, ri, inset, round * 2); // a crossing outline: round it more
+      if (!sh.reason && !ringOk(sh.ring)) return { reason: 'Area too irregular for a plug' };
       if (sh.reason) return sh;
       const base = sh.ring, mouth = offsetRing(base, gs);
       let lo = Infinity, hi = -Infinity;
@@ -3354,9 +3357,16 @@ const KMCore = (() => {
         if (a.depth >= a.want - 1e-6) break;
       }
       if (!best || best.depth < 1) { out.push({ region: ri, ok: false, reason: best && best.depth > -Infinity ? 'The other piece is too thin here for a plug' : why || 'Area too small for a plug' }); continue; }
-      const { base, mouth, depth, want } = best;
-      const top = offsetRing(base, -depth * tanS), floor = offsetRing(top, gs);
-      if (![base, top, mouth, floor].every(ringOk)) { out.push({ region: ri, ok: false, reason: 'Area too irregular for a plug' }); continue; }
+      const { base, mouth, want } = best;
+      // the sloping sides move the top in by depth × tan(slope): where that folds a concave corner over itself, a
+      // shallower plug is used instead of none
+      let depth = best.depth, top, floor, fine = false;
+      for (let tries = 0; tries < 8 && depth >= 1; tries++) {
+        top = offsetRing(base, -depth * tanS); floor = offsetRing(top, gs);
+        if (ringOk(top) && ringOk(floor)) { fine = true; break; }
+        depth *= 0.7;
+      }
+      if (!ringOk(mouth) || !fine) { out.push({ region: ri, ok: false, reason: 'Area too irregular for a plug' }); continue; }
       out.push({ region: ri, ok: true, x: best.x, y: best.y, base, top, mouth, floor, depth, side: S, ca, short: depth < want - 1e-6, want });
     }
     return out;

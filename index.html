@@ -414,7 +414,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.27, build 6d3921. After an update, refresh the page and check this changes.">v1.27 · 6d3921</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.28, build 177eda. After an update, refresh the page and check this changes.">v1.28 · 177eda</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -3158,11 +3158,12 @@ const KMCore = (() => {
       let clash = keep.length < n;
       for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) if (surf.has(ek(cap[i + k], cap[i + (k + 1) % 3]))) { clash = true; break; }
       const per = opts.perLoop ? opts.perLoop[li] || {} : opts, into2 = wantCCW ? 1 : -1;
+      const lcfg = per.pegSide && per.pegSide !== cfg.pegSide ? { ...cfg, pegSide: per.pegSide } : cfg; // which piece the pegs or plug stand on, per line
       // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
       // keys and its checks then all work on the sunk ring
       const sunk = opts.sink > 0 ? sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8) : null;
       const faceOf = (fxy, fh) => { const sec = { loops: [makeLoop(ring, [], fxy)] }; sec.regions = buildRegions(sec.loops); return { xy: fxy, h: fh, sec, step: capStep(fxy), H: capHeight(fxy, fh) }; };
-      const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
+      const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, cfg: lcfg, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
       c.use = (which) => { const f = which === 'sunk' && c.sunkFace ? c.sunkFace : c.plain; Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0 }); c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length; };
       c.use('sunk');
       return c;
@@ -3176,7 +3177,7 @@ const KMCore = (() => {
       let src = pos;
       caps.forEach((c, li) => {
         const { ring, n, F, xy, wantCCW, cap, sunk } = c;
-        if (c.joined) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys, cfg, surf, ek, c.plugs, sunk); src = r.V; pins.push(...r.pins); }
+        if (c.joined) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys, c.cfg, surf, ek, c.plugs, sunk); src = r.V; pins.push(...r.pins); }
         else {
           const xyMap = new Map([[extra + 2 * li, null]]);
           // the new points on the face that follows the line, each with a copy for the other piece
@@ -3288,7 +3289,7 @@ const KMCore = (() => {
         }
       }
       const mid = [p1, p2].map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
-      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(cfg, c.keys, c.plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
+      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(c.cfg, c.keys, c.plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
         const wedged = L > 1 && caps.filter(d => { const [a, b] = pair(d); return a === p1 && b === p2; }).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
         refuse(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
@@ -3813,7 +3814,9 @@ const KMCore = (() => {
     };
     // one try at a plug pulled in by `inset`: its outline and how deep its pocket can go
     const attempt = (ri, inset) => {
-      const sh = plugShape(sec, ri, inset, round);
+      let sh = plugShape(sec, ri, inset, round);
+      if (!sh.reason && !ringOk(sh.ring)) sh = plugShape(sec, ri, inset, round * 2); // a crossing outline: round it more
+      if (!sh.reason && !ringOk(sh.ring)) return { reason: 'Area too irregular for a plug' };
       if (sh.reason) return sh;
       const base = sh.ring, mouth = offsetRing(base, gs);
       let lo = Infinity, hi = -Infinity;
@@ -3844,9 +3847,16 @@ const KMCore = (() => {
         if (a.depth >= a.want - 1e-6) break;
       }
       if (!best || best.depth < 1) { out.push({ region: ri, ok: false, reason: best && best.depth > -Infinity ? 'The other piece is too thin here for a plug' : why || 'Area too small for a plug' }); continue; }
-      const { base, mouth, depth, want } = best;
-      const top = offsetRing(base, -depth * tanS), floor = offsetRing(top, gs);
-      if (![base, top, mouth, floor].every(ringOk)) { out.push({ region: ri, ok: false, reason: 'Area too irregular for a plug' }); continue; }
+      const { base, mouth, want } = best;
+      // the sloping sides move the top in by depth × tan(slope): where that folds a concave corner over itself, a
+      // shallower plug is used instead of none
+      let depth = best.depth, top, floor, fine = false;
+      for (let tries = 0; tries < 8 && depth >= 1; tries++) {
+        top = offsetRing(base, -depth * tanS); floor = offsetRing(top, gs);
+        if (ringOk(top) && ringOk(floor)) { fine = true; break; }
+        depth *= 0.7;
+      }
+      if (!ringOk(mouth) || !fine) { out.push({ region: ri, ok: false, reason: 'Area too irregular for a plug' }); continue; }
       out.push({ region: ri, ok: true, x: best.x, y: best.y, base, top, mouth, floor, depth, side: S, ca, short: depth < want - 1e-6, want });
     }
     return out;
@@ -5741,14 +5751,14 @@ const KMCore = (() => {
   function replayPick(part) {
     const last = state.regions.last, clicks = last ? last.clicks : [];
     if (last && last.painted) { pickPainted(); return; }
-    if (last && last.drawn) pickLoops(part, [last.drawn], { lines: true });
-    clicks.forEach((pt, i) => pickCutLine(part, pt, i > 0 || !!(last && last.drawn)));
+    if (last && last.drawn && last.drawn.length) pickLoops(part, last.drawn.slice(), { lines: true });
+    clicks.forEach((pt, i) => pickCutLine(part, pt, i > 0 || !!(last && last.drawn && last.drawn.length)));
   }
   // Drawing a cut line by hand: each click adds a point, the line runs between them along the surface, and
   // closing it (Enter, the button, or a click by the first point) picks it like any other line.
   function setDrawing(on) {
     state.draw.on = on; state.draw.points = [];
-    if (on) { clearPick(); state.regions.last = null; }
+    if (on) { if (state.paint.on) setPainting(false); if (state.regions.pick && (state.regions.pick.regions || state.regions.pick.painted)) { clearPick(); state.regions.last = null; } } // lines already picked stay: the next line adds to them
     renderDraw(); renderPick(); updateHint();
     const b = $('#drawLineBtn'); if (b) { b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.textContent = on ? 'Stop drawing' : 'Draw a cut line'; }
     markDirty();
@@ -5767,8 +5777,10 @@ const KMCore = (() => {
     state.draw.on = false; state.draw.points = [];
     const b = $('#drawLineBtn'); if (b) { b.setAttribute('aria-pressed', 'false'); b.textContent = 'Draw a cut line'; }
     renderDraw();
-    state.regions.last = { partId: p.id, drawn: loop, clicks: [] };
-    pickLoops(p, [loop], { lines: true });
+    const last = state.regions.last && state.regions.last.partId === p.id && !state.regions.last.painted && state.regions.pick && !state.regions.pick.regions ? state.regions.last : { partId: p.id, clicks: [] };
+    last.drawn = [...(last.drawn || []), loop]; // several drawn lines cut together, like shift-clicked ones
+    state.regions.last = last;
+    replayPick(p);
     updateHint();
   }
   // Painting an area to split off: a brush paints triangles on the chosen part (across the surface from the one
@@ -6233,7 +6245,7 @@ const KMCore = (() => {
       <div class="grid2">${c.plugDepthMode === 'set' ? inlineField('plugDepth', 'Depth', c.plugDepth || 5, { min: 1, step: 0.5, aria: 'Plug depth' }) : '<span class="muted small size-note">Up to 10 mm</span>'}${inlineField('plugSlope', 'Slope', c.plugSlope === undefined ? 5 : c.plugSlope, { min: 0, max: 30, step: 1, unit: '°', aria: 'Slope of the plug’s sides' })}</div>
       <div class="inline"><span class="lbl">Fit</span>${seg('fit', c.clearance, [['0.1', 'Snug'], ['0.2', 'Standard'], ['0.3', 'Loose']])}</div>
       <div class="grid2">${inlineField('clearance', 'Gap', c.clearance, { min: 0, step: 0.05, aria: 'Gap per side' })}${inlineField('margin', 'Wall', c.margin, { min: 0.4, step: 0.2, aria: 'Wall round the plug' })}</div>
-      <div class="inline"><span class="lbl">Plug on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}</div>`;
+      <div class="inline"><span class="lbl">Plug on</span>${seg('pegside', c.pegSide, state.regions.on ? [['below', 'This piece'], ['above', 'Other piece']] : [['below', 'Solid half'], ['above', 'Clear half']])}</div>`;
     return `<div class="ins-section head">
       <div class="head-row"><h2>${esc(p.name)}</h2><span><button class="btn ghost small" data-act="export-one" title="Export this part on its own">Export</button><button class="btn ghost small" data-act="done">Done</button></span></div>
       <p class="muted small">${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm, ${fmtInt(p.tris)} triangles</p>
@@ -6254,7 +6266,7 @@ const KMCore = (() => {
       <div class="grid2">${inlineField('clearance', 'Gap', c.clearance, { min: 0, step: 0.05, aria: 'Gap per side' })}${inlineField('margin', 'Wall', c.margin, { min: 0.4, step: 0.2, aria: 'Wall around keys' })}</div>
       ${shownShape !== 'round' ? `<div class="grid2 direction"><label class="check"><input type="checkbox" data-cfg="align" ${c.align !== false ? 'checked' : ''}> Line up with area</label>
         ${inlineField('turn', 'Turn', c.turn || 0, { min: -180, max: 180, step: 15, unit: '°', aria: 'Turn by' })}</div>` : ''}
-      ${c.type === 'peg' ? `<div class="inline"><span class="lbl">Pegs on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}</div>
+      ${c.type === 'peg' ? `<div class="inline"><span class="lbl">Pegs on</span>${seg('pegside', c.pegSide, state.regions.on ? [['below', 'This piece'], ['above', 'Other piece']] : [['below', 'Solid half'], ['above', 'Clear half']])}</div>
         ${taperField(c)}` : ''}
       <div class="row keyrow">
         <label class="numi"><span>Keys per area</span><select data-cfg="perArea" aria-label="Keys per area">${[1, 2, 3, 4].map(n => `<option ${n === c.perArea ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
@@ -6472,19 +6484,24 @@ const KMCore = (() => {
     const pick = { partId: p.id, loops, loop: loops[0], regions: info.regions, region: info.regions ? info.regions[0] : undefined, painted: !!info.painted, keys: [], plugs: [], perLoop: [], frames: [], ans: [] };
     const cfg = coreCfg(), minThickness = minWall(), D = K.diag(p.bbox);
     const closed = loops.length > 0 && loops.every(l => l.closed);
+    // On a curved cut "Pegs on" means the piece being split off (this piece) or the other piece, whichever way
+    // each line happens to face: the side is worked out per line from the analysis (curvedSide), so a plug stands
+    // on the arm and its pocket goes into the body, not the other way round.
     if (closed && cfg.type !== 'none') {
       for (const loop of loops) {
         const per = { keys: [], plugs: [] };
         try {
-          const an = K.analyzeLoop(p.positions, p.indices, loop, cfg, D);
+          const an0 = K.analyzeLoop(p.positions, p.indices, loop, cfg, D), side = curvedSide(cfg.pegSide, an0.curved.into2), lcfg = { ...cfg, pegSide: side };
+          const an = side === cfg.pegSide ? an0 : K.analyzeLoop(p.positions, p.indices, loop, lcfg, D);
+          per.pegSide = side; per.cfg = lcfg;
           pick.frames.push(an.frame); pick.ans.push(an);
           if (cfg.type === 'plug') {
-            const pl = K.planPlugs(an, cfg);
+            const pl = K.planPlugs(an, lcfg);
             per.plugs = pl.filter(q => q.ok);
             if (!per.plugs.length && !pick.noKeys) { const why = (pl[0] || {}).reason || 'no room'; pick.noKeys = `No plug inside ${loops.length > 1 ? 'one of its lines' : 'this line'} (${why.charAt(0).toLowerCase() + why.slice(1)}), so that line will be cut without one.`; }
           } else {
-            const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, cfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, cfg, state.cfg.perArea, new Set());
-            const ok = K.evaluateKeys(an, keys, cfg, new Set());
+            const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, lcfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, lcfg, state.cfg.perArea, new Set());
+            const ok = K.evaluateKeys(an, keys, lcfg, new Set());
             per.keys = keys.filter((k, i) => ok[i].ok);
             if (!per.keys.length && !pick.noKeys) pick.noKeys = `No room for keys inside ${loops.length > 1 ? 'one of its lines' : 'this line'} at these settings, so that line will be cut without them.`;
           }
@@ -6493,8 +6510,8 @@ const KMCore = (() => {
       }
     } else pick.perLoop = loops.map(() => ({ keys: [], plugs: [] }));
     const run = (withJoints, force) => {
-      const o = { cfg, minThickness, force, sink: Math.max(0, +state.cfg.sink || 0), perLoop: withJoints ? pick.perLoop : loops.map(() => ({ keys: [], plugs: [] })) };
-      return info.regions ? K.splitRegions(p.positions, p.indices, info.seg, info.regions, o) : loops.length > 1 ? K.cutAlongLoops(p.positions, p.indices, loops, { ...o, what: 'lines' }) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
+      const o = { cfg, minThickness, force, sink: Math.max(0, +state.cfg.sink || 0), perLoop: withJoints ? pick.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: pick.perLoop[i] && pick.perLoop[i].pegSide })) };
+      return info.regions ? K.splitRegions(p.positions, p.indices, info.seg, info.regions, o) : loops.length > 1 ? K.cutAlongLoops(p.positions, p.indices, loops, { ...o, what: 'lines' }) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, cfg: o.perLoop[0].pegSide ? { ...cfg, pegSide: o.perLoop[0].pegSide } : cfg, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
     };
     try { pick.result = run(true); }
     catch (err) {
@@ -6522,7 +6539,7 @@ const KMCore = (() => {
         line.renderOrder = 9;
         g.add(line);
         const per = pick.perLoop[li], F = pick.frames[li], an = pick.ans[li];
-        if (per && F && an && per.keys.length) markers.add(curvedKeyMarkers(per.keys, F, an));
+        if (per && F && an && per.keys.length) markers.add(curvedKeyMarkers(per.keys, F, an, per.cfg || state.cfg));
         if (per && F && an && per.plugs.length) markers.add(curvedPlugMarkers(per.plugs, F, an));
       });
       v.pickLine = g; v.mesh.add(g);
@@ -6532,8 +6549,11 @@ const KMCore = (() => {
     markDirty();
   }
   // Keys on a curved cut, drawn where they'll be: based on the face that follows the line, and as long as they'll be.
-  function curvedKeyMarkers(keys, F, an) {
-    const g = new THREE.Group(), cfg = state.cfg;
+  // "Pegs on: this piece" is the piece being split off (side 1, whose material lies at -into2 along the line's frame
+  // normal), whatever way the line faces; 'below' names it, 'above' the other piece.
+  function curvedSide(pref, into2) { return (pref === 'below') === (into2 > 0) ? 'below' : 'above'; }
+  function curvedKeyMarkers(keys, F, an, cfg = state.cfg) {
+    const g = new THREE.Group();
     const world = (geom) => { // plane coordinates (u, v, n) to the part's coordinates
       for (const name of ['position', 'normal']) {
         const att = geom.attributes[name];
@@ -6555,7 +6575,7 @@ const KMCore = (() => {
       const dg = fanGeometry(prof(ks.r, ks.cs), lv.mid + 0.02);
       dg.attributes.position.array[0] = k.x; dg.attributes.position.array[1] = k.y; // the fan's middle is the key's
       const disc = new THREE.Mesh(world(dg), new THREE.MeshBasicMaterial({ color: 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: 0.8, depthTest: false }));
-      const body = new THREE.Mesh(world(prismGeometry(prof(ks.r, 0), prof(tipR, 0), z0, z1)), new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.4 }));
+      const body = new THREE.Mesh(world(prismGeometry(prof(ks.r, 0), prof(tipR, 0), z0, z1)), new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.4, transparent: true, opacity: 0.85, depthTest: false })); // seen through the model, like the plug
       disc.renderOrder = 8; body.renderOrder = 8;
       g.add(disc, body);
     }
@@ -6596,7 +6616,8 @@ const KMCore = (() => {
     }
     if (state.draw.on) {
       const n = state.draw.points.length;
-      el.innerHTML = `<p class="status muted">${n ? `${n} point${n === 1 ? '' : 's'} so far. ` : ''}${n >= 3 ? 'Close the line to see what the cut would do.' : `Click ${n ? 'more points' : 'points'} on the part; the line follows the surface between them.`}</p>${n >= 3 ? '<button class="btn small" data-act="close-draw">Close the line</button>' : ''}`;
+      const more = pick && pick.loops && pick.loops.length ? ` It will be cut together with the ${pick.loops.length === 1 ? 'line' : `${pick.loops.length} lines`} already picked.` : '';
+      el.innerHTML = `<p class="status muted">${n ? `${n} point${n === 1 ? '' : 's'} so far. ` : ''}${n >= 3 ? 'Close the line to see what the cut would do.' : `Click ${n ? 'more points' : 'points'} on the part; the line follows the surface between them.`}${more}</p>${n >= 3 ? '<button class="btn small" data-act="close-draw">Close the line</button>' : ''}`;
       return;
     }
     if (!pick) { el.innerHTML = `<p class="muted small">${selectedPart() ? 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds another region or line. Keys use the settings on the right.' : 'Click a part to choose it, then a region on it to split off.'}</p>`; return; }

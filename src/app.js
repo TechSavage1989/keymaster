@@ -1407,14 +1407,14 @@
   function replayPick(part) {
     const last = state.regions.last, clicks = last ? last.clicks : [];
     if (last && last.painted) { pickPainted(); return; }
-    if (last && last.drawn) pickLoops(part, [last.drawn], { lines: true });
-    clicks.forEach((pt, i) => pickCutLine(part, pt, i > 0 || !!(last && last.drawn)));
+    if (last && last.drawn && last.drawn.length) pickLoops(part, last.drawn.slice(), { lines: true });
+    clicks.forEach((pt, i) => pickCutLine(part, pt, i > 0 || !!(last && last.drawn && last.drawn.length)));
   }
   // Drawing a cut line by hand: each click adds a point, the line runs between them along the surface, and
   // closing it (Enter, the button, or a click by the first point) picks it like any other line.
   function setDrawing(on) {
     state.draw.on = on; state.draw.points = [];
-    if (on) { clearPick(); state.regions.last = null; }
+    if (on) { if (state.paint.on) setPainting(false); if (state.regions.pick && (state.regions.pick.regions || state.regions.pick.painted)) { clearPick(); state.regions.last = null; } } // lines already picked stay: the next line adds to them
     renderDraw(); renderPick(); updateHint();
     const b = $('#drawLineBtn'); if (b) { b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.textContent = on ? 'Stop drawing' : 'Draw a cut line'; }
     markDirty();
@@ -1433,8 +1433,10 @@
     state.draw.on = false; state.draw.points = [];
     const b = $('#drawLineBtn'); if (b) { b.setAttribute('aria-pressed', 'false'); b.textContent = 'Draw a cut line'; }
     renderDraw();
-    state.regions.last = { partId: p.id, drawn: loop, clicks: [] };
-    pickLoops(p, [loop], { lines: true });
+    const last = state.regions.last && state.regions.last.partId === p.id && !state.regions.last.painted && state.regions.pick && !state.regions.pick.regions ? state.regions.last : { partId: p.id, clicks: [] };
+    last.drawn = [...(last.drawn || []), loop]; // several drawn lines cut together, like shift-clicked ones
+    state.regions.last = last;
+    replayPick(p);
     updateHint();
   }
   // Painting an area to split off: a brush paints triangles on the chosen part (across the surface from the one
@@ -1899,7 +1901,7 @@
       <div class="grid2">${c.plugDepthMode === 'set' ? inlineField('plugDepth', 'Depth', c.plugDepth || 5, { min: 1, step: 0.5, aria: 'Plug depth' }) : '<span class="muted small size-note">Up to 10 mm</span>'}${inlineField('plugSlope', 'Slope', c.plugSlope === undefined ? 5 : c.plugSlope, { min: 0, max: 30, step: 1, unit: '°', aria: 'Slope of the plug’s sides' })}</div>
       <div class="inline"><span class="lbl">Fit</span>${seg('fit', c.clearance, [['0.1', 'Snug'], ['0.2', 'Standard'], ['0.3', 'Loose']])}</div>
       <div class="grid2">${inlineField('clearance', 'Gap', c.clearance, { min: 0, step: 0.05, aria: 'Gap per side' })}${inlineField('margin', 'Wall', c.margin, { min: 0.4, step: 0.2, aria: 'Wall round the plug' })}</div>
-      <div class="inline"><span class="lbl">Plug on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}</div>`;
+      <div class="inline"><span class="lbl">Plug on</span>${seg('pegside', c.pegSide, state.regions.on ? [['below', 'This piece'], ['above', 'Other piece']] : [['below', 'Solid half'], ['above', 'Clear half']])}</div>`;
     return `<div class="ins-section head">
       <div class="head-row"><h2>${esc(p.name)}</h2><span><button class="btn ghost small" data-act="export-one" title="Export this part on its own">Export</button><button class="btn ghost small" data-act="done">Done</button></span></div>
       <p class="muted small">${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm, ${fmtInt(p.tris)} triangles</p>
@@ -1920,7 +1922,7 @@
       <div class="grid2">${inlineField('clearance', 'Gap', c.clearance, { min: 0, step: 0.05, aria: 'Gap per side' })}${inlineField('margin', 'Wall', c.margin, { min: 0.4, step: 0.2, aria: 'Wall around keys' })}</div>
       ${shownShape !== 'round' ? `<div class="grid2 direction"><label class="check"><input type="checkbox" data-cfg="align" ${c.align !== false ? 'checked' : ''}> Line up with area</label>
         ${inlineField('turn', 'Turn', c.turn || 0, { min: -180, max: 180, step: 15, unit: '°', aria: 'Turn by' })}</div>` : ''}
-      ${c.type === 'peg' ? `<div class="inline"><span class="lbl">Pegs on</span>${seg('pegside', c.pegSide, [['below', 'Solid half'], ['above', 'Clear half']])}</div>
+      ${c.type === 'peg' ? `<div class="inline"><span class="lbl">Pegs on</span>${seg('pegside', c.pegSide, state.regions.on ? [['below', 'This piece'], ['above', 'Other piece']] : [['below', 'Solid half'], ['above', 'Clear half']])}</div>
         ${taperField(c)}` : ''}
       <div class="row keyrow">
         <label class="numi"><span>Keys per area</span><select data-cfg="perArea" aria-label="Keys per area">${[1, 2, 3, 4].map(n => `<option ${n === c.perArea ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
@@ -2138,19 +2140,24 @@
     const pick = { partId: p.id, loops, loop: loops[0], regions: info.regions, region: info.regions ? info.regions[0] : undefined, painted: !!info.painted, keys: [], plugs: [], perLoop: [], frames: [], ans: [] };
     const cfg = coreCfg(), minThickness = minWall(), D = K.diag(p.bbox);
     const closed = loops.length > 0 && loops.every(l => l.closed);
+    // On a curved cut "Pegs on" means the piece being split off (this piece) or the other piece, whichever way
+    // each line happens to face: the side is worked out per line from the analysis (curvedSide), so a plug stands
+    // on the arm and its pocket goes into the body, not the other way round.
     if (closed && cfg.type !== 'none') {
       for (const loop of loops) {
         const per = { keys: [], plugs: [] };
         try {
-          const an = K.analyzeLoop(p.positions, p.indices, loop, cfg, D);
+          const an0 = K.analyzeLoop(p.positions, p.indices, loop, cfg, D), side = curvedSide(cfg.pegSide, an0.curved.into2), lcfg = { ...cfg, pegSide: side };
+          const an = side === cfg.pegSide ? an0 : K.analyzeLoop(p.positions, p.indices, loop, lcfg, D);
+          per.pegSide = side; per.cfg = lcfg;
           pick.frames.push(an.frame); pick.ans.push(an);
           if (cfg.type === 'plug') {
-            const pl = K.planPlugs(an, cfg);
+            const pl = K.planPlugs(an, lcfg);
             per.plugs = pl.filter(q => q.ok);
             if (!per.plugs.length && !pick.noKeys) { const why = (pl[0] || {}).reason || 'no room'; pick.noKeys = `No plug inside ${loops.length > 1 ? 'one of its lines' : 'this line'} (${why.charAt(0).toLowerCase() + why.slice(1)}), so that line will be cut without one.`; }
           } else {
-            const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, cfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, cfg, state.cfg.perArea, new Set());
-            const ok = K.evaluateKeys(an, keys, cfg, new Set());
+            const keys = state.cfg.sizeMode === 'set' ? K.autoPlaceKeys(an, lcfg, state.cfg.perArea, new Set()) : K.autoFitKeys(an, lcfg, state.cfg.perArea, new Set());
+            const ok = K.evaluateKeys(an, keys, lcfg, new Set());
             per.keys = keys.filter((k, i) => ok[i].ok);
             if (!per.keys.length && !pick.noKeys) pick.noKeys = `No room for keys inside ${loops.length > 1 ? 'one of its lines' : 'this line'} at these settings, so that line will be cut without them.`;
           }
@@ -2159,8 +2166,8 @@
       }
     } else pick.perLoop = loops.map(() => ({ keys: [], plugs: [] }));
     const run = (withJoints, force) => {
-      const o = { cfg, minThickness, force, sink: Math.max(0, +state.cfg.sink || 0), perLoop: withJoints ? pick.perLoop : loops.map(() => ({ keys: [], plugs: [] })) };
-      return info.regions ? K.splitRegions(p.positions, p.indices, info.seg, info.regions, o) : loops.length > 1 ? K.cutAlongLoops(p.positions, p.indices, loops, { ...o, what: 'lines' }) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
+      const o = { cfg, minThickness, force, sink: Math.max(0, +state.cfg.sink || 0), perLoop: withJoints ? pick.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: pick.perLoop[i] && pick.perLoop[i].pegSide })) };
+      return info.regions ? K.splitRegions(p.positions, p.indices, info.seg, info.regions, o) : loops.length > 1 ? K.cutAlongLoops(p.positions, p.indices, loops, { ...o, what: 'lines' }) : K.cutAlongLoop(p.positions, p.indices, loops[0], { ...o, cfg: o.perLoop[0].pegSide ? { ...cfg, pegSide: o.perLoop[0].pegSide } : cfg, keys: o.perLoop[0].keys, plugs: o.perLoop[0].plugs });
     };
     try { pick.result = run(true); }
     catch (err) {
@@ -2188,7 +2195,7 @@
         line.renderOrder = 9;
         g.add(line);
         const per = pick.perLoop[li], F = pick.frames[li], an = pick.ans[li];
-        if (per && F && an && per.keys.length) markers.add(curvedKeyMarkers(per.keys, F, an));
+        if (per && F && an && per.keys.length) markers.add(curvedKeyMarkers(per.keys, F, an, per.cfg || state.cfg));
         if (per && F && an && per.plugs.length) markers.add(curvedPlugMarkers(per.plugs, F, an));
       });
       v.pickLine = g; v.mesh.add(g);
@@ -2198,8 +2205,11 @@
     markDirty();
   }
   // Keys on a curved cut, drawn where they'll be: based on the face that follows the line, and as long as they'll be.
-  function curvedKeyMarkers(keys, F, an) {
-    const g = new THREE.Group(), cfg = state.cfg;
+  // "Pegs on: this piece" is the piece being split off (side 1, whose material lies at -into2 along the line's frame
+  // normal), whatever way the line faces; 'below' names it, 'above' the other piece.
+  function curvedSide(pref, into2) { return (pref === 'below') === (into2 > 0) ? 'below' : 'above'; }
+  function curvedKeyMarkers(keys, F, an, cfg = state.cfg) {
+    const g = new THREE.Group();
     const world = (geom) => { // plane coordinates (u, v, n) to the part's coordinates
       for (const name of ['position', 'normal']) {
         const att = geom.attributes[name];
@@ -2221,7 +2231,7 @@
       const dg = fanGeometry(prof(ks.r, ks.cs), lv.mid + 0.02);
       dg.attributes.position.array[0] = k.x; dg.attributes.position.array[1] = k.y; // the fan's middle is the key's
       const disc = new THREE.Mesh(world(dg), new THREE.MeshBasicMaterial({ color: 0x1d1d1b, side: THREE.DoubleSide, transparent: true, opacity: 0.8, depthTest: false }));
-      const body = new THREE.Mesh(world(prismGeometry(prof(ks.r, 0), prof(tipR, 0), z0, z1)), new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.4 }));
+      const body = new THREE.Mesh(world(prismGeometry(prof(ks.r, 0), prof(tipR, 0), z0, z1)), new THREE.MeshStandardMaterial({ color: 0xfafbfc, roughness: 0.4, transparent: true, opacity: 0.85, depthTest: false })); // seen through the model, like the plug
       disc.renderOrder = 8; body.renderOrder = 8;
       g.add(disc, body);
     }
@@ -2262,7 +2272,8 @@
     }
     if (state.draw.on) {
       const n = state.draw.points.length;
-      el.innerHTML = `<p class="status muted">${n ? `${n} point${n === 1 ? '' : 's'} so far. ` : ''}${n >= 3 ? 'Close the line to see what the cut would do.' : `Click ${n ? 'more points' : 'points'} on the part; the line follows the surface between them.`}</p>${n >= 3 ? '<button class="btn small" data-act="close-draw">Close the line</button>' : ''}`;
+      const more = pick && pick.loops && pick.loops.length ? ` It will be cut together with the ${pick.loops.length === 1 ? 'line' : `${pick.loops.length} lines`} already picked.` : '';
+      el.innerHTML = `<p class="status muted">${n ? `${n} point${n === 1 ? '' : 's'} so far. ` : ''}${n >= 3 ? 'Close the line to see what the cut would do.' : `Click ${n ? 'more points' : 'points'} on the part; the line follows the surface between them.`}${more}</p>${n >= 3 ? '<button class="btn small" data-act="close-draw">Close the line</button>' : ''}`;
       return;
     }
     if (!pick) { el.innerHTML = `<p class="muted small">${selectedPart() ? 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds another region or line. Keys use the settings on the right.' : 'Click a part to choose it, then a region on it to split off.'}</p>`; return; }
