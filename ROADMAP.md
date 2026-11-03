@@ -25,6 +25,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
 - Pictures on the assembly sheet (1.48): each part beside its row, and the pieces spread apart along their cuts at the top.
+- The look (1.59): filmic tone mapping, a soft shadow under the model, framing that takes in the exploded pieces.
 - Split into parts (1.58): one press splits a figure into its parts by form, each with keys, one undo step.
 - Parts by form (1.57): regions from the thickness under the surface, so a head, each limb and the torso come out as regions of their own; Folds kept as the other way.
 - Regions outlined, not coloured, with the picked region tinted; every cut piece its own colour (1.56).

@@ -118,6 +118,12 @@
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.localClippingEnabled = true;
   renderer.setClearColor(0x000000, 0);
+  // the look: filmic tone mapping with colours managed in sRGB, and a soft shadow under the model (the owner asked
+  // for a more appealing view); the mock three.js in the tests has none of this, so each is guarded
+  if (THREE.ColorManagement) THREE.ColorManagement.legacyMode = false;
+  if (THREE.sRGBEncoding !== undefined) renderer.outputEncoding = THREE.sRGBEncoding;
+  if (THREE.ACESFilmicToneMapping !== undefined) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0; }
+  if (renderer.shadowMap) { renderer.shadowMap.enabled = true; if (THREE.PCFSoftShadowMap !== undefined) renderer.shadowMap.type = THREE.PCFSoftShadowMap; }
   stage.prepend(renderer.domElement);
   const canvas = renderer.domElement;
   canvas.setAttribute('aria-label', '3D view of the model');
@@ -131,22 +137,33 @@
   orbit.dampingFactor = 0.12;
   orbit.screenSpacePanning = true;
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x5a5f66, 0.85));
-  const keyLight = new THREE.DirectionalLight(0xffffff, 0.85);
-  const fillLight = new THREE.DirectionalLight(0xe4ecff, 0.32);
-  const rimLight = new THREE.DirectionalLight(0xfff4e0, 0.28);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x5a5f66, 0.9));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  const fillLight = new THREE.DirectionalLight(0xe4ecff, 0.35);
+  const rimLight = new THREE.DirectionalLight(0xfff4e0, 0.3);
   scene.add(keyLight, fillLight, rimLight);
+  if (keyLight.shadow && keyLight.shadow.mapSize) { keyLight.castShadow = true; keyLight.shadow.mapSize.set(2048, 2048); keyLight.shadow.bias = -0.0004; keyLight.shadow.radius = 4; scene.add(keyLight.target); }
+  // the ground the shadow falls on: a plane under the model that shows nothing but the shadow
+  const shadowGround = THREE.ShadowMaterial ? new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.22 })) : null;
+  if (shadowGround) { shadowGround.receiveShadow = true; shadowGround.visible = false; scene.add(shadowGround); }
   function placeLights(c, R) {
     keyLight.position.set(c[0] + R * 1.2, c[1] - R * 1.6, c[2] + R * 2.2);
     fillLight.position.set(c[0] - R * 2, c[1] + R * 0.6, c[2] + R * 0.4);
     rimLight.position.set(c[0] + R * 0.4, c[1] + R * 2.2, c[2] + R * 1.2);
+    if (keyLight.castShadow && keyLight.shadow && keyLight.shadow.camera) {
+      keyLight.target.position.set(c[0], c[1], c[2]);
+      const cam = keyLight.shadow.camera, s = R * 1.6;
+      cam.left = -s; cam.right = s; cam.top = s; cam.bottom = -s; cam.near = R * 0.2; cam.far = R * 6;
+      keyLight.shadow.normalBias = R * 0.004;
+      if (cam.updateProjectionMatrix) cam.updateProjectionMatrix();
+    }
   }
   placeLights([0, 0, 0], 100);
 
   let grid = null;
   function updateGrid() {
     if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); grid = null; }
-    if (!state.parts.length) return;
+    if (!state.parts.length) { if (shadowGround) shadowGround.visible = false; return; }
     const b = modelBounds();
     const span = Math.max(b.size[0], b.size[1]) * 1.8 + 40;
     const step = span > 600 ? 50 : 10;
@@ -154,8 +171,9 @@
     grid = new THREE.GridHelper(size, size / step, 0x6f757c, 0x8e949a);
     grid.rotation.x = Math.PI / 2;
     grid.position.set(b.center[0], b.center[1], b.min[2] - 0.01);
-    grid.material.transparent = true; grid.material.opacity = 0.38; grid.material.depthWrite = false;
+    grid.material.transparent = true; grid.material.opacity = 0.32; grid.material.depthWrite = false;
     scene.add(grid);
+    if (shadowGround) { shadowGround.visible = true; shadowGround.position.set(b.center[0], b.center[1], b.min[2] - 0.02); shadowGround.scale.set(size * 2, size * 2, 1); }
   }
   function modelBounds() {
     let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
@@ -287,8 +305,9 @@
     geom.setAttribute('position', new THREE.BufferAttribute(arr.pos, 3));
     geom.setAttribute('normal', new THREE.BufferAttribute(arr.nor, 3));
     geom.computeBoundingSphere(); geom.computeBoundingBox();
-    const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.66, metalness: 0, wireframe: state.wire, flatShading: state.flat });
+    const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.58, metalness: 0, wireframe: state.wire, flatShading: state.flat });
     const mesh = new THREE.Mesh(geom, mat);
+    mesh.castShadow = true; // onto the ground only: the parts don't shade each other, so no acne on fine detail
     mesh.userData.partId = p.id;
     v = { geom, mesh, mat, offset: new THREE.Vector3() };
     views.set(p.id, v);
@@ -1266,7 +1285,12 @@
     else if (specks) toast(specks.trim());
   }
   function frameAll(target) {
-    const b = target ? target.bbox : modelBounds();
+    let b = target ? target.bbox : modelBounds();
+    if (!target && state.explode > 0 && !state.selectedId && state.parts.length > 1) { // the pieces as they stand spread apart
+      const D = Math.hypot(...b.size), min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+      for (const p of state.parts) { if (state.hidden.has(p.id)) continue; const o = explodeOffset(p, state.explode, b, D); for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], p.bbox.min[k] + o[k]); max[k] = Math.max(max[k], p.bbox.max[k] + o[k]); } }
+      if (min[0] < Infinity) b = { min, max, size: max.map((x, k) => x - min[k]), center: max.map((x, k) => (x + min[k]) / 2) };
+    }
     const c = new THREE.Vector3(...b.center);
     const R = Math.max(1, Math.hypot(...b.size) / 2);
     const dist = R / Math.sin((camera.fov * Math.PI) / 360) * 1.08;
