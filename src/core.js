@@ -1750,7 +1750,7 @@ const KMCore = (() => {
   // can stay joined. Returns the piece's volume (the sum over its triangles with the caps added, and the caps lie
   // in the plane through the origin, so they add nothing), the rest, the areas to cut (`areas`, as 3D points, and
   // their total `cutArea`). With `whole` set the whole plane is cut and the two sides are measured instead.
-  function freedBy(P, I, F, scale, whole = false) {
+  function freedBy(P, I, F, scale, whole = false, at = [0, 0]) {
     const nt = I.length / 3, nv = P.length / 3, o = F.o, n = F.n, total = Math.abs(volume(P, I));
     const s = new Float64Array(nv);
     for (let i = 0; i < nv; i++) s[i] = (P[3 * i] - o[0]) * n[0] + (P[3 * i + 1] - o[1]) * n[1] + (P[3 * i + 2] - o[2]) * n[2];
@@ -1768,7 +1768,7 @@ const KMCore = (() => {
     }
     const sec = section(P, I, F, scale);
     if (sec.error) return null;
-    const ri = regionAt(sec, 0, 0);
+    const ri = regionAt(sec, at[0], at[1]);
     if (ri < 0) return null;
     const tol = 1e-3 * scale;
     // where each crossing triangle's piece of the outline lies, in the plane
@@ -1816,6 +1816,54 @@ const KMCore = (() => {
     for (const j of needed) { const r = sec.regions[j]; cutArea += r.area; extra = Math.max(extra, r.area); areas.push(planePoint(F, ...regionCentroid(sec, r))); }
     const piece = Math.abs(vol) / 6;
     return { area: sec.regions[ri].area, piece, rest: Math.max(0, total - piece), areas, cutArea, extra };
+  }
+  // The cleanest flat cut through a spot on the surface (the owner's click-to-cut-here): planes through the point
+  // with normals in and around the surface's tangent plane there (the ring round a limb runs across the limb, so
+  // its normal lies along it), each measured by the area whose outline the point is on and, through `freedBy`,
+  // what cutting it frees. The best is the lowest cut area for the piece freed (area over freed^⅔, as the
+  // suggestions score), never the smallest area alone, which would be a sliver shaved off the surface. It is then
+  // tilted, still through the point, until that stops improving. Returns a suggestion-shaped result or null.
+  function cutHere(P, I, point, scale) {
+    const tri = nearestTriangle(P, I, point, 0.1 * scale);
+    let N = null;
+    if (tri >= 0) { const a = 3 * I[3 * tri], b = 3 * I[3 * tri + 1], c = 3 * I[3 * tri + 2]; N = norm3(cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]])); }
+    const dirs = [];
+    if (N) {
+      const T = frameFromNormal(N, point);
+      for (const el of [0, 30, -30]) { const ce = Math.cos(el * Math.PI / 180), se = Math.sin(el * Math.PI / 180), step = el ? 30 : 15; for (let a = 0; a < 180; a += step) { const r = a * Math.PI / 180; dirs.push(norm3([(T.u[0] * Math.cos(r) + T.v[0] * Math.sin(r)) * ce + N[0] * se, (T.u[1] * Math.cos(r) + T.v[1] * Math.sin(r)) * ce + N[1] * se, (T.u[2] * Math.cos(r) + T.v[2] * Math.sin(r)) * ce + N[2] * se])); } }
+    } else dirs.push(...sweepDirections(P));
+    const total = Math.abs(volume(P, I)) || 1, tol = 2e-3 * scale;
+    // the cut through the point with this normal: the area the point's outline bounds, and what it frees
+    const measure = (n) => {
+      const F = frameFromNormal(n, point), sec = section(P, I, F, scale);
+      if (sec.error) return null;
+      let ri = -1, bd = Infinity;
+      for (let i = 0; i < sec.regions.length; i++) { const r = sec.regions[i]; if (r.nested || r.inverted) continue; const d = regionClearance(sec.loops, r, 0, 0); if (d < bd) { bd = d; ri = i; } }
+      if (ri < 0 || bd > tol) return null;
+      const s = pickLabelPoint(regionSamples(sec, ri, 200), [], 0); // a point well inside the area
+      const fb = freedBy(P, I, F, scale, false, [s.x, s.y]);
+      if (!fb) return null;
+      const freed = Math.min(fb.piece, fb.rest);
+      if (freed < 0.005 * total) return null;
+      if (fb.extra > 0.4 * fb.area) return null; // would need a second cut nearly as big elsewhere (both legs): a slice through the model, not a cut round this spot
+      return { normal: n, F, area: sec.regions[ri].area, inside: planePoint(F, s.x, s.y), freed, piece: fb.piece, areas: fb.areas, cutArea: fb.cutArea, extra: fb.extra, ratio: fb.cutArea / Math.pow(freed, 2 / 3) };
+    };
+    let best = null;
+    for (const d of dirs) { const m = measure(d); if (m && (!best || m.ratio < best.ratio)) best = m; }
+    if (!best) return null;
+    for (const deg of [12, 6, 3, 1.5]) {
+      let improved = true, guard = 0;
+      while (improved && guard++ < 4) {
+        improved = false;
+        const F = best.F, r = (deg * Math.PI) / 180, nrm = best.normal;
+        for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const tn = norm3([nrm[0] * Math.cos(r) + (F.u[0] * a + F.v[0] * b) * Math.sin(r), nrm[1] * Math.cos(r) + (F.u[1] * a + F.v[1] * b) * Math.sin(r), nrm[2] * Math.cos(r) + (F.u[2] * a + F.v[2] * b) * Math.sin(r)]);
+          const m = measure(tn);
+          if (m && m.ratio < best.ratio * 0.995) { best = m; improved = true; break; }
+        }
+      }
+    }
+    return { kind: 'here', normal: best.normal, point: best.inside, at: point.slice(), area: best.area, width: 2 * Math.sqrt(best.area / Math.PI), freed: best.freed, piece: best.piece, areas: best.areas, cutArea: best.cutArea, extra: best.extra, score: 1 / (1 + best.ratio / 1.5) };
   }
   // Merge narrow points found from several directions and tilt each plane until it sits square across the neck.
   // Each is scored by how cleanly it separates (1 − pinch), how much it frees (`freed` as a share of the model:
@@ -4017,7 +4065,7 @@ const KMCore = (() => {
     parseSTL, parseOBJ, prepareMesh, fillHoles, edgeReport, volume, bounds, diag,
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
-    sweepDirections, neckSweep, refineNecks, freedBy, creaseEdges, creasePlanes, separateShells,
+    sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
     segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
