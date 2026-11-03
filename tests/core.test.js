@@ -674,6 +674,18 @@ console.log('curved cuts along a border');
   const back = K.drawnLoop(sp.positions, sp.indices, [drawnPts[0], drawnPts[1], drawnPts[0], drawnPts[2], drawnPts[3]]);
   check('a line that doubles back on itself is made simple', back && back.closed && new Set(back.verts).size === back.verts.length && Math.abs(back.length - drawn.length) / drawn.length < 0.15, back && [back.verts.length, back.length]);
   check('fewer than three points make no line', K.drawnLoop(sp.positions, sp.indices, drawnPts.slice(0, 2)) === null);
+  // seam editing: a line as handles along the surface, dragged, smoothed and snapped
+  const hs = K.loopHandles(sp.positions, drawn, 12);
+  const onLine = (q) => drawn.verts.some(v => Math.hypot(sp.positions[3 * v] - q[0], sp.positions[3 * v + 1] - q[1], sp.positions[3 * v + 2] - q[2]) < 1e-6);
+  check('a line gives about a dozen handles, all on it, spread round it', hs.length >= 10 && hs.length <= 12 && hs.every(onLine) && Math.max(...hs.map(q => q[1])) > 10 && Math.min(...hs.map(q => q[1])) < -10, hs.length);
+  const moved = hs.map(q => q.slice()); { const q = moved[3], zz = q[2] + 8, rr = Math.sqrt(400 - zz * zz), rh = Math.hypot(q[0], q[1]); moved[3] = [q[0] / rh * rr, q[1] / rh * rr, zz]; } // one handle pulled 8 mm up the sphere
+  const edited = K.drawnLoop(sp.positions, sp.indices, moved);
+  check('the line re-routed through a dragged handle still closes and passes near the handle', edited && edited.closed && edited.verts.some(v => Math.hypot(sp.positions[3 * v] - moved[3][0], sp.positions[3 * v + 1] - moved[3][1], sp.positions[3 * v + 2] - moved[3][2]) < 1.5) && edited.length > drawn.length, edited && [edited.length, drawn.length]);
+  const zig = hs.map((q, i) => (i % 2 ? [q[0], q[1], q[2] + 6] : q)); // every other handle lifted: a zig-zag
+  const zigLoop = K.drawnLoop(sp.positions, sp.indices, zig), smoothLoop = K.drawnLoop(sp.positions, sp.indices, K.smoothHandles(sp.positions, zig, 3));
+  check('smoothing a zig-zag line shortens it, and keeps its handles on the surface', zigLoop && smoothLoop && smoothLoop.length < 0.9 * zigLoop.length && K.smoothHandles(sp.positions, zig, 3).every(q => Math.abs(Math.hypot(...q) - 20) < 0.5), zigLoop && smoothLoop && [zigLoop.length, smoothLoop.length]);
+  const nbp = K.nearestBorderPoint(sp.positions, segW, [sp.positions[3 * loopsW[0].verts[5]] + 0.3, sp.positions[3 * loopsW[0].verts[5] + 1], sp.positions[3 * loopsW[0].verts[5] + 2]]);
+  check('the nearest point on a border to a point just off it is under half a millimetre away', !!nbp && nbp.distance < 0.5, nbp);
   // A painted selection, like a face selection in Meshmixer: brush dabs reach across the surface within the brush,
   // grow, shrink and tidy work in millimetres, and the painted area splits off like a region, sealed
   const ntS2 = sp.indices.length / 3, painted = new Uint8Array(ntS2), dabs = [[0, 0, 20], [4, 0, 19.6]];

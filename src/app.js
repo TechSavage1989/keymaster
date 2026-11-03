@@ -33,6 +33,7 @@
   state.regions = { on: false, angle: 60, fold: 15 };
   state.here = { on: false }; // Cut at a spot: the next click on the part finds the narrowest cut through it
   state.draw = { on: false, points: [] }; // a cut line drawn by hand: points clicked on the chosen part
+  state.edit = null; // the picked lines as draggable handles: { partId, loops: [{ pts, base }], smooth, snap }
   state.paint = { on: false, partId: null, sel: null, erase: false, size: 3, sized: false }; // a painted selection to split off, like a face selection in Meshmixer
   const history = { past: [], future: [] };
   let uid = 1;
@@ -1216,7 +1217,7 @@
     const n = planeNormal();
     return n.dot(camera.position.clone().sub(planeGroup.position)) > 0;
   }
-  const ptr = { down: false, x: 0, y: 0, t: 0, dragKey: -1, ring: null, hoverRing: null, tilt: null, sheet: null };
+  const ptr = { down: false, x: 0, y: 0, t: 0, dragKey: -1, ring: null, hoverRing: null, tilt: null, sheet: null, handle: null };
   function toScreen(v) {
     const r = canvas.getBoundingClientRect();
     const q = v.clone().project(camera);
@@ -1313,7 +1314,7 @@
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { cutHereAt(partIndex, point) { const part = state.parts[partIndex]; const it = K.cutHere(part.positions, part.indices, point, K.diag(part.bbox)); if (!it) return null; addHereSuggestion(part, it); return { width: it.width, freed: it.freed, areas: it.areas.length, normal: it.normal }; }, explodeOffsets() { return state.parts.map(p => { const v = views.get(p.id); return { pull: p.pull, at: v ? [v.mesh.position.x - v.offset.x, v.mesh.position.y - v.offset.y, v.mesh.position.z - v.offset.z] : null }; }); }, regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintLetGo() { previewPainted(); const pk = state.regions.pick; return pk ? { preview: !!pk.preview, loops: pk.loops.length, error: pk.error || '' } : null; }, paintDone() { pickPainted(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { seamEdit() { startSeamEdit(); return state.edit ? state.edit.loops.map(l => l.pts.length) : null; }, seamDrag(li, i, point) { moveHandle(li, i, point); ptr.handle = { li, i }; endHandle(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', length: pk.loops.reduce((s, l) => s + l.length, 0), handle: state.edit.loops[li].pts[i] } : null; }, seamSmooth(passes) { smoothSeam(passes); const pk = state.regions.pick; return pk ? { ok: !!pk.result, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, cutHereAt(partIndex, point) { const part = state.parts[partIndex]; const it = K.cutHere(part.positions, part.indices, point, K.diag(part.bbox)); if (!it) return null; addHereSuggestion(part, it); return { width: it.width, freed: it.freed, areas: it.areas.length, normal: it.normal }; }, explodeOffsets() { return state.parts.map(p => { const v = views.get(p.id); return { pull: p.pull, at: v ? [v.mesh.position.x - v.offset.x, v.mesh.position.y - v.offset.y, v.mesh.position.z - v.offset.z] : null }; }); }, regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintLetGo() { previewPainted(); const pk = state.regions.pick; return pk ? { preview: !!pk.preview, loops: pk.loops.length, error: pk.error || '' } : null; }, paintDone() { pickPainted(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -1373,7 +1374,9 @@
     ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = performance.now(); ptr.dragKey = -1; ptr.ring = null; ptr.tilt = null; ptr.sheet = null;
     if (e.altKey) return; // Alt-drag always orbits
     if (state.regions.on) { // the cut plane is hidden while surface regions show: drags orbit, clicks pick lines, or paint
-      if (state.paint.on && paintAt(e, e.shiftKey)) { ptr.paint = true; orbit.enabled = false; canvas.setPointerCapture(e.pointerId); }
+      if (state.paint.on && paintAt(e, e.shiftKey)) { ptr.paint = true; orbit.enabled = false; canvas.setPointerCapture(e.pointerId); return; }
+      const hd = handleAt(e);
+      if (hd) { ptr.handle = hd; orbit.enabled = false; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; }
       return;
     }
     const ring = pickRing(e);
@@ -1401,7 +1404,8 @@
       return;
     }
     if (ptr.paint) { paintAt(e, e.shiftKey); return; }
-    if (state.regions.on) { if (!ptr.down) { canvas.style.cursor = state.paint.on ? 'crosshair' : ''; if (state.paint.on) hoverBrush(e); } return; } // nothing on the hidden plane to grab
+    if (ptr.handle) { dragHandle(e); return; }
+    if (state.regions.on) { if (!ptr.down) { canvas.style.cursor = state.paint.on ? 'crosshair' : handleAt(e) ? 'grab' : ''; if (state.paint.on) hoverBrush(e); } return; } // nothing on the hidden plane to grab
     if (!ptr.down && selectedPart() && !tc.dragging) {
       const ring = tc.axis ? null : pickRing(e);
       setRingHover(ring ? ring.ax : null);
@@ -1423,11 +1427,12 @@
     const ri = h ? K.regionAt(state.cut.analysis.base, h.x, h.y) : -1;
     return state.cut.skip.has(ri) ? ri : -1;
   }
-  canvas.addEventListener('pointercancel', () => { if (ptr.ring) endRing(); if (ptr.tilt) endTilt(); if (ptr.sheet) { ptr.sheet = null; orbit.enabled = true; } if (ptr.dragKey >= 0) { ptr.dragKey = -1; orbit.enabled = true; } if (ptr.paint) endPaint(); ptr.down = false; });
+  canvas.addEventListener('pointercancel', () => { if (ptr.ring) endRing(); if (ptr.tilt) endTilt(); if (ptr.sheet) { ptr.sheet = null; orbit.enabled = true; } if (ptr.dragKey >= 0) { ptr.dragKey = -1; orbit.enabled = true; } if (ptr.paint) endPaint(); if (ptr.handle) endHandle(); ptr.down = false; });
   canvas.addEventListener('pointerup', (e) => {
     if (!ptr.down) return;
     ptr.down = false;
     if (ptr.paint) { endPaint(); return; }
+    if (ptr.handle) { endHandle(); return; }
     if (ptr.ring) { endRing(); return; }
     if (ptr.tilt) { endTilt(); return; }
     if (ptr.sheet) { ptr.sheet = null; orbit.enabled = true; }
@@ -1489,8 +1494,117 @@
     if (part.id !== state.selectedId) { if (state.paint.on) setPainting(false); clearPick(); selectPart(part.id); renderPick(); updateHint(); return; }
     const last = state.regions.last;
     if (add && last && last.partId === part.id && state.regions.pick) last.clicks.push(point);
-    else state.regions.last = { partId: part.id, clicks: [point] };
+    else { endSeamEdit(); state.regions.last = { partId: part.id, clicks: [point] }; }
     replayPick(part);
+  }
+  // Seam editing: the picked lines become handles along the surface. Drag one and the line is re-routed through it
+  // (along the surface, as a drawn line is), Smooth eases them, and a handle dragged near a region border snaps to
+  // it. The pick re-runs when a handle is let go, so keys, plug, sinking and the checks follow the new line.
+  function startSeamEdit() {
+    const p = selectedPart(), pick = state.regions.pick;
+    if (!p || !pick || !pick.loops.length) return;
+    const n = Math.max(6, Math.min(40, Math.round(pick.loops.reduce((s, l) => s + l.length, 0) / (K.diag(p.bbox) * 0.03) / pick.loops.length)));
+    const loops = pick.loops.map(l => { const pts = K.loopHandles(p.positions, l, n); return { pts, base: pts.map(q => q.slice()) }; });
+    state.edit = { partId: p.id, loops, smooth: 0, snap: true };
+    if (state.draw.on) setDrawing(false);
+    state.regions.last = { partId: p.id, clicks: [], drawn: [] };
+    rebuildSeam();
+    const sl = $('#seamSmooth'); if (sl) { sl.value = 0; $('#seamSmoothOut').textContent = '0'; }
+    updateHint();
+  }
+  function endSeamEdit() {
+    if (!state.edit) return;
+    state.edit = null;
+    for (const v of views.values()) if (v.editDots) { v.mesh.remove(v.editDots); clearGroup(v.editDots); v.editDots = null; }
+    const tools = $('#seamTools'); if (tools) tools.hidden = true;
+    markDirty();
+  }
+  // Rebuild every edited line through its handles and re-run the pick
+  function rebuildSeam() {
+    const ed = state.edit, p = ed && state.parts.find(q => q.id === ed.partId);
+    if (!p) return;
+    const drawn = [];
+    for (const l of ed.loops) { const loop = K.drawnLoop(p.positions, p.indices, l.pts); if (loop) { loop.edited = true; drawn.push(loop); } }
+    if (!drawn.length) { toast('Those handles can’t be joined along the surface. Drag them back onto one piece of it.', 'error'); return; }
+    state.regions.last = { partId: p.id, clicks: [], drawn };
+    replayPick(p);
+    renderSeamHandles();
+    const tools = $('#seamTools'); if (tools) tools.hidden = false;
+  }
+  function renderSeamHandles() {
+    for (const v of views.values()) if (v.editDots) { v.mesh.remove(v.editDots); clearGroup(v.editDots); v.editDots = null; }
+    const ed = state.edit, p = ed && selectedPart(), v = p && p.id === ed.partId && views.get(p.id);
+    if (!v) return;
+    const g = new THREE.Group();
+    const all = ed.loops.flatMap(l => l.pts).map(q => new THREE.Vector3(q[0], q[1], q[2]));
+    const dots = new THREE.Points(new THREE.BufferGeometry().setFromPoints(all), new THREE.PointsMaterial({ color: 0xffffff, size: 10, sizeAttenuation: false, depthTest: false }));
+    dots.renderOrder = 10; g.add(dots);
+    const inner = new THREE.Points(new THREE.BufferGeometry().setFromPoints(all), new THREE.PointsMaterial({ color: 0x2f6fe0, size: 6, sizeAttenuation: false, depthTest: false }));
+    inner.renderOrder = 11; g.add(inner);
+    v.editDots = g; v.mesh.add(g);
+    markDirty();
+  }
+  // The handle under the pointer, if any: the nearest within 12 px on screen
+  function handleAt(e) {
+    const ed = state.edit, p = ed && selectedPart(), v = p && p.id === ed.partId && views.get(p.id);
+    if (!v || state.paint.on || state.draw.on) return null;
+    camera.updateMatrixWorld(); v.mesh.updateMatrixWorld(true);
+    const r = canvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    let best = null, bd = 12;
+    ed.loops.forEach((l, li) => l.pts.forEach((q, i) => { const s = toScreen(v.mesh.localToWorld(new THREE.Vector3(q[0], q[1], q[2]))); const d = Math.hypot(s[0] - x, s[1] - y); if (d < bd) { bd = d; best = { li, i }; } }));
+    return best;
+  }
+  function dragHandle(e) {
+    const ed = state.edit, p = selectedPart(), v = p && views.get(p.id);
+    if (!ed || !v) return;
+    setNdc(e);
+    const hit = raycaster.intersectObjects([v.mesh], false)[0];
+    if (!hit) return;
+    const local = hit.point.clone().sub(hit.object.position);
+    moveHandle(ptr.handle.li, ptr.handle.i, [local.x, local.y, local.z]);
+  }
+  // Put a handle at a point on the part (snapped to a region border when close), and redraw its two legs
+  function moveHandle(li, i, point) {
+    const ed = state.edit, p = selectedPart();
+    if (!ed || !p || !ed.loops[li]) return;
+    let q = point.slice();
+    if (ed.snap) { const nb = K.nearestBorderPoint(p.positions, regionsFor(p), q); if (nb && nb.distance < K.diag(p.bbox) * 0.015) q = nb.point; }
+    const vtx = K.nearestVertex(p.positions, q);
+    ed.loops[li].pts[i] = [p.positions[3 * vtx], p.positions[3 * vtx + 1], p.positions[3 * vtx + 2]];
+    renderSeamHandles();
+    previewLegs(li, i);
+  }
+  // While a handle is dragged, only its two legs are redrawn (the full pick waits for the pointer to be let go)
+  function previewLegs(li, i) {
+    const ed = state.edit, p = selectedPart(), v = p && views.get(p.id);
+    if (!v) return;
+    if (v.legLine) { v.mesh.remove(v.legLine); clearGroup(v.legLine); v.legLine = null; }
+    const pts = ed.loops[li].pts, n = pts.length, line = [];
+    for (const [a, b] of [[(i + n - 1) % n, i], [i, (i + 1) % n]]) {
+      const path = K.surfacePath(p.positions, p.indices, K.nearestVertex(p.positions, pts[a]), K.nearestVertex(p.positions, pts[b])) || [];
+      for (const w of path) line.push(new THREE.Vector3(p.positions[3 * w], p.positions[3 * w + 1], p.positions[3 * w + 2]));
+    }
+    const g = new THREE.Group();
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(line), new THREE.LineBasicMaterial({ color: 0xf2b705, depthTest: false })); l.renderOrder = 10; g.add(l);
+    v.legLine = g; v.mesh.add(g);
+    markDirty();
+  }
+  function endHandle() {
+    const h = ptr.handle; ptr.handle = null;
+    orbit.enabled = true; canvas.style.cursor = '';
+    const ed = state.edit, p = selectedPart(), v = p && views.get(p.id);
+    if (v && v.legLine) { v.mesh.remove(v.legLine); clearGroup(v.legLine); v.legLine = null; }
+    if (!ed || !h) return;
+    ed.loops.forEach(l => { l.base = l.pts.map(q => q.slice()); });
+    ed.smooth = 0; const sl = $('#seamSmooth'); if (sl) { sl.value = 0; $('#seamSmoothOut').textContent = '0'; }
+    rebuildSeam();
+  }
+  function smoothSeam(passes) {
+    const ed = state.edit, p = selectedPart();
+    if (!ed || !p) return;
+    ed.smooth = passes;
+    for (const l of ed.loops) l.pts = passes ? K.smoothHandles(p.positions, l.base, passes) : l.base.map(q => q.slice());
+    rebuildSeam();
   }
   function replayPick(part) {
     const last = state.regions.last, clicks = last ? last.clicks : [];
@@ -1502,6 +1616,7 @@
   // closing it (Enter, the button, or a click by the first point) picks it like any other line.
   function setDrawing(on) {
     state.draw.on = on; state.draw.points = [];
+    if (on) endSeamEdit();
     if (on) { if (state.paint.on) setPainting(false); if (state.regions.pick && (state.regions.pick.regions || state.regions.pick.painted)) { clearPick(); state.regions.last = null; } } // lines already picked stay: the next line adds to them
     renderDraw(); renderPick(); updateHint();
     const b = $('#drawLineBtn'); if (b) { b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.textContent = on ? 'Stop drawing' : 'Draw a cut line'; }
@@ -1532,7 +1647,7 @@
   // the pointer picks the painted area like a region, with the usual keys, plug, sinking and "cut anyway".
   function setPainting(on) {
     state.paint.on = on;
-    if (on) { clearPick(); state.regions.last = null; if (state.draw.on) setDrawing(false); }
+    if (on) { endSeamEdit(); clearPick(); state.regions.last = null; if (state.draw.on) setDrawing(false); }
     const p = selectedPart();
     if (on && p && state.paint.partId !== p.id) { state.paint.partId = p.id; state.paint.sel = new Uint8Array(p.indices.length / 3); }
     if (on && p && !state.paint.sized) { state.paint.size = Math.max(0.5, Math.round(K.diag(p.bbox) * 0.03 * 2) / 2); const inp = $('#brushSize'); if (inp) inp.value = state.paint.size; } // a brush to suit the model's size until it's set by hand
@@ -1708,7 +1823,7 @@
     if (typing || mod || e.altKey) return;
     const p = selectedPart();
     switch (e.key) {
-      case 'Escape': if (state.here.on) setHere(false); else if (state.regions.on && state.paint.on) setPainting(false); else if (state.regions.on && state.draw.on) setDrawing(false); else if (state.regions.on && state.regions.pick) { clearPick(); renderPick(); markDirty(); } else if (p && state.cut.active >= 0) { state.cut.active = -1; renderKeyMarkers(); renderInspector(); } else if (p) selectPart(null); break;
+      case 'Escape': if (state.here.on) setHere(false); else if (state.regions.on && state.paint.on) setPainting(false); else if (state.regions.on && state.draw.on) setDrawing(false); else if (state.regions.on && state.regions.pick) { endSeamEdit(); clearPick(); state.regions.last = null; renderPick(); updateHint(); markDirty(); } else if (p && state.cut.active >= 0) { state.cut.active = -1; renderKeyMarkers(); renderInspector(); } else if (p) selectPart(null); break;
       case 'Backspace': if (state.regions.on && state.draw.on && state.draw.points.length) { e.preventDefault(); state.draw.points.pop(); renderDraw(); renderPick(); updateHint(); markDirty(); } break;
       case 'Enter': if (state.regions.on && state.draw.on) { e.preventDefault(); closeDrawing(); } else if (state.regions.on && state.regions.pick && state.regions.pick.result) { e.preventDefault(); cutAlongPick(); } else if (p) { e.preventDefault(); doCut(); } break;
       case 'Delete': case 'Backspace': if (p && state.cut.active >= 0) { e.preventDefault(); removeKey(state.cut.active); } break;
@@ -1754,6 +1869,7 @@
     if (!state.parts.length) t = '';
     else if (state.here.on) t = 'Click where the cut should go round, on a limb, a neck or an accessory. Keymaster finds the narrowest cut through that spot. Esc to stop.';
     else if (state.regions.on && state.paint.on) t = `Drag over the part to paint the area to split off (Shift-drag erases). The circle is the brush, ${fmt(state.paint.size)} mm wide. Let go to see the split. Esc stops painting.`;
+    else if (state.regions.on && state.edit && !state.paint.on && !state.draw.on) t = 'Drag a handle to move the line along the surface; it snaps to a region border when close. Smooth eases the line. Enter cuts, Esc picks again.';
     else if (state.regions.on && state.draw.on) t = `Click points on the part to draw the cut line${state.draw.points.length >= 3 ? '. Enter or a click by the first point closes it' : ' (at least three)'}. Backspace takes the last point back, Esc stops drawing.`;
     else if (state.regions.on) t = !p ? 'Click a part to choose it. Its key settings appear on the right.' : 'Click a region to split it off, or a dark border line to cut along it. Shift-click adds to the pick. Enter cuts, Esc picks again.';
     else if (!p) t = (state.parts.length > 1 ? 'Click a part to cut it. ' : 'Click the model to start cutting it. ') + (coarse ? 'Drag to orbit, pinch to zoom.' : 'Drag to orbit, right-drag to pan.');
@@ -2425,7 +2541,7 @@
       : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')} cm³.`;
     el.innerHTML = `${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}${sunkLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}${sunkLine}</span></p>`}
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
-      <button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>${pick.forced ? (region ? `Split ${painted || nr === 1 ? 'it' : 'them'} off anyway` : `Cut along ${nl === 1 ? 'it' : 'them'} anyway`) : painted ? 'Split off painted area' : region ? `Split off ${nr === 1 ? 'this region' : 'these regions'}` : `Cut along ${nl === 1 ? 'this line' : 'these lines'}`}</span></button>${painted ? '' : addHint}`;
+      <div class="btn-row"><button class="btn cut small" data-act="cut-line">${ICONS.cut}<span>${pick.forced ? (region ? `Split ${painted || nr === 1 ? 'it' : 'them'} off anyway` : `Cut along ${nl === 1 ? 'it' : 'them'} anyway`) : painted ? 'Split off painted area' : region ? `Split off ${nr === 1 ? 'this region' : 'these regions'}` : `Cut along ${nl === 1 ? 'this line' : 'these lines'}`}</span></button>${state.edit ? '' : `<button class="btn small" data-act="edit-seam" title="Turn the line into handles you can drag along the surface">Edit ${nl === 1 ? 'the line' : 'the lines'}</button>`}</div>${painted || state.edit ? '' : addHint}`;
   }
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);
@@ -2446,6 +2562,8 @@
   regionsPanel.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]') && e.target.closest('[data-act]').dataset.act;
     if (act === 'cut-line') cutAlongPick();
+    else if (act === 'edit-seam') startSeamEdit();
+    else if (act === 'seam-done') { endSeamEdit(); renderPick(); updateHint(); }
     else if (act === 'split-painted') splitPainted();
     else if (act === 'close-draw') closeDrawing();
     else if (act && act.startsWith('paint-')) paintEdit(act);
@@ -2453,6 +2571,9 @@
     else if (e.target.closest('#paintBtn')) { if (!selectedPart()) { toast('Click a part to choose it first.'); return; } setPainting(!state.paint.on); }
     else if (e.target.closest('#eraseBtn')) { state.paint.erase = !state.paint.erase; $('#eraseBtn').setAttribute('aria-pressed', state.paint.erase ? 'true' : 'false'); }
   });
+  $('#seamSmooth').addEventListener('input', (e) => { $('#seamSmoothOut').textContent = e.target.value; });
+  $('#seamSmooth').addEventListener('change', (e) => { smoothSeam(+e.target.value); });
+  $('#seamSnap').addEventListener('change', (e) => { if (state.edit) state.edit.snap = e.target.checked; });
   $('#brushSize').addEventListener('change', (e) => { state.paint.size = Math.max(0.2, +e.target.value || 3); e.target.value = state.paint.size; state.paint.sized = true; brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); markDirty(); });
   function applyRegions() {
     const on = state.regions.on;
@@ -2487,7 +2608,7 @@
     if (state.regions.on === on) return;
     state.regions.on = on;
     if (on && !selectedPart() && state.parts.filter(q => !state.hidden.has(q.id)).length === 1) selectPart(state.parts.find(q => !state.hidden.has(q.id)).id); // one part: it's the one
-    if (!on) { state.regions.last = null; if (state.draw.on) setDrawing(false); if (state.paint.on) setPainting(false); }
+    if (!on) { endSeamEdit(); state.regions.last = null; if (state.draw.on) setDrawing(false); if (state.paint.on) setPainting(false); }
     applyRegions();
     updatePreview();
     placeAreaTags(); placeSuggestPins(); updateHint(); renderInspector();

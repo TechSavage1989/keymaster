@@ -2633,6 +2633,48 @@ const KMCore = (() => {
     let length = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; length += Math.hypot(P[3 * p] - P[3 * q], P[3 * p + 1] - P[3 * q + 1], P[3 * p + 2] - P[3 * q + 2]); }
     return { verts: ring, closed: true, length, drawn: true };
   }
+  /* ---------- seam editing ----------
+     A cut line as a few handles along the surface (the owner's band tool, as modelsplitter has): drag one and the
+     line is re-routed through it along the surface, smooth them, or snap one to a region border. */
+  // Handles along a line: about `n` points evenly spaced by length along its vertices (always at least three).
+  function loopHandles(P, loop, n = 16) {
+    const vs = loop.verts, m = vs.length, at = (v) => [P[3 * v], P[3 * v + 1], P[3 * v + 2]];
+    let total = 0;
+    for (let i = 0; i < m; i++) { const a = vs[i], b = vs[(i + 1) % m]; total += Math.hypot(P[3 * a] - P[3 * b], P[3 * a + 1] - P[3 * b + 1], P[3 * a + 2] - P[3 * b + 2]); }
+    const want = Math.max(3, Math.min(n, m)), step = total / want, out = [];
+    let acc = 0, next = 0;
+    for (let i = 0; i < m && out.length < want; i++) {
+      if (acc >= next - 1e-9) { out.push(at(vs[i])); next += step; }
+      const a = vs[i], b = vs[(i + 1) % m]; acc += Math.hypot(P[3 * a] - P[3 * b], P[3 * a + 1] - P[3 * b + 1], P[3 * a + 2] - P[3 * b + 2]);
+    }
+    while (out.length < 3 && out.length < m) out.push(at(vs[Math.floor(m * out.length / 3)]));
+    return out;
+  }
+  // Smooth a closed run of handles, `passes` times, then put each back onto the nearest vertex so the line stays
+  // on the surface. Each pass is Taubin's pair: a step towards the midpoint of the neighbours (λ) and a slightly
+  // bigger step back (μ), which eases zig-zags without shrinking the loop (plain averaging pulled a small seam
+  // round a 5 mm bar into a dot).
+  function smoothHandles(P, points, passes = 1) {
+    let pts = points.map(q => q.slice());
+    const n = pts.length;
+    if (n < 3) return pts;
+    const step = (t) => { pts = pts.map((q, i) => { const a = pts[(i + n - 1) % n], b = pts[(i + 1) % n]; return [q[0] + t * ((a[0] + b[0]) / 2 - q[0]), q[1] + t * ((a[1] + b[1]) / 2 - q[1]), q[2] + t * ((a[2] + b[2]) / 2 - q[2])]; }); };
+    for (let k = 0; k < passes; k++) { step(0.5); step(-0.53); }
+    return pts.map(q => { const v = nearestVertex(P, q); return [P[3 * v], P[3 * v + 1], P[3 * v + 2]]; });
+  }
+  // The nearest point on any region border to a point, and how far it is.
+  function nearestBorderPoint(P, seg, point) {
+    const b = seg.borders;
+    let best = null, bd = Infinity;
+    for (let e = 0; e < b.length / 4; e++) {
+      const a = 3 * b[4 * e + 2], c = 3 * b[4 * e + 3];
+      const d = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]], L = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+      let s = L > 0 ? ((point[0] - P[a]) * d[0] + (point[1] - P[a + 1]) * d[1] + (point[2] - P[a + 2]) * d[2]) / L : 0; s = Math.max(0, Math.min(1, s));
+      const q = [P[a] + s * d[0], P[a + 1] + s * d[1], P[a + 2] + s * d[2]], dist = Math.hypot(q[0] - point[0], q[1] - point[1], q[2] - point[2]);
+      if (dist < bd) { bd = dist; best = q; }
+    }
+    return best ? { point: best, distance: bd } : null;
+  }
   // Which way, along the line's frame normal, the material of side 2 (the piece that doesn't hold the line's
   // forward edges) lies: +1 or -1.
   function intoSide2(xy) {
@@ -4066,7 +4108,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
