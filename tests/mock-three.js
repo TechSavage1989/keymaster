@@ -129,7 +129,7 @@
     HemisphereLight: class extends Object3D {},
     DirectionalLight: class extends Object3D {},
     GridHelper: class extends Mesh { constructor() { super(new BufferGeometry(), new Material()); } },
-    PerspectiveCamera: class extends Object3D { constructor(fov, aspect, near, far) { super(); Object.assign(this, { fov, aspect, near, far }); this.up = new Vector3(0, 1, 0); } updateProjectionMatrix() {} },
+    PerspectiveCamera: class extends Object3D { constructor(fov, aspect, near, far) { super(); Object.assign(this, { fov, aspect, near, far }); this.up = new Vector3(0, 1, 0); } updateProjectionMatrix() {} lookAt() {} },
     BufferAttribute: class { constructor(a, s) { this.array = a; this.itemSize = s; } },
     PlaneGeometry: class extends BufferGeometry {}, CircleGeometry: class extends BufferGeometry {},
     TorusGeometry: class extends BufferGeometry {},
@@ -153,9 +153,12 @@
     },
     WebGLRenderer: class {
       constructor() { this.domElement = document.createElement('canvas'); this.capabilities = { getMaxAnisotropy: () => 1 }; window.__renders = 0; }
-      setPixelRatio() {} setSize() {} setClearColor() {} clearStencil() {}
+      setPixelRatio() {} setSize() {} setClearColor() {} clearStencil() {} clear() {}
+      setRenderTarget(t) { this.target = t || null; } getRenderTarget() { return this.target || null; }
+      readRenderTargetPixels(t, x, y, w, h, out) { out.fill(0x80); for (let i = 3; i < out.length; i += 4) out[i] = 255; } // a grey picture
       render(scene) { window.__renders++; scene.traverse(o => { if (o.onAfterRender && o.visible) o.onAfterRender(this); }); }
     },
+    WebGLRenderTarget: class { constructor(w, h) { this.width = w; this.height = h; } dispose() {} },
     OrbitControls: class extends EventTarget3 { constructor(cam) { super(); this.cam = cam; this.target = new Vector3(); this.enabled = true; } update() { this.cam._target = this.target; return false; } },
     TransformControls: class extends Object3D {
       constructor() { super(); this.dragging = false; this.axis = null; }

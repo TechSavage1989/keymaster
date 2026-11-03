@@ -283,14 +283,21 @@
   }
   // The exploded view moves each piece along the cut that made it (its pull direction, away from the piece across
   // the cut), the way the pieces come apart; a piece with no cut of its own moves out from the middle.
+  // Where a piece goes at explode amount k: along its pull by a quarter of the model's diagonal, plus how far its
+  // middle already lies out that way, so pieces of a chain of cuts (a head, a neck, a body) open up between
+  // themselves instead of travelling together; a piece with no pull moves out from the model's middle.
+  function explodeOffset(p, k, b, D) {
+    if (!p.pull) return p.bbox.center.map((x, i) => (x - b.center[i]) * k * 0.9);
+    const out = Math.max(0, p.pull.reduce((s, x, i) => s + x * (p.bbox.center[i] - b.center[i]), 0));
+    return p.pull.map(x => x * k * (0.25 * D + 0.9 * out));
+  }
   function applyExplode() {
     const b = state.parts.length ? modelBounds() : null, D = b ? Math.hypot(...b.size) : 1;
     for (const p of state.parts) {
       const v = views.get(p.id);
       if (!v) continue;
-      const k = state.selectedId ? 0 : state.explode;
-      if (p.pull) v.mesh.position.set(p.pull[0] * k * 0.25 * D + v.offset.x, p.pull[1] * k * 0.25 * D + v.offset.y, p.pull[2] * k * 0.25 * D + v.offset.z);
-      else v.mesh.position.set((p.bbox.center[0] - b.center[0]) * k * 0.9 + v.offset.x, (p.bbox.center[1] - b.center[1]) * k * 0.9 + v.offset.y, (p.bbox.center[2] - b.center[2]) * k * 0.9 + v.offset.z);
+      const k = state.selectedId ? 0 : state.explode, at = explodeOffset(p, k, b, D);
+      v.mesh.position.set(at[0] + v.offset.x, at[1] + v.offset.y, at[2] + v.offset.z);
     }
     markDirty();
   }
@@ -1204,6 +1211,52 @@
     toast(`Reduced from ${fmtInt(before)} to ${fmtInt(after)} triangles (${Math.round(100 - 100 * after / before)}% fewer), keeping the surface within ${tol} mm. Ctrl+Z puts the detail back.`);
   }
   /* ---------------- export ---------------- */
+  // Pictures for the assembly sheet, drawn off screen with the view's renderer: each part alone, and all the parts
+  // spread apart along their cuts, lit as in the view and seen from the front and a little above, as PNG data URLs.
+  // Null where the renderer can't draw to a target (the test harness without a graphics card).
+  function picture(items, w, h) {
+    if (!THREE.WebGLRenderTarget || typeof renderer.readRenderTargetPixels !== 'function' || !items.length) return null;
+    const sc = new THREE.Scene();
+    let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    const meshes = [];
+    for (const { p, at } of items) {
+      const v = views.get(p.id);
+      if (!v) continue;
+      const m = new THREE.Mesh(v.geom, new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.75, metalness: 0, flatShading: state.flat }));
+      m.position.set(at[0], at[1], at[2]);
+      sc.add(m); meshes.push(m);
+      for (let i = 0; i < 3; i++) { mn[i] = Math.min(mn[i], p.bbox.min[i] + at[i]); mx[i] = Math.max(mx[i], p.bbox.max[i] + at[i]); }
+    }
+    if (!meshes.length) return null;
+    const c = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2], R = Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) / 2 || 1;
+    sc.add(new THREE.HemisphereLight(0xffffff, 0x5a5f66, 0.85));
+    const l1 = new THREE.DirectionalLight(0xffffff, 0.85); l1.position.set(c[0] + R * 1.2, c[1] - R * 1.6, c[2] + R * 2.2);
+    const l2 = new THREE.DirectionalLight(0xe4ecff, 0.32); l2.position.set(c[0] - R * 2, c[1] + R * 0.6, c[2] + R * 0.4);
+    sc.add(l1, l2);
+    const cam = new THREE.PerspectiveCamera(30, w / h, R / 50, R * 20);
+    cam.up.set(0, 0, 1);
+    const d = R / Math.sin(cam.fov / 2 * Math.PI / 180) * 1.05, dir = new THREE.Vector3(0.55, -1, 0.5).normalize();
+    cam.position.set(c[0] + dir.x * d, c[1] + dir.y * d, c[2] + dir.z * d); cam.lookAt(new THREE.Vector3(c[0], c[1], c[2])); cam.updateProjectionMatrix();
+    const target = new THREE.WebGLRenderTarget(w, h), prev = renderer.getRenderTarget ? renderer.getRenderTarget() : null;
+    const clip = renderer.localClippingEnabled; renderer.localClippingEnabled = false;
+    renderer.setRenderTarget(target); renderer.setClearColor(0xffffff, 1); renderer.clear(); renderer.render(sc, cam);
+    const px = new Uint8Array(w * h * 4); renderer.readRenderTargetPixels(target, 0, 0, w, h, px);
+    renderer.setRenderTarget(prev); renderer.setClearColor(0x000000, 0); renderer.localClippingEnabled = clip;
+    target.dispose(); for (const m of meshes) m.material.dispose();
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d'), img = ctx.createImageData(w, h);
+    for (let y = 0; y < h; y++) img.data.set(px.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4); // the target's rows run bottom up
+    ctx.putImageData(img, 0, 0);
+    markDirty();
+    return cv.toDataURL('image/png');
+  }
+  function partPicture(p) { return picture([{ p, at: [0, 0, 0] }], 320, 240); }
+  // The exploded model, as the exploded view at a little over half way
+  function assemblyPicture(list) {
+    const b = modelBounds(), D = Math.hypot(...b.size);
+    const items = list.map(p => ({ p, at: explodeOffset(p, 0.6, b, D) }));
+    return picture(items, 800, 560);
+  }
   function safeName(s) { return (s || 'part').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'part'; }
   // Export: every part as an STL in a ZIP (the default), all parts in one 3MF, or the STLs with an assembly sheet.
   async function exportParts(onlyId, format) {
@@ -1223,7 +1276,10 @@
       used.add(n);
       return { name: n + '.stl', data: new Uint8Array(K.writeSTL(p.positions, p.indices, p.name)) };
     });
-    if (fmt3 === 'sheet') files.push({ name: 'assembly.html', data: new TextEncoder().encode(K.assemblySheet(list, { name: state.model ? state.model.name : 'Model', bed: state.bed, date: new Date().toLocaleDateString() })) });
+    if (fmt3 === 'sheet') {
+      const pictured = list.map(p => ({ ...p, image: partPicture(p) })); // the sheet shows each part and the pieces spread apart
+      files.push({ name: 'assembly.html', data: new TextEncoder().encode(K.assemblySheet(pictured, { name: state.model ? state.model.name : 'Model', bed: state.bed, date: new Date().toLocaleDateString(), image: list.length > 1 ? assemblyPicture(list) : null })) });
+    }
     const zip = K.makeZip(files), filename = base + '.zip';
     if (await saveFile(filename, new Blob([zip], { type: 'application/zip' }), true)) toast(`Saved ${filename} with ${list.length} STL ${list.length === 1 ? 'file' : 'files'}${fmt3 === 'sheet' ? ' and the assembly sheet' : ''}.`);
   }
