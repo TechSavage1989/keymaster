@@ -2101,6 +2101,205 @@ const KMCore = (() => {
     for (let i = 0; i < pairs.length; i += 4) if (groupOf[pairs[i]] !== groupOf[pairs[i + 1]]) borders.push(pairs[i], pairs[i + 1], pairs[i + 2], pairs[i + 3]);
     return { groupOf, count: order.length, areas: order.map(([, a]) => a), borders: new Int32Array(borders) };
   }
+  /* ---------- form: the parts of a figure by thickness ----------
+     The owner's "intelligence to detect form and parts": limbs, a head, a torso, a weapon are told apart by how
+     thick the solid is under the surface (the shape diameter of Shapira, Shamir and Cohen-Or), not by how the
+     surface turns. Rays are sent inward from each vertex in a small cone; the median distance to the far wall is
+     the thickness there. Thicknesses are clustered into a few levels, each triangle takes the level that fits it
+     and its neighbours (a few passes of smoothing that respects concave creases), and each connected run of one
+     level is a region: a head and a torso of like thickness still part at the thin neck between them. */
+  // A grid of the triangles for ray casting: cells of about diag / n, each with the triangles whose box meets it
+  function meshGrid(P, I, n = 48) {
+    const b = bounds(P), lo = [b.min[0] - 1e-6, b.min[1] - 1e-6, b.min[2] - 1e-6], size = Math.max(...b.size) / n + 1e-9;
+    const dims = b.size.map(s => Math.max(1, Math.ceil(s / size) + 1)), nt = I.length / 3;
+    const cellOf = (x, y, z) => (Math.min(dims[0] - 1, Math.max(0, Math.floor((x - lo[0]) / size))) * dims[1] + Math.min(dims[1] - 1, Math.max(0, Math.floor((y - lo[1]) / size)))) * dims[2] + Math.min(dims[2] - 1, Math.max(0, Math.floor((z - lo[2]) / size)));
+    const count = new Int32Array(dims[0] * dims[1] * dims[2] + 1);
+    const span = (t) => { const a = 3 * I[3 * t], c = 3 * I[3 * t + 1], d = 3 * I[3 * t + 2], out = []; for (let k = 0; k < 3; k++) { const x0 = Math.min(P[a + k], P[c + k], P[d + k]), x1 = Math.max(P[a + k], P[c + k], P[d + k]); out.push(Math.max(0, Math.floor((x0 - lo[k]) / size)), Math.min(dims[k] - 1, Math.floor((x1 - lo[k]) / size))); } return out; };
+    for (let t = 0; t < nt; t++) { const s = span(t); for (let i = s[0]; i <= s[1]; i++) for (let j = s[2]; j <= s[3]; j++) for (let k = s[4]; k <= s[5]; k++) count[(i * dims[1] + j) * dims[2] + k + 1]++; }
+    for (let c = 0; c < count.length - 1; c++) count[c + 1] += count[c];
+    const fill = count.slice(0, -1), tris = new Int32Array(count[count.length - 1]);
+    for (let t = 0; t < nt; t++) { const s = span(t); for (let i = s[0]; i <= s[1]; i++) for (let j = s[2]; j <= s[3]; j++) for (let k = s[4]; k <= s[5]; k++) tris[fill[(i * dims[1] + j) * dims[2] + k]++] = t; }
+    return { lo, size, dims, start: count, tris, cellOf };
+  }
+  // The distance along a ray to the first face whose back it meets (the far wall from inside), or -1
+  function castInward(grid, P, I, o, d, maxT) {
+    const { lo, size, dims, start, tris } = grid;
+    let ix = Math.floor((o[0] - lo[0]) / size), iy = Math.floor((o[1] - lo[1]) / size), iz = Math.floor((o[2] - lo[2]) / size);
+    if (ix < 0 || iy < 0 || iz < 0 || ix >= dims[0] || iy >= dims[1] || iz >= dims[2]) return -1;
+    const step = [Math.sign(d[0]), Math.sign(d[1]), Math.sign(d[2])], idx = [ix, iy, iz];
+    const tMax = [0, 0, 0], tDelta = [0, 0, 0];
+    for (let k = 0; k < 3; k++) { if (d[k] === 0) { tMax[k] = Infinity; tDelta[k] = Infinity; continue; } const next = lo[k] + (idx[k] + (step[k] > 0 ? 1 : 0)) * size; tMax[k] = (next - o[k]) / d[k]; tDelta[k] = Math.abs(size / d[k]); }
+    let best = -1, guard = 0;
+    const eps = size * 1e-6;
+    while (guard++ < dims[0] + dims[1] + dims[2] + 3) {
+      const c = (idx[0] * dims[1] + idx[1]) * dims[2] + idx[2];
+      for (let q = start[c]; q < start[c + 1]; q++) {
+        const t = tris[q], a = 3 * I[3 * t], b = 3 * I[3 * t + 1], cc = 3 * I[3 * t + 2];
+        const e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2], e2x = P[cc] - P[a], e2y = P[cc + 1] - P[a + 1], e2z = P[cc + 2] - P[a + 2];
+        const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x, det = e1x * px + e1y * py + e1z * pz;
+        if (det >= -1e-12) continue; // only the back of a face (its normal along the ray, so det < 0): the far wall seen from inside
+        const inv = 1 / det, tx = o[0] - P[a], ty = o[1] - P[a + 1], tz = o[2] - P[a + 2];
+        const u = (tx * px + ty * py + tz * pz) * inv; if (u < 0 || u > 1) continue;
+        const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+        const v = (d[0] * qx + d[1] * qy + d[2] * qz) * inv; if (v < 0 || u + v > 1) continue;
+        const tt = (e2x * qx + e2y * qy + e2z * qz) * inv;
+        if (tt > eps && tt < maxT && (best < 0 || tt < best)) best = tt;
+      }
+      // the nearest hit found in a cell already passed is final
+      const tCell = Math.min(tMax[0], tMax[1], tMax[2]);
+      if (best >= 0 && best <= tCell) return best;
+      if (tCell > maxT) return best;
+      const k = tMax[0] <= tMax[1] ? (tMax[0] <= tMax[2] ? 0 : 2) : (tMax[1] <= tMax[2] ? 1 : 2);
+      idx[k] += step[k]; tMax[k] += tDelta[k];
+      if (idx[k] < 0 || idx[k] >= dims[k]) return best;
+    }
+    return best;
+  }
+  // The thickness under every vertex: the median distance to the far wall over rays in a cone round the inward
+  // normal, smoothed a little over the surface. NaN where no ray meets a wall (an open or inverted surface).
+  function shapeDiameter(P, I, opts = {}) {
+    const nv = P.length / 3, b = bounds(P), D = diag(b), grid = meshGrid(P, I, opts.cells || 48), vt = vertexTriangles(P, I), adj = vertexAdjacency(P, I);
+    const cone = ((opts.cone === undefined ? 45 : opts.cone) * Math.PI) / 180, rays = opts.rays || 12;
+    const out = new Float32Array(nv), fn = [0, 0, 0];
+    for (let v = 0; v < nv; v++) {
+      let nx = 0, ny = 0, nz = 0;
+      for (let e = vt.start[v]; e < vt.start[v + 1]; e++) { faceNormal(P, I, vt.tri[e], fn); nx += fn[0]; ny += fn[1]; nz += fn[2]; }
+      const l = Math.hypot(nx, ny, nz); if (!(l > 0)) { out[v] = NaN; continue; }
+      const n = [-nx / l, -ny / l, -nz / l], F = frameFromNormal(n, [0, 0, 0]);
+      const o = [P[3 * v] + n[0] * D * 1e-5, P[3 * v + 1] + n[1] * D * 1e-5, P[3 * v + 2] + n[2] * D * 1e-5];
+      const hits = [];
+      const c = Math.cos(cone), s = Math.sin(cone);
+      const t0 = castInward(grid, P, I, o, n, D); if (t0 > 0) hits.push(t0);
+      for (let r = 0; r < rays; r++) {
+        const a = (2 * Math.PI * r) / rays, d = [n[0] * c + (F.u[0] * Math.cos(a) + F.v[0] * Math.sin(a)) * s, n[1] * c + (F.u[1] * Math.cos(a) + F.v[1] * Math.sin(a)) * s, n[2] * c + (F.u[2] * Math.cos(a) + F.v[2] * Math.sin(a)) * s];
+        const tt = castInward(grid, P, I, o, d, D); if (tt > 0) hits.push(tt); // the ray's own length, as the shape diameter is defined
+      }
+      if (!hits.length) { out[v] = NaN; continue; }
+      // at a corner or an edge half the cone can leave through a neighbouring face at once: only rays that see a
+      // wall within a few times the straight ray's distance count
+      const keep = t0 > 0 ? hits.filter(h => h > t0 / 2.5 && h < t0 * 2.5) : hits;
+      keep.sort((x, y) => x - y);
+      out[v] = keep[keep.length >> 1];
+    }
+    // a little smoothing in log space, so one stray ray doesn't make a bump; holes filled from neighbours
+    let cur = new Float32Array(nv); for (let v = 0; v < nv; v++) cur[v] = out[v] > 0 ? Math.log(out[v]) : NaN;
+    for (let pass = 0; pass < (opts.smooth === undefined ? 3 : opts.smooth); pass++) {
+      const next = new Float32Array(nv);
+      for (let v = 0; v < nv; v++) {
+        let sum = 0, n = 0; if (cur[v] === cur[v]) { sum += 2 * cur[v]; n += 2; }
+        for (let e = adj.start[v]; e < adj.start[v + 1]; e++) { const u = cur[adj.to[e]]; if (u === u) { sum += u; n++; } }
+        next[v] = n ? sum / n : NaN;
+      }
+      cur = next;
+    }
+    for (let v = 0; v < nv; v++) out[v] = cur[v] === cur[v] ? Math.exp(cur[v]) : NaN;
+    return out;
+  }
+  // Regions by form: the thickness levels, smoothed over the surface, each connected run of a level a region.
+  // ratio: thickness levels closer than this (1.35: 35% apart) are one; minFrac: regions under this share of the
+  // area melt into a neighbour. Returns what segmentSurface returns.
+  function segmentForm(P, I, opts = {}) {
+    const nt = I.length / 3, nv = P.length / 3, ratio = opts.ratio || 1.35, minFrac = opts.minFrac === undefined ? 0.02 : opts.minFrac;
+    const sdf = opts.sdf || shapeDiameter(P, I, opts);
+    const A = new Float64Array(nt), X = new Float64Array(nt), N = new Float64Array(nt * 3), C = new Float64Array(nt * 3);
+    let total = 0, nx = 0;
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]), L = Math.hypot(n[0], n[1], n[2]);
+      A[t] = L / 2; total += L / 2; if (L > 0) { N[3 * t] = n[0] / L; N[3 * t + 1] = n[1] / L; N[3 * t + 2] = n[2] / L; }
+      for (let k = 0; k < 3; k++) C[3 * t + k] = (P[a + k] + P[b + k] + P[c + k]) / 3;
+      let s = 0, m = 0; for (const v of [I[3 * t], I[3 * t + 1], I[3 * t + 2]]) if (sdf[v] > 0) { s += Math.log(sdf[v]); m++; }
+      X[t] = m ? s / m : NaN; if (m) nx++;
+    }
+    if (!nx) return bordersFromGroups(P, I, new Int32Array(nt));
+    // thickness levels: k-means on the log thickness, area-weighted, from six seeds, merged where levels are close
+    const xs = []; for (let t = 0; t < nt; t++) if (X[t] === X[t]) xs.push([X[t], A[t]]);
+    xs.sort((p, q) => p[0] - q[0]);
+    let centres = []; for (let k = 0; k < 6; k++) centres.push(xs[Math.min(xs.length - 1, Math.floor(((k + 0.5) / 6) * xs.length))][0]);
+    const kmeans = () => { for (let it = 0; it < 20; it++) { const sum = centres.map(() => 0), w = centres.map(() => 0); for (const [x, a] of xs) { let bi = 0, bd = Infinity; for (let k = 0; k < centres.length; k++) { const d = Math.abs(x - centres[k]); if (d < bd) { bd = d; bi = k; } } sum[bi] += x * a; w[bi] += a; } let moved = 0; for (let k = 0; k < centres.length; k++) if (w[k] > 0) { const c = sum[k] / w[k]; moved += Math.abs(c - centres[k]); centres[k] = c; } centres.sort((p, q) => p - q); if (moved < 1e-6) break; } };
+    kmeans();
+    const gap = Math.log(ratio);
+    for (let guard = 0; guard < 8; guard++) {
+      let merged = false;
+      for (let k = 0; k + 1 < centres.length; k++) if (centres[k + 1] - centres[k] < gap) { centres.splice(k, 2, (centres[k] + centres[k + 1]) / 2); merged = true; break; }
+      if (!merged) break;
+      kmeans();
+    }
+    const K = centres.length, sigma = gap / 2;
+    // the label of each triangle: its own fit plus its neighbours' labels, across concave creases less so
+    const first = new Map(), pairs = [];
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a; const f = first.get(key); if (f === undefined) first.set(key, t); else { first.delete(key); pairs.push(f, t, a, b); } }
+    const nbStart = new Int32Array(nt + 1); for (let i = 0; i < pairs.length; i += 4) { nbStart[pairs[i] + 1]++; nbStart[pairs[i + 1] + 1]++; }
+    for (let t = 0; t < nt; t++) nbStart[t + 1] += nbStart[t];
+    const nbFill = nbStart.slice(0, nt), nb = new Int32Array(nbStart[nt]), nw = new Float64Array(nbStart[nt]);
+    for (let i = 0; i < pairs.length; i += 4) {
+      const s = pairs[i], q = pairs[i + 1], dot = N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2];
+      const valley = (C[3 * q] - C[3 * s]) * N[3 * s] + (C[3 * q + 1] - C[3 * s + 1]) * N[3 * s + 1] + (C[3 * q + 2] - C[3 * s + 2]) * N[3 * s + 2] > 1e-9;
+      const w = (valley && dot < 0.97 ? 0.15 : 1) * Math.max(0.1, dot); // labels change easily across a crease
+      nb[nbFill[s]] = q; nw[nbFill[s]++] = w; nb[nbFill[q]] = s; nw[nbFill[q]++] = w;
+    }
+    const label = new Int32Array(nt), lambda = opts.smoothness === undefined ? 1.5 : opts.smoothness;
+    for (let t = 0; t < nt; t++) { let bi = 0, bd = Infinity; for (let k = 0; k < K; k++) { const d = X[t] === X[t] ? Math.abs(X[t] - centres[k]) : 0; if (d < bd) { bd = d; bi = k; } } label[t] = bi; }
+    const cost = new Float64Array(K);
+    for (let pass = 0; pass < 8; pass++) {
+      let changed = 0;
+      for (let t = 0; t < nt; t++) {
+        for (let k = 0; k < K; k++) { const d = X[t] === X[t] ? (X[t] - centres[k]) / sigma : 0; cost[k] = 0.5 * d * d; }
+        for (let e = nbStart[t]; e < nbStart[t + 1]; e++) { const l = label[nb[e]]; for (let k = 0; k < K; k++) if (k !== l) cost[k] += lambda * nw[e]; }
+        let bi = label[t], bc = cost[bi]; for (let k = 0; k < K; k++) if (cost[k] < bc - 1e-12) { bc = cost[k]; bi = k; }
+        if (bi !== label[t]) { label[t] = bi; changed++; }
+      }
+      if (!changed) break;
+    }
+    // each connected run of one level is a region; specks melt into the neighbour they share most border with
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < pairs.length; i += 4) if (label[pairs[i]] === label[pairs[i + 1]]) { const x = find(pairs[i]), y = find(pairs[i + 1]); if (x !== y) par[x] = y; }
+    const minA = total * minFrac;
+    for (let pass = 0; pass < 12; pass++) {
+      const area = new Map(); for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
+      const border = new Map();
+      for (let i = 0; i < pairs.length; i += 4) { const x = find(pairs[i]), y = find(pairs[i + 1]); if (x === y) continue; const a = 3 * pairs[i + 2], b = 3 * pairs[i + 3], len = Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]); for (const [g, h] of [[x, y], [y, x]]) { if (!border.has(g)) border.set(g, new Map()); const m = border.get(g); m.set(h, (m.get(h) || 0) + len); } }
+      const small = [...area.entries()].filter(([, a]) => a < minA).sort((a, b) => a[1] - b[1]);
+      if (!small.length) break;
+      let merged = 0;
+      for (const [g] of small) { if (find(g) !== g) continue; const m = border.get(g); if (!m) continue; let best = -1, bl = -1; for (const [h, len] of m) { const hr = find(h); if (hr !== g && len > bl) { bl = len; best = hr; } } if (best >= 0) { par[g] = best; merged++; } }
+      if (!merged) break;
+    }
+    const groupOf = new Int32Array(nt), ids = new Map();
+    for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
+    const seg = bordersFromGroups(P, I, groupOf);
+    seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
+    seg.levels = centres.map(c => Math.exp(c)); seg.sdf = sdf;
+    return seg;
+  }
+  // Every edge longer than maxEdge split at its middle, the triangles beside it with it (one split edge gives two
+  // triangles, two give three, three give four), until no edge is longer. The mesh stays sealed: neighbours share
+  // each new point. Thickness and region labels are read per triangle, so long thin triangles blur them.
+  function subdivideMesh(P, I, opts = {}) {
+    const maxEdge = opts.maxEdge, max2 = maxEdge * maxEdge;
+    let pos = Array.from(P), idx = Array.from(I);
+    for (let round = 0; round < (opts.rounds || 8); round++) {
+      const nv = pos.length / 3, mids = new Map(), out = [];
+      const mid = (a, b) => { const key = a < b ? a * nv + b : b * nv + a; let m = mids.get(key); if (m === undefined) { m = pos.length / 3; pos.push((pos[3 * a] + pos[3 * b]) / 2, (pos[3 * a + 1] + pos[3 * b + 1]) / 2, (pos[3 * a + 2] + pos[3 * b + 2]) / 2); mids.set(key, m); } return m; };
+      const long = (a, b) => (pos[3 * a] - pos[3 * b]) ** 2 + (pos[3 * a + 1] - pos[3 * b + 1]) ** 2 + (pos[3 * a + 2] - pos[3 * b + 2]) ** 2 > max2;
+      let any = false;
+      for (let t = 0; t < idx.length; t += 3) {
+        let a = idx[t], b = idx[t + 1], c = idx[t + 2];
+        const s = [long(a, b), long(b, c), long(c, a)], n = s.filter(Boolean).length;
+        if (!n) { out.push(a, b, c); continue; }
+        any = true;
+        if (n === 3) { const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a); out.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca); continue; }
+        // turn the triangle so the split edges come first: a->b split (n = 1), or a->b and b->c split (n = 2)
+        for (let k = 0; k < 3; k++) { if ((n === 1 && s[0]) || (n === 2 && s[0] && s[1])) break; [a, b, c] = [b, c, a]; s.push(s.shift()); }
+        if (n === 1) { const ab = mid(a, b); out.push(a, ab, c, ab, b, c); }
+        else { const ab = mid(a, b), bc = mid(b, c); out.push(a, ab, c, ab, bc, c, ab, b, bc); }
+      }
+      idx = out;
+      if (!any) break;
+    }
+    return { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
+  }
   // The same result shape for any grouping of triangles (used by tests and by hand-made groupings).
   function bordersFromGroups(P, I, groupOf) {
     const nt = I.length / 3, nv = P.length / 3, first = new Map(), out = [];
@@ -5099,7 +5298,13 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const w = weld(short.positions, short.indices, Math.max(scale * 1e-12, 1e-12)), rep = edgeReport(w.indices);
     if (!rep.closed) throw new Error(`The result isn’t sealed where the shape meets the part (${rep.openEdges} open and ${rep.badEdges} tangled edges). Move the shape a little and try again.`);
     if (volume(w.positions, w.indices) < 0) flipAll(w.indices);
-    return { positions: w.positions, indices: w.indices };
+    // only the vertices a triangle uses: the tool's corners inside the part, and seam points of dropped pieces, go
+    const used = new Int32Array(w.positions.length / 3).fill(-1); let nu = 0;
+    for (let i = 0; i < w.indices.length; i++) if (used[w.indices[i]] < 0) used[w.indices[i]] = nu++;
+    const cpos = new Float32Array(nu * 3), cidx = new Uint32Array(w.indices.length);
+    for (let v = 0; v < used.length; v++) if (used[v] >= 0) { cpos[3 * used[v]] = w.positions[3 * v]; cpos[3 * used[v] + 1] = w.positions[3 * v + 1]; cpos[3 * used[v] + 2] = w.positions[3 * v + 2]; }
+    for (let i = 0; i < w.indices.length; i++) cidx[i] = used[w.indices[i]];
+    return { positions: cpos, indices: cidx };
   }
   // A ring is not convex: it is taken as its sectors, each the prism of the ring's profile over one step round,
   // convex cells that share their radial faces and the flat top and bottom. One list of planes serves every
@@ -5310,7 +5515,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, loopFrame, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, sphereTriangles, sculptDab, vertexTriangles, refreshCreased, snapSelectionToRegions, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, segmentForm, shapeDiameter, meshGrid, castInward, subdivideMesh, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, loopFrame, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, sphereTriangles, sculptDab, vertexTriangles, refreshCreased, snapSelectionToRegions, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
