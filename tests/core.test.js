@@ -784,6 +784,11 @@ console.log('curved cuts along a border');
   const cnt = (a) => { let n = 0; for (const v of a) n += v; return n; };
   const farSide = (a) => { let n = 0; for (let t = 0; t < a.length; t++) if (a[t] && sp.positions[3 * sp.indices[3 * t] + 2] < 0) n++; return n; };
   check('two brush dabs paint a patch round the top, nothing on the far side', cnt(painted) > 500 && cnt(painted) < 3000 && farSide(painted) === 0, [cnt(painted), farSide(painted)]);
+  const sphereHit = K.sphereTriangles(sp.positions, sp.indices, [0, 0, 20], 6), surfaceHit = K.brushTriangles(sp.positions, sp.indices, K.nearestTriangle(sp.positions, sp.indices, [0, 0, 20]), [0, 0, 20], 6);
+  check('on one layer the sphere brush and the surface brush take the same faces', sphereHit.length === surfaceHit.length && sphereHit.length > 100, [sphereHit.length, surfaceHit.length]);
+  const two = K.prepareMesh(K.mergeMeshes([uvSphere(20, 96, 64), uvSphere(23, 96, 64)])); // a shell round a ball: two layers
+  const topT = K.nearestTriangle(two.positions, two.indices, [0, 0, 23]);
+  check('through two layers the sphere brush reaches the layer behind, the surface brush does not', K.sphereTriangles(two.positions, two.indices, [0, 0, 23], 5).length > K.brushTriangles(two.positions, two.indices, topT, [0, 0, 23], 5).length * 1.3, [K.sphereTriangles(two.positions, two.indices, [0, 0, 23], 5).length, K.brushTriangles(two.positions, two.indices, topT, [0, 0, 23], 5).length]);
   const grown = K.growSelection(sp.positions, sp.indices, painted, 2), shrunk = K.shrinkSelection(sp.positions, sp.indices, painted, 2);
   check('grow adds a 2 mm band and shrink takes one away', cnt(grown) > cnt(painted) * 1.2 && cnt(shrunk) < cnt(painted) * 0.8 && cnt(K.shrinkSelection(sp.positions, sp.indices, grown, 2)) <= cnt(painted) * 1.05, [cnt(painted), cnt(grown), cnt(shrunk)]);
   const spiky = new Uint8Array(painted); { const sq = [0, 12, 16]; const s = K.nearestTriangle(sp.positions, sp.indices, sq); for (const t of K.brushTriangles(sp.positions, sp.indices, s, sq, 0.6)) spiky[t] = 1; }
@@ -1190,6 +1195,10 @@ console.log('regions by folds, and splitting off a region');
   const segB = K.segmentSurface(bell.positions, bell.indices, { angle: 60, fold: 15 });
   const bar = (() => { let best = -1, bl = -Infinity; for (let g = 0; g < segB.count; g++) { const l = K.regionLoops(bell.positions, bell.indices, segB, g); if (l.length === 2 && segB.areas[g] > bl) { bl = segB.areas[g]; best = g; } } return best; })();
   check('the dumbbell’s bar is a region with two loops', bar >= 0, segB.count);
+  // snapping a rough selection to the regions: most of the bar painted, a few faces of a ball, gives the whole bar and nothing else
+  const rough = new Uint8Array(bell.indices.length / 3); { let k = 0; for (let t = 0; t < rough.length; t++) if (segB.groupOf[t] === bar && (k++ % 10) < 7) rough[t] = 1; let m = 0; for (let t = 0; t < rough.length && m < 20; t++) if (segB.groupOf[t] !== bar) { rough[t] = 1; m++; } }
+  const snapped = K.snapSelectionToRegions(bell.positions, bell.indices, rough, segB);
+  check('snap to borders paints the bar whole and clears the stray faces on the ball', snapped.every((v, t) => v === (segB.groupOf[t] === bar ? 1 : 0)));
   const rB = K.splitRegion(bell.positions, bell.indices, segB, bar, { minThickness: 1.2 });
   // regions as cut suggestions: each ball comes off along one line and frees its own volume; the bar needs two
   const rcB = K.regionCuts(bell.positions, bell.indices, segB);
