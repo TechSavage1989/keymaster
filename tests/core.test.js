@@ -1055,6 +1055,11 @@ console.log('regions by folds, and splitting off a region');
   check('the dumbbell’s bar is a region with two loops', bar >= 0, segB.count);
   const rB = K.splitRegion(bell.positions, bell.indices, segB, bar, { minThickness: 1.2 });
   check('splitting off the bar gives three sealed pieces, the bar first, volume kept', rB.parts.length === 3 && rB.loops === 2 && allClosed(rB.parts) && rB.parts[0].volume < rB.parts[1].volume && Math.abs(sumVol(rB.parts) - bell.report.volume) / bell.report.volume < 1e-6, [rB.parts.map(q => q.volume.toFixed(0)), bell.report.volume]);
+  // each piece carries a pull direction for the exploded view: the balls pull away from the bar, along the bar, in opposite directions; the bar (pulled both ways) has none
+  const unit = (v) => v && Math.abs(Math.hypot(...v) - 1) < 1e-9, dotP = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  check('the two balls pull apart along the bar and the bar pulls nowhere', unit(rB.parts[1].pull) && unit(rB.parts[2].pull) && dotP(rB.parts[1].pull, rB.parts[2].pull) < -0.999 && Math.abs(Math.abs(rB.parts[1].pull[2]) - 1) < 1e-6 && !rB.parts[0].pull, rB.parts.map(q => q.pull));
+  const rU0 = K.splitRegions(bell.positions, bell.indices, segB, [bar, (() => { const l = K.regionLoops(bell.positions, bell.indices, segB, bar); const v = l[0].verts[0]; for (let tt = 0; tt < bell.indices.length / 3; tt++) for (let k = 0; k < 3; k++) if (bell.indices[3 * tt + k] === v && segB.groupOf[tt] !== bar) return segB.groupOf[tt]; return -1; })()], { minThickness: 1.2 });
+  check('a bar-and-ball piece and the other ball pull in opposite directions', unit(rU0.parts[0].pull) && unit(rU0.parts[1].pull) && dotP(rU0.parts[0].pull, rU0.parts[1].pull) < -0.999, rU0.parts.map(q => q.pull));
   // several regions as one piece (shift-click): the bar and one ball together have a single outline, the other seam
   const ballG = (() => { const l = K.regionLoops(bell.positions, bell.indices, segB, bar); const v = l[0].verts[0]; for (let tt = 0; tt < bell.indices.length / 3; tt++) for (let k = 0; k < 3; k++) if (bell.indices[3 * tt + k] === v && segB.groupOf[tt] !== bar) return segB.groupOf[tt]; return -1; })();
   const unionLoops = K.groupLoops(bell.positions, bell.indices, segB, [bar, ballG]);

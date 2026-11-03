@@ -198,6 +198,16 @@ with sync_playwright() as p:
     pg.click('[data-act=cut]')
     pg.wait_for_function(f"document.querySelectorAll('#partList li[data-id]').length > {n_parts}", timeout=15000)
     check('cutting with a custom key works', pg.locator('#partList li[data-id]').count() > n_parts)
+    # the exploded view moves each piece along the cut that made it, not out from the middle
+    pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
+    pg.evaluate("(() => { const e = document.querySelector('#explode'); e.value = '0.6'; e.dispatchEvent(new Event('input', { bubbles: true })); })()"); pg.wait_for_timeout(1500)
+    ex = pg.evaluate("KeymasterDebug.explodeOffsets()")
+    def along(o):
+        d = sum(a * b for a, b in zip(o['at'], o['pull'])); L = sum(a * a for a in o['at']) ** 0.5
+        return L > 1 and abs(d / L - 1) < 1e-3
+    pieces = [o for o in ex if o['pull']]
+    check('the pieces of a cut spread apart along the cut, in opposite directions', len(pieces) >= 2 and all(along(o) for o in pieces) and any(abs(sum(a * b for a, b in zip(pieces[0]['pull'], o['pull'])) + 1) < 1e-6 for o in pieces[1:]), ex)
+    pg.evaluate("(() => { const e = document.querySelector('#explode'); e.value = '0'; e.dispatchEvent(new Event('input', { bubbles: true })); })()"); pg.wait_for_timeout(200)
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(600)
 
@@ -680,6 +690,16 @@ with sync_playwright() as p:
     check('the brush starts at a size to suit the model, faces show while painting, and the hint gives the size', 1 <= float(pg.input_value('#brushSize')) <= 4 and pg.get_attribute('#flatBtn', 'aria-pressed') == 'true' and 'mm wide' in pg.inner_text('#hint'), (pg.input_value('#brushSize'), pg.inner_text('#hint')))
     pg.fill('#brushSize', '4'); pg.press('#brushSize', 'Tab'); pg.wait_for_timeout(100)
     top = [ax[k] * 12 + u[k] * 12 for k in range(3)]; top2 = [ax[k] * 15.5 + u[k] * 11.5 for k in range(3)]  # on the side of a ball
+    n0 = pg.evaluate(f"KeymasterDebug.paintAt(0, {top})")
+    resL = pg.evaluate("KeymasterDebug.paintLetGo()"); pg.wait_for_timeout(200)
+    check('letting go shows the outline at once, with Split off painted area, and no cut yet', resL['preview'] and resL['loops'] == 1 and 'Keep painting' in pg.inner_text('#cutLineInfo') and pg.locator('[data-act=split-painted]').count() == 1, (resL, pg.inner_text('#cutLineInfo')[:120]))
+    pg.click('[data-act=split-painted]')
+    pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
+    check('Split off painted area runs the cut straight away', pg.locator('#partList li[data-id]').count() == 2 and 'painted area' in pg.inner_text('#toast'), pg.inner_text('#toast'))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
+    pg.click('#paintBtn'); pg.wait_for_timeout(200)
+    pg.fill('#brushSize', '4'); pg.press('#brushSize', 'Tab'); pg.wait_for_timeout(100)
     n1 = pg.evaluate(f"KeymasterDebug.paintAt(0, {top})"); n2 = pg.evaluate(f"KeymasterDebug.paintAt(0, {top2})")
     check('two dabs paint a patch', n1 > 20 and n2 > n1, (n1, n2))
     n3 = pg.evaluate("KeymasterDebug.paintEdit('paint-grow')")
@@ -697,9 +717,9 @@ with sync_playwright() as p:
     pg.evaluate(f"KeymasterDebug.paintAt(0, {top})"); nE = pg.evaluate(f"KeymasterDebug.paintAt(0, {top}, true)")
     check('erasing takes the paint off again', nE == 0, nE)
     pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
-    check('Esc stops painting, and faces go back to smooth', pg.get_attribute('#paintBtn', 'aria-pressed') == 'false' and not pg.is_visible('#paintTools') and pg.get_attribute('#flatBtn', 'aria-pressed') == 'false')
+    check('Esc stops painting; faces stay shown, as they are by default', pg.get_attribute('#paintBtn', 'aria-pressed') == 'false' and not pg.is_visible('#paintTools') and pg.get_attribute('#flatBtn', 'aria-pressed') == 'true')
     pg.click('#flatBtn'); pg.wait_for_timeout(100)
-    check('Show faces can be turned on by hand', pg.get_attribute('#flatBtn', 'aria-pressed') == 'true')
+    check('Show faces can be turned off by hand', pg.get_attribute('#flatBtn', 'aria-pressed') == 'false')
     pg.click('#flatBtn'); pg.wait_for_timeout(100)
     # the model's size and orientation tools stay on screen with a part chosen
     check('the scale and turn tools show over the view with a part chosen', pg.is_visible('#modelTools') and pg.locator('#modelTools [data-act=scale]').count() == 2, pg.is_visible('#modelTools'))
