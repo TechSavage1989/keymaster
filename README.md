@@ -15,6 +15,7 @@
 
 ## Features
 
+- **Sculpt.** Smooth, inflate (or, with Shift, push in) and flatten the surface with a brush, in any size and strength. Each stroke is one undo step, and a painted area keeps the brush inside it.
 - **Boolean.** Join a shape to the model, cut it out, or keep only where they overlap: a base under a figure, a socket for a magnet, a slice off a side, a figure trimmed to a box. The result is sealed and ready to cut, in one undo step.
 - **Shapes.** Add a cube, ball, tube, cone or ring with sharp, chamfered or rounded edges, size it, turn it and place it with handles or numbers. A shape is a part like any other: cut it, export it, or join it to the model with Boolean.
 - **Make room.** Drag the edge of either side panel to resize it (double-click puts it back), and press ? for the list of mouse and keyboard shortcuts.
@@ -86,6 +87,7 @@
 
 <table>
 <tr><td width="50%" valign="top"><b>Shapes: a rounded cube added as a base under the pawn, sized and placed from the panel</b><br><img src="docs/images/shapes-cube.png" alt="Shapes: a rounded cube added as a base under the pawn, sized and placed from the panel" width="440"></td><td width="50%" valign="top"><b>A ring on top, with the handles set to turn it</b><br><img src="docs/images/shapes-ring.png" alt="A ring on top, with the handles set to turn it" width="440"></td></tr>
+<tr><td width="50%" valign="top"><b>Sculpt: an Inflate stroke raising a bump on the pawn's head</b><br><img src="docs/images/sculpt-inflate.png" alt="Sculpt: an Inflate stroke raising a bump on the pawn's head" width="440"></td><td width="50%" valign="top"><b>Flatten pressing the side of the pawn's base flat</b><br><img src="docs/images/sculpt-flatten.png" alt="Flatten pressing the side of the pawn's base flat" width="440"></td></tr>
 <tr><td width="50%" valign="top"><b>Boolean: a ball placed against the pawn's head, ready to be cut out</b><br><img src="docs/images/boolean-tool.png" alt="Boolean: a ball placed against the pawn's head, ready to be cut out" width="440"></td><td width="50%" valign="top"><b>The ball cut out: a sealed hollow in the head, in one undo step</b><br><img src="docs/images/boolean-cut.png" alt="The ball cut out: a sealed hollow in the head, in one undo step" width="440"></td></tr>
 <tr><td width="50%" valign="top"><b>Repair: a tangled model is untangled as it opens</b><br><img src="docs/images/repair-surface.png" alt="Repair: a tangled model is untangled as it opens" width="440"></td><td width="50%" valign="top"><b>Reduce detail: the pawn at an eighth of its triangles, still within 0.1 mm</b><br><img src="docs/images/reduce-detail.png" alt="Reduce detail: the pawn at an eighth of its triangles, still within 0.1 mm" width="440"></td></tr>
 </table>

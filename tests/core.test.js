@@ -745,6 +745,35 @@ console.log('booleans');
   check('no two vertices of a result share a position', dup === 0, dup);
 }
 
+console.log('sculpting');
+{
+  const m = K.shapeMesh({ kind: 'ball', w: 20, h: 20, segments: 48 }), I = m.indices, v0 = K.volume(m.positions, I);
+  const at = [10, 0, 0], start = K.nearestTriangle(m.positions, I, at, 2);
+  const P = new Float32Array(m.positions), P0 = new Float32Array(m.positions);
+  let r; for (let i = 0; i < 5; i++) r = K.sculptDab(P, I, { centre: at, radius: 5, strength: 1, mode: 'inflate', start });
+  const far = []; for (let v = 0; v < P.length / 3; v++) if (Math.hypot(P[3 * v] - 10, P[3 * v + 1], P[3 * v + 2]) > 5.5 && (P[3 * v] !== P0[3 * v] || P[3 * v + 1] !== P0[3 * v + 1] || P[3 * v + 2] !== P0[3 * v + 2])) far.push(v);
+  check('inflate puffs the ball out under the brush: more volume, still sealed, only the vertices within reach moved', K.volume(P, I) > v0 * 1.005 && K.edgeReport(I).closed && r.moved.length > 20 && r.tris.length > r.moved.length && far.length === 0, { vol: K.volume(P, I), v0, moved: r.moved.length, far: far.length });
+  for (let i = 0; i < 10; i++) K.sculptDab(P, I, { centre: at, radius: 5, strength: 1, mode: 'inflate', reverse: true, start });
+  check('Shift (reverse) pushes it back in, below where it started', K.volume(P, I) < v0, K.volume(P, I));
+  const Q = new Float32Array(m.positions); for (let v = 0; v < Q.length / 3; v++) { const s = 1 + 0.05 * Math.sin(v * 7.3); Q[3 * v] *= s; Q[3 * v + 1] *= s; Q[3 * v + 2] *= s; }
+  const spread = (A) => { let s = 0, s2 = 0, n = 0; for (let v = 0; v < A.length / 3; v++) if (A[3 * v] > 8.5) { const d = Math.hypot(A[3 * v], A[3 * v + 1], A[3 * v + 2]); s += d; s2 += d * d; n++; } return s2 / n - (s / n) ** 2; };
+  const sp0 = spread(Q); for (let i = 0; i < 12; i++) K.sculptDab(Q, I, { centre: at, radius: 8, strength: 1, mode: 'smooth', start });
+  check('smooth melts the noise on a bumpy ball: the radius spreads much less', spread(Q) < sp0 * 0.6, { before: sp0, after: spread(Q) });
+  const F = new Float32Array(m.positions), flat = (A) => { let s2 = 0, n = 0; for (let v = 0; v < A.length / 3; v++) if (A[3 * v] > 9) { s2 += (A[3 * v] - 9.5) ** 2; n++; } return s2 / n; };
+  const f0 = flat(F); for (let i = 0; i < 10; i++) K.sculptDab(F, I, { centre: at, radius: 5, strength: 1, mode: 'flatten', start });
+  check('flatten presses the cap of the ball towards a plane', flat(F) < f0 * 0.2, { before: f0, after: flat(F) });
+  // a mask keeps the brush to the painted triangles
+  const mask = new Uint8Array(I.length / 3); for (let t = 0; t < mask.length; t++) { const a = I[3 * t]; if (m.positions[3 * a + 1] > 0) mask[t] = 1; }
+  const M = new Float32Array(m.positions); const rm = K.sculptDab(M, I, { centre: at, radius: 5, strength: 1, mode: 'inflate', start, mask });
+  const vt = K.vertexTriangles(M, I); let outside = 0; for (const v of rm.moved) { let ok = false; for (let e = vt.start[v]; e < vt.start[v + 1]; e++) if (mask[vt.tri[e]]) ok = true; if (!ok) outside++; }
+  check('with a painted mask only vertices of painted faces move', rm.moved.length > 0 && rm.moved.length < r.moved.length && outside === 0, { moved: rm.moved.length, outside });
+  // the display arrays refreshed for the touched triangles agree with a full rebuild
+  const full = K.creasedArrays(P, I, 38), arr = K.creasedArrays(m.positions, I, 38), all = []; for (let t = 0; t < I.length / 3; t++) all.push(t);
+  K.refreshCreased(P, I, all, arr.pos, arr.nor, 38);
+  let dpos = 0, dnor = 0; for (let i = 0; i < full.pos.length; i++) { dpos = Math.max(dpos, Math.abs(full.pos[i] - arr.pos[i])); dnor = Math.max(dnor, Math.abs(full.nor[i] - arr.nor[i])); }
+  check('refreshing the view arrays after a stroke matches rebuilding them', dpos < 1e-6 && dnor < 1e-5, { dpos, dnor });
+}
+
 console.log('split to fit the bed');
 {
   const box = (sx, sy, sz) => ({ min: [0, 0, 0], max: [sx, sy, sz], size: [sx, sy, sz], center: [sx / 2, sy / 2, sz / 2] });

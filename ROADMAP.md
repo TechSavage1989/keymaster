@@ -25,6 +25,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
 - Pictures on the assembly sheet (1.48): each part beside its row, and the pieces spread apart along their cuts at the top.
+- Sculpt (1.54): Smooth, Inflate and Flatten brushes with a soft falloff, one undo step per stroke, kept to a painted area.
 - Boolean (1.53): a shape joined to a part, cut out of it, or only the overlap kept, sealed and cuttable, with a ring taken as its sectors.
 - Shapes (1.52): a cube, ball, tube, cone or ring, with sharp, chamfered or rounded edges, moved, turned and sized by handles or numbers; and the exact plane clip the booleans will build on.
 - Resizable side panels and a mouse and keyboard reference (1.51).

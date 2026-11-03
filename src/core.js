@@ -3052,6 +3052,94 @@ const KMCore = (() => {
     for (let t = 0; t < C.length / 3; t++) if ((C[3 * t] - centre[0]) ** 2 + (C[3 * t + 1] - centre[1]) ** 2 + (C[3 * t + 2] - centre[2]) ** 2 <= r2) out.push(t);
     return out;
   }
+  /* ---------- sculpting ----------
+     modelsplitter's Sculpt tool: brushes that move vertices, with a soft falloff, on a copy of the positions the
+     app commits as one undo step per stroke. The surface's connections never change, so a sealed part stays sealed.
+     The brush takes the vertices it can reach across the surface from the face under it, within its radius (as the
+     surface paint brush does), never the far side of a thin part. */
+  const vtCache = new WeakMap();
+  // The triangles round each vertex (CSR), cached per index array
+  function vertexTriangles(P, I) {
+    let vt = vtCache.get(I);
+    if (vt) return vt;
+    const nv = P.length / 3, start = new Int32Array(nv + 1);
+    for (let k = 0; k < I.length; k++) start[I[k] + 1]++;
+    for (let v = 0; v < nv; v++) start[v + 1] += start[v];
+    const fill = start.slice(0, nv), tri = new Int32Array(I.length);
+    for (let k = 0; k < I.length; k++) tri[fill[I[k]]++] = (k / 3) | 0;
+    vt = { start, tri };
+    vtCache.set(I, vt);
+    return vt;
+  }
+  const faceNormal = (P, I, t, out) => {
+    const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+    const ex = P[b] - P[a], ey = P[b + 1] - P[a + 1], ez = P[b + 2] - P[a + 2], fx = P[c] - P[a], fy = P[c + 1] - P[a + 1], fz = P[c + 2] - P[a + 2];
+    out[0] = ey * fz - ez * fy; out[1] = ez * fx - ex * fz; out[2] = ex * fy - ey * fx; // twice the area, facing out
+    return out;
+  };
+  // One dab of the brush on P (changed in place). centre and radius in mm; strength 0 to 1; mode 'smooth'
+  // (each vertex towards the middle of its neighbours), 'inflate' (out along the surface, or in with reverse),
+  // 'flatten' (towards the plane through the brush's area); start is the triangle under the brush; mask, if given,
+  // marks the triangles the brush may touch (a painted area), by triangle. Returns the vertices moved and the
+  // triangles they belong to, so a view can refresh just those.
+  function sculptDab(P, I, { centre, radius, strength = 0.5, mode = 'inflate', reverse = false, start = -1, mask = null }) {
+    const nv = P.length / 3, r2 = radius * radius, adj = vertexAdjacency(P, I), vt = vertexTriangles(P, I);
+    if (start < 0) start = nearestTriangle(P, I, centre, radius);
+    if (start < 0) return { moved: [], tris: [] };
+    // the vertices within reach across the surface
+    const seen = new Uint8Array(nv), queue = [], w = [];
+    const d2 = (v) => (P[3 * v] - centre[0]) ** 2 + (P[3 * v + 1] - centre[1]) ** 2 + (P[3 * v + 2] - centre[2]) ** 2;
+    for (let k = 0; k < 3; k++) { const v = I[3 * start + k]; if (!seen[v]) { seen[v] = 1; queue.push(v); } }
+    const picked = [];
+    for (let q = 0; q < queue.length; q++) {
+      const v = queue[q], dd = d2(v);
+      if (dd > r2) continue;
+      picked.push(v); const u = Math.sqrt(dd) / radius; w.push((1 - u * u) ** 2);
+      for (let e = adj.start[v]; e < adj.start[v + 1]; e++) { const n = adj.to[e]; if (!seen[n]) { seen[n] = 1; queue.push(n); } }
+    }
+    const allowed = (v) => { if (!mask) return true; for (let e = vt.start[v]; e < vt.start[v + 1]; e++) if (mask[vt.tri[e]]) return true; return false; };
+    const moved = [], fn = [0, 0, 0];
+    const normalAt = (v, out) => { out[0] = out[1] = out[2] = 0; for (let e = vt.start[v]; e < vt.start[v + 1]; e++) { faceNormal(P, I, vt.tri[e], fn); out[0] += fn[0]; out[1] += fn[1]; out[2] += fn[2]; } const l = Math.hypot(out[0], out[1], out[2]) || 1; out[0] /= l; out[1] /= l; out[2] /= l; return out; };
+    const s = Math.max(0, Math.min(1, strength));
+    if (mode === 'smooth') {
+      const target = new Float64Array(picked.length * 3);
+      for (let i = 0; i < picked.length; i++) { // the middle of the neighbours, from the positions before the dab
+        const v = picked[i]; let x = 0, y = 0, z = 0, n = 0;
+        for (let e = adj.start[v]; e < adj.start[v + 1]; e++) { const u = adj.to[e]; x += P[3 * u]; y += P[3 * u + 1]; z += P[3 * u + 2]; n++; }
+        if (n) { target[3 * i] = x / n; target[3 * i + 1] = y / n; target[3 * i + 2] = z / n; } else { target[3 * i] = P[3 * v]; target[3 * i + 1] = P[3 * v + 1]; target[3 * i + 2] = P[3 * v + 2]; }
+      }
+      for (let i = 0; i < picked.length; i++) { const v = picked[i]; if (!allowed(v)) continue; const f = s * w[i] * 0.5; P[3 * v] += (target[3 * i] - P[3 * v]) * f; P[3 * v + 1] += (target[3 * i + 1] - P[3 * v + 1]) * f; P[3 * v + 2] += (target[3 * i + 2] - P[3 * v + 2]) * f; moved.push(v); }
+    } else if (mode === 'flatten') {
+      // the plane: the brush area's weighted middle and the mean of its normals
+      let cx = 0, cy = 0, cz = 0, nx = 0, ny = 0, nz = 0, tw = 0; const nn = [0, 0, 0], N = [];
+      for (let i = 0; i < picked.length; i++) { const v = picked[i]; normalAt(v, nn); N.push(nn[0], nn[1], nn[2]); cx += P[3 * v] * w[i]; cy += P[3 * v + 1] * w[i]; cz += P[3 * v + 2] * w[i]; nx += nn[0] * w[i]; ny += nn[1] * w[i]; nz += nn[2] * w[i]; tw += w[i]; }
+      if (!(tw > 0)) return { moved: [], tris: [] };
+      cx /= tw; cy /= tw; cz /= tw; const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      for (let i = 0; i < picked.length; i++) { const v = picked[i]; if (!allowed(v)) continue; const h = (P[3 * v] - cx) * nx + (P[3 * v + 1] - cy) * ny + (P[3 * v + 2] - cz) * nz, f = s * w[i] * 0.5 * h; P[3 * v] -= nx * f; P[3 * v + 1] -= ny * f; P[3 * v + 2] -= nz * f; moved.push(v); }
+    } else { // inflate
+      const step = s * radius * 0.05 * (reverse ? -1 : 1), nn = [0, 0, 0], N = new Float64Array(picked.length * 3);
+      for (let i = 0; i < picked.length; i++) { normalAt(picked[i], nn); N[3 * i] = nn[0]; N[3 * i + 1] = nn[1]; N[3 * i + 2] = nn[2]; } // normals from the positions before the dab
+      for (let i = 0; i < picked.length; i++) { const v = picked[i]; if (!allowed(v)) continue; const f = step * w[i]; P[3 * v] += N[3 * i] * f; P[3 * v + 1] += N[3 * i + 1] * f; P[3 * v + 2] += N[3 * i + 2] * f; moved.push(v); }
+    }
+    const tset = new Set(); for (const v of moved) for (let e = vt.start[v]; e < vt.start[v + 1]; e++) tset.add(vt.tri[e]);
+    return { moved, tris: [...tset] };
+  }
+  // Display arrays (as creasedArrays makes them) refreshed for a few triangles after their vertices moved: the
+  // positions, and each corner's normal from the faces round its vertex within the crease angle.
+  function refreshCreased(P, I, tris, pos, nor, creaseDeg) {
+    const vt = vertexTriangles(P, I), cosT = Math.cos((creaseDeg * Math.PI) / 180), fn = [0, 0, 0], gn = [0, 0, 0];
+    for (const t of tris) {
+      faceNormal(P, I, t, fn); const l = Math.hypot(fn[0], fn[1], fn[2]) || 1, ux = fn[0] / l, uy = fn[1] / l, uz = fn[2] / l;
+      for (let j = 0; j < 3; j++) {
+        const vi = I[3 * t + j], o = 9 * t + 3 * j;
+        pos[o] = P[3 * vi]; pos[o + 1] = P[3 * vi + 1]; pos[o + 2] = P[3 * vi + 2];
+        let sx = 0, sy = 0, sz = 0;
+        for (let e = vt.start[vi]; e < vt.start[vi + 1]; e++) { faceNormal(P, I, vt.tri[e], gn); const gl = Math.hypot(gn[0], gn[1], gn[2]) || 1; if ((gn[0] * ux + gn[1] * uy + gn[2] * uz) / gl >= cosT) { sx += gn[0]; sy += gn[1]; sz += gn[2]; } }
+        const sl = Math.hypot(sx, sy, sz) || 1;
+        nor[o] = sx / sl; nor[o + 1] = sy / sl; nor[o + 2] = sz / sl;
+      }
+    }
+  }
   // Snap a selection to the surface regions: every region at least half painted (by area) is painted whole, the
   // rest is cleared, so a rough stroke lands on the regions' borders.
   function snapSelectionToRegions(P, I, sel, seg) {
@@ -5222,7 +5310,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, loopFrame, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, sphereTriangles, snapSelectionToRegions, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, loopFrame, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, sphereTriangles, sculptDab, vertexTriangles, refreshCreased, snapSelectionToRegions, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
