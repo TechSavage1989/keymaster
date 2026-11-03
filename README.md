@@ -15,6 +15,7 @@
 
 ## Features
 
+- **Make room.** Drag the edge of either side panel to resize it (double-click puts it back), and press ? for the list of mouse and keyboard shortcuts.
 - **Look from any side, light or dark.** A View from list turns the view to the front, back, a side, the top or the bottom of the part, and a sun button in the top bar switches between light and dark.
 - **Your printer, in one pick.** Choose a common printer (Bambu Lab, Prusa, Creality, Elegoo, Anycubic, Phrozen, Formlabs) and the bed size and the filament or resin settings follow; or type your own size. **Start over** brings the model back as it was opened, in one undoable step.
 - **One row of cut tools.** Plane, Regions, Paint, Draw, Suggest and Fit bed sit in a row at the top of the right panel, each with its own controls under it; the Joints section folds to a one-line summary when a tool needs the room, and the one yellow button at the foot always does what the tool is ready to do.

@@ -131,6 +131,28 @@ with sync_playwright() as p:
     check('Front looks at the part from the front', df[1] < -0.99 and abs(df[2]) < 0.05, df)
     pg.click('[data-act=done]'); pg.keyboard.press('f'); pg.wait_for_timeout(600)  # back to the usual view, with nothing chosen
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(600)
+    # the side panels' edges can be dragged, within limits, and a double-click resets one
+    w0 = pg.evaluate("document.querySelector('.inspector').getBoundingClientRect().width")
+    bx = pg.locator('#dividerRight').bounding_box()
+    x0, y0 = bx['x'] + bx['width'] / 2, bx['y'] + 300
+    pg.mouse.move(x0, y0); pg.mouse.down()
+    for i in range(1, 9): pg.mouse.move(x0 - 10 * i, y0)
+    pg.mouse.up(); pg.wait_for_timeout(300)
+    w1 = pg.evaluate("document.querySelector('.inspector').getBoundingClientRect().width")
+    check('dragging the settings panel\'s edge 80 px makes it 80 px wider, and the width is kept', abs(w1 - w0 - 80) <= 2 and pg.evaluate("JSON.parse(localStorage.getItem('keymaster.panels')).right") == round(w1), (w0, w1))
+    check('the settings still fit without scrolling at that width', pg.evaluate("(() => { const i = document.querySelector('#inspector'); return i.scrollHeight - i.clientHeight; })()") <= 1)
+    pg.evaluate("KeymasterDebug.setPanelWidth('right', 100)")
+    check('a panel can\'t be dragged narrower than its limit', pg.evaluate("document.querySelector('.inspector').getBoundingClientRect().width") == 300)
+    pg.dblclick('#dividerRight'); pg.wait_for_timeout(200)
+    check('double-clicking the edge resets the width', abs(pg.evaluate("document.querySelector('.inspector').getBoundingClientRect().width") - w0) <= 1 and pg.evaluate("JSON.parse(localStorage.getItem('keymaster.panels')).right") is None)
+    # the keyboard reference: ? opens it, Esc closes it
+    check('the top bar has a ? button and the reference starts closed', pg.locator('#keysBtn').count() == 1 and not pg.evaluate("document.querySelector('#keysDialog').open"))
+    pg.keyboard.press('?'); pg.wait_for_timeout(150)
+    check('pressing ? opens the mouse and keyboard reference', pg.evaluate("document.querySelector('#keysDialog').open") and 'Undo' in pg.inner_text('#keysDialog') and 'Orbit' in pg.inner_text('#keysDialog'))
+    pg.keyboard.press('Escape'); pg.wait_for_timeout(150)
+    check('Esc closes it and leaves the part chosen', not pg.evaluate("document.querySelector('#keysDialog').open") and pg.locator('[data-act=keytype]').count() > 0)
+    pg.click('#keysBtn'); pg.wait_for_timeout(150); pg.click('#keysClose'); pg.wait_for_timeout(150)
+    check('the button opens it and Close shuts it', not pg.evaluate("document.querySelector('#keysDialog').open"))
     # light or dark: the system's choice until the button is pressed, then kept
     check('the theme button starts on the system choice (light here)', pg.get_attribute('#themeBtn', 'aria-pressed') == 'false' and pg.evaluate("document.documentElement.dataset.theme || ''") == '')
     pg.click('#themeBtn'); pg.wait_for_timeout(100)

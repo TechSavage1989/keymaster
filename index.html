@@ -70,7 +70,24 @@ button, input, select { font: inherit; color: inherit; }
 .bar-mid { display: flex; align-items: center; gap: 10px; margin-left: 18px; flex: 1; }
 .hist { display: flex; gap: 2px; }
 
-.layout { display: grid; grid-template-columns: 252px minmax(0, 1fr) 340px; min-height: 0; }
+.layout { --left-w: 252px; --right-w: 340px; display: grid; grid-template-columns: var(--left-w) minmax(0, 1fr) var(--right-w); min-height: 0; }
+/* the edges of the side panels can be dragged to resize them */
+.divider { position: absolute; top: 0; bottom: 0; width: 8px; z-index: 6; cursor: col-resize; touch-action: none; }
+.divider.left { left: 0; } .divider.right { right: 0; }
+.divider::after { content: ""; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--focus); opacity: 0; transition: opacity .12s; }
+.divider.left::after { left: 0; } .divider.right::after { right: 0; }
+.divider:hover::after, .divider.is-dragging::after { opacity: .7; }
+body.is-resizing { cursor: col-resize; user-select: none; }
+/* the keyboard reference */
+.keys-dialog { border: 0; border-radius: 12px; padding: 0; width: min(92vw, 700px); background: var(--panel); color: var(--ink); box-shadow: 0 18px 50px rgba(0,0,0,.3); }
+.keys-dialog::backdrop { background: rgba(20,22,24,.45); }
+.keys-dialog .kd-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 8px; }
+.keys-dialog .kd-body { padding: 0 18px 16px; display: grid; grid-template-columns: 1fr 1.15fr; gap: 0 28px; }
+.keys-dialog h3 { margin: 10px 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.keys-dialog dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13.5px; align-items: baseline; }
+.keys-dialog dt { white-space: nowrap; } .keys-dialog dd { margin: 0; color: var(--muted); }
+.keys-dialog kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--field); font: inherit; font-size: 12px; font-weight: 600; text-align: center; }
+@media (max-width: 600px) { .keys-dialog .kd-body { grid-template-columns: 1fr; } }
 .parts-panel, .inspector { background: var(--panel); min-height: 0; overflow: auto; }
 .parts-panel { border-right: 1px solid var(--line); display: flex; flex-direction: column; }
 .inspector { border-left: 1px solid var(--line); }
@@ -450,7 +467,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
 .cut-action .key-status .status + .status { margin-top: 6px; }
 .cut-action .key-status .btn.small { margin-top: 6px; }
 @media (max-width: 860px) { .plane-bar { position: static; margin: 8px; } .hint { bottom: 16px; } }
-@media (max-width: 1080px) { .layout { grid-template-columns: 220px minmax(0, 1fr) 312px; } }
+@media (max-width: 1080px) { .layout { --left-w: 220px; --right-w: 312px; } }
 @media (max-width: 860px) {
   body { overflow: auto; }
   .app { height: auto; min-height: 100%; }
@@ -458,6 +475,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
   .bar-mid { margin-left: 4px; gap: 4px; }
   .brand span { display: none; }
   .layout { grid-template-columns: minmax(0, 1fr); }
+  .divider { display: none; }
   .stage { height: 58vh; min-height: 320px; order: 0; }
   .inspector { order: 1; border-left: 0; overflow: visible; }
   .parts-panel { order: 2; border-right: 0; border-top: 1px solid var(--line); overflow: visible; }
@@ -476,7 +494,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.50, build 309a43. After an update, refresh the page and check this changes.">v1.50 · 309a43</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.51, build 1712e9. After an update, refresh the page and check this changes.">v1.51 · 1712e9</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -485,6 +503,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <button class="icon-btn" id="redoBtn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 9H8a4.5 4.5 0 0 0 0 9h2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
       </div>
     </div>
+    <button class="icon-btn" id="keysBtn" aria-label="Mouse and keyboard" title="Mouse and keyboard (?)"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7.6 8a2.4 2.4 0 1 1 3.4 2.2c-.7.4-1 .8-1 1.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.2" r=".9" fill="currentColor"/></svg></button>
     <button class="icon-btn" id="themeBtn" aria-label="Switch between light and dark" aria-pressed="false" title="Light or dark"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
     <div class="export-group"><select id="exportFormat" aria-label="Export format" title="What to save"><option value="zip">STLs in a ZIP</option><option value="3mf">One 3MF</option><option value="sheet">STLs + assembly sheet</option></select><button class="btn primary" id="exportBtn" disabled title="Save every part">Export parts</button></div>
   </header>
@@ -496,6 +515,8 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
       <p class="tip muted small">Double-click a name to rename it. Parts are checked against your printer bed size.</p>
     </aside>
     <section class="stage" id="stage">
+      <div class="divider left" id="dividerLeft" title="Drag to resize the parts panel; double-click to reset"></div>
+      <div class="divider right" id="dividerRight" title="Drag to resize the settings panel; double-click to reset"></div>
       <div class="empty" id="empty">
         <div class="empty-card">
           <svg viewBox="0 0 168 120" aria-hidden="true">
@@ -567,6 +588,41 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
   </div>
 </div>
 </div>
+<dialog class="keys-dialog" id="keysDialog" aria-label="Mouse and keyboard">
+  <div class="kd-head"><h2>Mouse and keyboard</h2><button class="btn small" id="keysClose">Close</button></div>
+  <div class="kd-body">
+    <div>
+      <h3>Cutting</h3>
+      <dl><dt><kbd>Enter</kbd></dt><dd>Cut: the plane, the picked region or line, or close the line being drawn</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Step back: stop painting or drawing, drop the pick, let the part go</dd>
+      <dt><kbd>X</kbd> <kbd>Y</kbd> <kbd>Z</kbd></dt><dd>Turn the cut plane square to that axis</dd>
+      <dt><kbd>Delete</kbd></dt><dd>Remove the chosen key</dd>
+      <dt><kbd>Backspace</kbd></dt><dd>Take the last drawn point back</dd>
+      <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Smaller or bigger brush</dd>
+      <dt><kbd>Shift</kbd> + click</dt><dd>Add a region or line to the pick</dd>
+      <dt><kbd>Shift</kbd> + drag</dt><dd>Erase paint; tilt the plane in 5° steps</dd></dl>
+      <h3>Everything else</h3>
+      <dl><dt><kbd>Ctrl</kbd> <kbd>Z</kbd></dt><dd>Undo</dd>
+      <dt><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Z</kbd></dt><dd>Redo</dd>
+      <dt><kbd>Ctrl</kbd> <kbd>O</kbd></dt><dd>Open a model or project</dd>
+      <dt><kbd>F</kbd></dt><dd>Frame the model, or the chosen part</dd>
+      <dt><kbd>?</kbd></dt><dd>This list</dd></dl>
+    </div>
+    <div>
+      <h3>Mouse</h3>
+      <dl><dt>Drag</dt><dd>Orbit; on the cut plane, tip it; with Paint on, paint</dd>
+      <dt>Right drag</dt><dd>Pan</dd>
+      <dt>Wheel</dt><dd>Zoom</dd>
+      <dt><kbd>Alt</kbd> + drag</dt><dd>Orbit from anywhere, even over the plane</dd>
+      <dt>Arrow</dt><dd>Slide the cut plane</dd>
+      <dt>Rings</dt><dd>Tilt the cut plane</dd>
+      <dt>Click the cut face</dt><dd>Add a key; click a key to set it up on its own</dd>
+      <dt>Click a region or line</dt><dd>With Regions on, pick it to split off or cut along</dd>
+      <dt>Double-click a part's name</dt><dd>Rename it</dd>
+      <dt>Panel edges</dt><dd>Drag to resize a panel; double-click to reset</dd></dl>
+    </div>
+  </div>
+</dialog>
 <input type="file" id="fileInput" accept=".stl,.obj,.zip" hidden>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
@@ -6516,7 +6572,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { cameraDir() { const d = camera.position.clone().sub(orbit.target).normalize(); return [d.x, d.y, d.z]; }, setTool(t) { setTool(t); return state.tool; }, tool() { return state.tool; }, cutAcross(x0, y0, x1, y1) { const r = canvas.getBoundingClientRect(); setAcross(true); const out = cutAcross(r.left + x0, r.top + y0, r.left + x1, r.top + y1); return out ? { ...out, selected: !!selectedPart(), regions: state.regions.on } : null; }, movePick(dir, mm) { if (mm) { state.moveBy = mm; const i = $('#moveLineBy'); if (i) i.value = mm; } movePick(dir); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, flatHere() { flatFromPick(); return { regions: state.regions.on, focus: state.cut.focus ? state.cut.focus.length : 0 }; }, paintMode(mode) { state.paint.mode = mode; renderPaintTools(); updateHint(); return state.paint.mode; }, paintFill(on) { state.paint.fill = !!on; renderPaintTools(); updateHint(); return state.paint.fill; }, regionTriangles(partIndex, point) { const part = state.parts[partIndex], seg = regionsFor(part), g = seg.groupOf[K.nearestTriangle(part.positions, part.indices, point)]; let n = 0; for (const x of seg.groupOf) if (x === g) n++; return n; }, paintIsolate() { paintEdit('paint-isolate'); const p = selectedPart(), v = p && views.get(p.id); return { shown: v && v.isoMap ? v.isoMap.length : 0, isolated: !!state.paint.iso }; }, paintShowAll() { paintEdit('paint-show'); const p = selectedPart(), v = p && views.get(p.id); return { indexed: !!(v && v.geom.index), isolated: !!state.paint.iso }; }, inlayCut() { inlayFromPick(); return true; }, splitPlan() { planSplit(null); const b = modelBounds(); return state.split.planes ? { planes: state.split.planes.map(q => [q.axis, +q.pos.toFixed(2)]), ...K.bedFit(b, state.split.planes, state.bed, SPLIT_MARGIN) } : null; }, seamEdit() { startSeamEdit(); return state.edit ? state.edit.loops.map(l => l.pts.length) : null; }, seamDrag(li, i, point) { moveHandle(li, i, point); ptr.handle = { li, i }; endHandle(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', length: pk.loops.reduce((s, l) => s + l.length, 0), handle: state.edit.loops[li].pts[i] } : null; }, seamSmooth(passes) { smoothSeam(passes); const pk = state.regions.pick; return pk ? { ok: !!pk.result, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, cutHereAt(partIndex, point) { const part = state.parts[partIndex]; const it = K.cutHere(part.positions, part.indices, point, K.diag(part.bbox)); if (!it) return null; addHereSuggestion(part, it); return { width: it.width, freed: it.freed, areas: it.areas.length, normal: it.normal }; }, explodeOffsets() { return state.parts.map(p => { const v = views.get(p.id); return { pull: p.pull, at: v ? [v.mesh.position.x - v.offset.x, v.mesh.position.y - v.offset.y, v.mesh.position.z - v.offset.z] : null }; }); }, regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintLetGo() { previewPainted(); const pk = state.regions.pick; return pk ? { preview: !!pk.preview, loops: pk.loops.length, error: pk.error || '' } : null; }, paintDone() { pickPainted(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { panelWidths, setPanelWidth(side, px) { setPanelWidth(side, px); savePanels(); renderInspector(); return panelWidths(); }, cameraDir() { const d = camera.position.clone().sub(orbit.target).normalize(); return [d.x, d.y, d.z]; }, setTool(t) { setTool(t); return state.tool; }, tool() { return state.tool; }, cutAcross(x0, y0, x1, y1) { const r = canvas.getBoundingClientRect(); setAcross(true); const out = cutAcross(r.left + x0, r.top + y0, r.left + x1, r.top + y1); return out ? { ...out, selected: !!selectedPart(), regions: state.regions.on } : null; }, movePick(dir, mm) { if (mm) { state.moveBy = mm; const i = $('#moveLineBy'); if (i) i.value = mm; } movePick(dir); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, flatHere() { flatFromPick(); return { regions: state.regions.on, focus: state.cut.focus ? state.cut.focus.length : 0 }; }, paintMode(mode) { state.paint.mode = mode; renderPaintTools(); updateHint(); return state.paint.mode; }, paintFill(on) { state.paint.fill = !!on; renderPaintTools(); updateHint(); return state.paint.fill; }, regionTriangles(partIndex, point) { const part = state.parts[partIndex], seg = regionsFor(part), g = seg.groupOf[K.nearestTriangle(part.positions, part.indices, point)]; let n = 0; for (const x of seg.groupOf) if (x === g) n++; return n; }, paintIsolate() { paintEdit('paint-isolate'); const p = selectedPart(), v = p && views.get(p.id); return { shown: v && v.isoMap ? v.isoMap.length : 0, isolated: !!state.paint.iso }; }, paintShowAll() { paintEdit('paint-show'); const p = selectedPart(), v = p && views.get(p.id); return { indexed: !!(v && v.geom.index), isolated: !!state.paint.iso }; }, inlayCut() { inlayFromPick(); return true; }, splitPlan() { planSplit(null); const b = modelBounds(); return state.split.planes ? { planes: state.split.planes.map(q => [q.axis, +q.pos.toFixed(2)]), ...K.bedFit(b, state.split.planes, state.bed, SPLIT_MARGIN) } : null; }, seamEdit() { startSeamEdit(); return state.edit ? state.edit.loops.map(l => l.pts.length) : null; }, seamDrag(li, i, point) { moveHandle(li, i, point); ptr.handle = { li, i }; endHandle(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', length: pk.loops.reduce((s, l) => s + l.length, 0), handle: state.edit.loops[li].pts[i] } : null; }, seamSmooth(passes) { smoothSeam(passes); const pk = state.regions.pick; return pk ? { ok: !!pk.result, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, cutHereAt(partIndex, point) { const part = state.parts[partIndex]; const it = K.cutHere(part.positions, part.indices, point, K.diag(part.bbox)); if (!it) return null; addHereSuggestion(part, it); return { width: it.width, freed: it.freed, areas: it.areas.length, normal: it.normal }; }, explodeOffsets() { return state.parts.map(p => { const v = views.get(p.id); return { pull: p.pull, at: v ? [v.mesh.position.x - v.offset.x, v.mesh.position.y - v.offset.y, v.mesh.position.z - v.offset.z] : null }; }); }, regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintLetGo() { previewPainted(); const pk = state.regions.pick; return pk ? { preview: !!pk.preview, loops: pk.loops.length, error: pk.error || '' } : null; }, paintDone() { pickPainted(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -7097,9 +7153,43 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   fileInput.addEventListener('change', () => { const f = fileInput.files[0]; if (f) loadFile(f); fileInput.value = ''; });
 
   /* ---------------- keyboard ---------------- */
+  // The keyboard reference: the ? button or key opens it, Esc or Close shuts it
+  const keysDialog = $('#keysDialog');
+  function showKeys(on) { if (!keysDialog) return; if (on && !keysDialog.open) keysDialog.showModal(); else if (!on && keysDialog.open) keysDialog.close(); }
+  $('#keysBtn').addEventListener('click', () => showKeys(true));
+  $('#keysClose').addEventListener('click', () => showKeys(false));
+  keysDialog.addEventListener('click', (e) => { if (e.target === keysDialog) showKeys(false); }); // a click on the backdrop
+  // The side panels' edges can be dragged (the guide's "drag the divider"): the widths live in CSS variables on the
+  // layout, within limits that keep the settings readable, and are kept for next time; a double-click resets one.
+  const layout = document.querySelector('.layout'), PANELS_KEY = 'keymaster.panels', PANEL_LIMITS = { left: [180, 440], right: [300, 560] };
+  function setPanelWidth(side, px) {
+    if (px === null) { layout.style.removeProperty(side === 'left' ? '--left-w' : '--right-w'); return; }
+    const [lo, hi] = PANEL_LIMITS[side], w = Math.round(Math.max(lo, Math.min(hi, px)));
+    layout.style.setProperty(side === 'left' ? '--left-w' : '--right-w', `${w}px`);
+  }
+  function panelWidths() { return { left: parseFloat(layout.style.getPropertyValue('--left-w')) || null, right: parseFloat(layout.style.getPropertyValue('--right-w')) || null }; }
+  function savePanels() { try { localStorage.setItem(PANELS_KEY, JSON.stringify(panelWidths())); } catch (e) { /* ignore */ } }
+  try { const pw = JSON.parse(localStorage.getItem(PANELS_KEY) || 'null'); if (pw) { if (pw.left) setPanelWidth('left', pw.left); if (pw.right) setPanelWidth('right', pw.right); } } catch (e) { /* storage unavailable */ }
+  for (const side of ['left', 'right']) {
+    const el = $(side === 'left' ? '#dividerLeft' : '#dividerRight');
+    if (!el) continue;
+    let start = null;
+    el.addEventListener('pointerdown', (e) => {
+      const panel = document.querySelector(side === 'left' ? '.parts-panel' : '.inspector');
+      start = { x: e.clientX, w: panel.getBoundingClientRect().width };
+      el.setPointerCapture(e.pointerId); el.classList.add('is-dragging'); document.body.classList.add('is-resizing');
+      e.preventDefault();
+    });
+    el.addEventListener('pointermove', (e) => { if (!start) return; setPanelWidth(side, start.w + (side === 'left' ? e.clientX - start.x : start.x - e.clientX)); });
+    const stop = () => { if (!start) return; start = null; el.classList.remove('is-dragging'); document.body.classList.remove('is-resizing'); savePanels(); renderInspector(); };
+    el.addEventListener('pointerup', stop); el.addEventListener('pointercancel', stop);
+    el.addEventListener('dblclick', () => { setPanelWidth(side, null); savePanels(); renderInspector(); });
+  }
   window.addEventListener('keydown', (e) => {
     const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement && document.activeElement.tagName);
     const mod = e.ctrlKey || e.metaKey;
+    if (keysDialog && keysDialog.open) return; // the reference is up: Esc closes it on its own
+    if (e.key === '?' && !typing) { e.preventDefault(); showKeys(true); return; }
     if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
     if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); fileInput.click(); return; }
