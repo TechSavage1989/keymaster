@@ -144,6 +144,10 @@ The owner's verdict on the first version was "terrible" (pins on the base's edge
 
 `VERSION` holds the version shown next to the app's name, with a short build code that `tools/build.py` works out from the sources (the same sources always give the same code). **Bump `VERSION` in every pull request** (1.14 to 1.15 and so on), so the owner can refresh the live page and see the new version has arrived.
 
+## Repository standards
+
+Keymaster follows the shared TechSavage1989 standard in `docs/REPOSITORY_STANDARDS.md` (the same file in every app repository), which every AI tool reads through `AGENTS.md`. In short: the README keeps the standard centered header and section order and is updated with any user-visible change; screenshots are real captures with fictional data in `docs/images/` (`hero.png` + kebab-case names) and are recaptured in the same pull request when a UI change makes them stale; nothing built or private is committed except `index.html`, which must be rebuilt; branches are short-lived (`feat/`, `fix/`, `docs/`, `chore/`) and deleted after merging. Where this file differs from the standard (for example, bumping `VERSION` in every pull request, including documentation-only ones), this file wins.
+
 ## Working style
 
 - Small, focused pull requests, one roadmap item each, with tests. **The owner has asked that pull requests be merged as soon as CI is green, without waiting for a go-ahead** (said on 2 Nov 2026: "merge without my consent in the future").
