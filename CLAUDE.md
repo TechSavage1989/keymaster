@@ -97,6 +97,10 @@ modelsplitter's joint numbers (roadmap item 12): **Number the joints** in the ke
 
 modelsplitter's inlay cut, for an eye, a gem or a badge to print in another colour: `inlayCut(P, I, sel, { depth, fit, flat, wall })` takes the area as a triangle selection and makes two sunk-face cuts of the original model, the pocket from the area's outline (the recess goes into the body: `splitRegions` with `sink: depth`, `force`, no keys) and the inlay from the outline shrunk by `fit` (`shrinkSelection`), keeping only the body of the first and the inlay of the second. With `flat`, `sunkRing(..., flat, plane)` makes one level floor `want` beyond the line's deepest point (the whole floor comes up when any point lacks room, so it stays flat) and returns its `plane`; the inlay cut is given that plane (`opts.sinkPlane`), so its floor is the pocket's exactly and the inlay prints on its base. `cutAlongLoops` reports the planes in `floors`. The result's `depth` is the floor under the line's deepest point (`deepest` is further in under a bump); `loopSelection` turns picked lines into a selection (side 1, the smaller side). In the app the **Inlay** row of the regions panel (`#inlayTools`: Depth, Fit, Flat floor, **Inlay cut**) shows whenever a pick has closed outlines; `inlayFromPick` takes the painted selection, the picked regions' triangles, or the inside of the picked lines, and replaces the part with the body and `<name> inlay` in a new colour, one undo step.
 
+## Cut across the view
+
+modelsplitter's Line tool: **Cut across the view** in the suggestions panel (`setAcross`, `state.across.on`) arms the next drag on the canvas; the drag draws a dashed line in the cut colour over the view (`#acrossLine`, an SVG overlay) and letting go (`cutAcross`) sets the plane through the two rays from the eye through the line's ends (`raycaster.setFromCamera` for each, normal = their cross product), placed where the line's middle meets the model or at the model's middle brought onto the plane, through `placeFlatCut` with no focus, so every area the plane crosses is cut. A drag under 10 px is a click and does nothing. Esc stops; the hint says to turn the model and check the back.
+
 ## Moving a line, and a flat cut in its place
 
 modelsplitter's "Lower the cut line" and "Flat plane replaces the seam". **Move the line In / Out by N mm** under a pick (`movePick`): the area the pick bounds (`pickSelection`: the paint, the picked regions' triangles, or the smaller side of the lines through `loopSelection`) is shrunk or grown by that much (`shrinkSelection` / `growSelection`) and its new outline picked as drawn lines, so keys, plug, sinking and the checks follow; a painted pick keeps painting with the moved selection. **Flat cut here** (`flatFromPick`) puts the cut plane through the first line's best-fit plane (`loopFrame`, now exported) and focuses the flat cut on the area the line bounds, saying how far the line strays from flat.
@@ -139,6 +143,10 @@ The owner's verdict on the first version was "terrible" (pins on the base's edge
 ## Versions
 
 `VERSION` holds the version shown next to the app's name, with a short build code that `tools/build.py` works out from the sources (the same sources always give the same code). **Bump `VERSION` in every pull request** (1.14 to 1.15 and so on), so the owner can refresh the live page and see the new version has arrived.
+
+## Repository standards
+
+Keymaster follows the shared TechSavage1989 standard in `docs/REPOSITORY_STANDARDS.md` (the same file in every app repository), which every AI tool reads through `AGENTS.md`. In short: the README keeps the standard centered header and section order and is updated with any user-visible change; screenshots are real captures with fictional data in `docs/images/` (`hero.png` + kebab-case names) and are recaptured in the same pull request when a UI change makes them stale; nothing built or private is committed except `index.html`, which must be rebuilt; branches are short-lived (`feat/`, `fix/`, `docs/`, `chore/`) and deleted after merging. Where this file differs from the standard (for example, bumping `VERSION` in every pull request, including documentation-only ones), this file wins.
 
 ## Working style
 
