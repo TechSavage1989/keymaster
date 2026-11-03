@@ -2633,6 +2633,42 @@ const KMCore = (() => {
     let length = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; length += Math.hypot(P[3 * p] - P[3 * q], P[3 * p + 1] - P[3 * q + 1], P[3 * p + 2] - P[3 * q + 2]); }
     return { verts: ring, closed: true, length, drawn: true };
   }
+  /* ---------- inlay cut ----------
+     Pop a detail out as its own part to print in another colour (an eye, a gem, a badge), as modelsplitter's inlay
+     cut: the body gets a pocket under the painted or picked area, and the inlay is the same area cut with its
+     outline pulled in by the fit, so it presses back into place. Both come from sunk-face cuts of the original
+     model: the pocket from the area's outline (the recess goes into the body), the inlay from the outline shrunk
+     by `fit`, sunk to the same depth; only the body of the first cut and the inlay of the second are kept. */
+  // `sel` is the area as a triangle selection (1 painted); opts: depth (mm), fit (mm per side), flat (a level
+  // floor, so the inlay prints on its base), wall (solid to keep under the pocket).
+  function inlayCut(P, I, sel, opts = {}) {
+    const depth = opts.depth > 0 ? opts.depth : 3, fit = opts.fit >= 0 ? opts.fit : 0.2, wall = opts.wall > 0 ? opts.wall : 0.8;
+    const cut = (s, want, w, plane) => splitRegions(P, I, selectionSeg(P, I, s), [1], { sink: want, sinkFlat: !!opts.flat, sinkPlane: plane || null, force: true, minThickness: 0, cfg: { type: 'none', margin: w } });
+    let pocket;
+    try { pocket = cut(sel, depth, wall); } catch (err) { throw new Error(`The pocket can’t be cut here: ${err.message.charAt(0).toLowerCase()}${err.message.slice(1)}`); }
+    const got = pocket.sinks[0] || 0;
+    if (got < 0.3) throw new Error('No room for a pocket here: the body is too thin under this area. Try a shallower depth or a thicker spot.');
+    const sel2 = fit > 0 ? shrinkSelection(P, I, sel, fit) : sel;
+    let count = 0; for (let t = 0; t < sel2.length; t++) count += sel2[t];
+    if (!count) throw new Error('The area is too small for an inlay at this fit: nothing is left once it’s pulled in. Paint a bigger area or reduce the fit.');
+    let inlay;
+    const floor = opts.flat && pocket.floors ? pocket.floors[0] : null;
+    try { inlay = cut(sel2, got, 0.1, floor); } catch (err) { throw new Error(`The inlay can’t be cut here: ${err.message.charAt(0).toLowerCase()}${err.message.slice(1)}`); }
+    const body = pocket.parts.slice(1), piece = inlay.parts[0];
+    if (!body.length || !piece) throw new Error('The inlay cut didn’t separate the area from the body.');
+    const merged = body.length === 1 ? body[0] : (() => { const m = mergeMeshes(body); return { positions: m.positions, indices: m.indices, volume: body.reduce((s, q) => s + q.volume, 0) }; })();
+    // the depth shown is the pocket's floor under the line's deepest point (with a flat floor the deepest point of the
+    // recess is further in, under the area's highest point)
+    return { body: { positions: merged.positions, indices: merged.indices, volume: merged.volume }, inlay: { positions: piece.positions, indices: piece.indices, volume: piece.volume }, depth: floor ? floor.floor : got, deepest: got, inlayDepth: inlay.sinks[0] || 0, flat: !!floor, floor };
+  }
+  // The triangles on one side of closed lines (side 1: the smaller side, or the side the lines run forward on),
+  // as a selection, so a picked line or region can be used where a painted area is.
+  function loopSelection(P, I, loops) {
+    const { side } = orientLoops(P, I, loops, { what: 'lines' });
+    const sel = new Uint8Array(side.length);
+    for (let t = 0; t < side.length; t++) sel[t] = side[t] === 1 ? 1 : 0;
+    return sel;
+  }
   /* ---------- seam editing ----------
      A cut line as a few handles along the surface (the owner's band tool, as modelsplitter has): drag one and the
      line is re-routed through it along the surface, smooth them, or snap one to a region border. */
@@ -2723,7 +2759,7 @@ const KMCore = (() => {
      ring is checked the same way. Returns { xy2, h2, depth, max } in the line's frame, or null for no sink. The
      walls run straight along the line's frame normal: following the other piece's surface was tried and dropped,
      because on a bumpy line the pushed points crossed each other. */
-  function sunkRing(P, I, F, ring, xy, h, into2, want, wall) {
+  function sunkRing(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null) {
     const n = ring.length, g = raysFor(P, I, F), nv = P.length / 3;
     const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2], oz = F.o[0] * F.n[0] + F.o[1] * F.n[1] + F.o[2] * F.n[2];
     // straight into the other piece along the frame normal, so the recess walls are parallel and the piece lifts
@@ -2732,6 +2768,40 @@ const KMCore = (() => {
     // how deep each point can go: the sunk point needs a wall of solid beyond it, and must be inside at all
     const roomAt = (x, y, z) => { const r = solidRuns(g, x + ox + 1.3e-7, y + oy + 0.7e-7), c = z + oz; for (let i = 0; i < r.length; i += 2) if (r[i] - 1e-6 <= c && c <= r[i + 1] + 1e-6) return into2 > 0 ? [r[i + 1] - c, c - r[i]] : [c - r[i], r[i + 1] - c]; return null; };
     const depth = new Float64Array(n);
+    if (flat) {
+      // a flat floor (an inlay that prints on its base): one plane, `want` beyond the line's deepest point, every
+      // point pushed to it; when any point lacks the room, the whole floor comes up, so it stays flat
+      let lo = Infinity, hi = -Infinity; for (let i = 0; i < n; i++) { lo = Math.min(lo, h[i]); hi = Math.max(hi, h[i]); }
+      const off = Array.from(h, v => (into2 > 0 ? hi - v : v - lo));
+      // a given plane (an inlay's floor must be the pocket's): each point goes straight along the normal to it
+      let given = null;
+      if (plane) {
+        const dn = F.n[0] * plane.normal[0] + F.n[1] * plane.normal[1] + F.n[2] * plane.normal[2];
+        if (Math.abs(dn) > 0.5) {
+          given = [];
+          for (let i = 0; i < n; i++) { const p = planePoint(F, xy[2 * i], xy[2 * i + 1]), q = [p[0] + F.n[0] * h[i], p[1] + F.n[1] * h[i], p[2] + F.n[2] * h[i]]; given.push(((plane.point[0] - q[0]) * plane.normal[0] + (plane.point[1] - q[1]) * plane.normal[1] + (plane.point[2] - q[2]) * plane.normal[2]) / (into2 * dn)); }
+          if (given.some(v => !(v > 0.02))) given = null;
+        }
+      }
+      const tries = given ? [0] : []; for (let w = want; w > 0.05 && !given; w /= 2) tries.push(w);
+      for (const w of tries) {
+        const d = given ? given : off.map(v => v + w);
+        let ok = true;
+        for (let i = 0; i < n && ok; i++) { const r = roomAt(xy[2 * i], xy[2 * i + 1], h[i] + d[i] * into2); if (!(r && r[0] >= wall && r[1] >= 0.05)) ok = false; }
+        if (!ok) continue;
+        const xy2 = new Float64Array(2 * n), h2 = new Float64Array(n);
+        for (let i = 0; i < n; i++) { xy2[2 * i] = xy[2 * i]; xy2[2 * i + 1] = xy[2 * i + 1]; h2[i] = h[i] + d[i] * into2; }
+        const H = capHeight(xy2, h2), L = makeLoop(ring, [], xy2), base = { loops: [L], regions: buildRegions([L]) }, rooms = [];
+        for (const q of regionSamples(base, 0, 150)) { const r = roomAt(q.x, q.y, H(q.x, q.y)); rooms.push(r ? r[0] : 0); }
+        rooms.sort((a, b) => a - b);
+        if (!rooms.length || rooms[Math.floor(0.1 * rooms.length)] >= 0.75 * wall) {
+          const zf = h2[0], pt = [F.o[0] + F.n[0] * zf, F.o[1] + F.n[1] * zf, F.o[2] + F.n[2] * zf]; // the floor plane, for a matching piece
+          const floor = given ? Math.min(...d) : w;
+          return { xy2, h2, depth: d, max: Math.max(...d), floor, flat: true, plane: { point: pt, normal: F.n.slice(), floor } };
+        }
+      }
+      return null;
+    }
     for (let i = 0; i < n; i++) {
       let s = want;
       for (let tries = 0; tries < 5 && s > 0.02; tries++) {
@@ -2964,7 +3034,7 @@ const KMCore = (() => {
       const lcfg = per.pegSide && per.pegSide !== cfg.pegSide ? { ...cfg, pegSide: per.pegSide } : cfg; // which piece the pegs or plug stand on, per line
       // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
       // keys and its checks then all work on the sunk ring
-      const sunk = opts.sink > 0 ? sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8) : null;
+      const sunk = opts.sink > 0 ? sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, !!opts.sinkFlat, opts.sinkPlane || null) : null;
       const faceOf = (fxy, fh) => { const sec = { loops: [makeLoop(ring, [], fxy)] }; sec.regions = buildRegions(sec.loops); return { xy: fxy, h: fh, sec, step: capStep(fxy), H: capHeight(fxy, fh) }; };
       const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, cfg: lcfg, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
       c.use = (which) => { const f = which === 'sunk' && c.sunkFace ? c.sunkFace : c.plain; Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0 }); c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length; };
@@ -3067,7 +3137,7 @@ const KMCore = (() => {
       try { warnings = checkPieces(parts, last); break; } catch (e) { if (last || e.code !== 'locked') throw e; }
     }
     parts.sort((x, y) => y.volume - x.volume);
-    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings, sinks: caps.map(c => c.sink) };
+    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings, sinks: caps.map(c => c.sink), floors: caps.map(c => (c.sunk && c.sunk.plane) || null) };
     // The printability rules on the pieces: a refusal, or with opts.force (the owner's "cut anyway") a warning on the
     // result. Thrown (never a warning) while a sink plan can still be retried.
     function checkPieces(parts, canForce) {
@@ -4139,7 +4209,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };

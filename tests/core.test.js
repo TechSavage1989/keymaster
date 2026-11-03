@@ -719,7 +719,19 @@ console.log('curved cuts along a border');
   const segPaint = K.selectionSeg(sp.positions, sp.indices, painted), loopsPaint = K.groupLoops(sp.positions, sp.indices, segPaint, [1]);
   const rPaint = K.splitRegions(sp.positions, sp.indices, segPaint, [1], { minThickness: 1, sink: 1 });
   check('the painted area has one closed outline and splits off sealed, sunk, volume kept', loopsPaint.length === 1 && loopsPaint[0].closed && rPaint.parts.length === 2 && allClosed(rPaint.parts) && rPaint.sinks[0] > 0.5 && Math.abs(sumVol(rPaint.parts) - sp.report.volume) / sp.report.volume < 1e-6, [loopsPaint.length, rPaint.parts.map(q => q.volume), rPaint.sinks]);
+  // an inlay cut: the painted patch becomes a pocket in the body and an inlay pulled in by the fit, both sealed
+  const inl = K.inlayCut(sp.positions, sp.indices, painted, { depth: 2, fit: 1, wall: 0.8 });
+  const rOf = (m) => { let r = 0; for (let i = 0; i < m.positions.length; i += 3) if (m.positions[i + 2] > 16) r = Math.max(r, Math.hypot(m.positions[i], m.positions[i + 1])); return r; }; // the widest reach of the top (z > 16)
+  let rPocket = 0; for (const v of loopsPaint[0].verts) rPocket = Math.max(rPocket, Math.hypot(sp.positions[3 * v], sp.positions[3 * v + 1]));
+  check('the inlay cut gives a sealed body with a pocket about 2 mm deep and a sealed inlay', K.edgeReport(inl.body.indices).closed && K.edgeReport(inl.inlay.indices).closed && inl.body.volume > 0 && inl.inlay.volume > 0 && inl.depth > 1.5 && inl.depth <= 2.001, [inl.depth, inl.inlayDepth, inl.body.volume, inl.inlay.volume]);
+  check('the inlay is pulled in by the fit all round, and the two together are a little less than the sphere', rOf(inl.inlay) < rPocket - 0.5 && inl.body.volume + inl.inlay.volume < sp.report.volume && inl.body.volume + inl.inlay.volume > 0.97 * sp.report.volume, [rOf(inl.inlay), rPocket, inl.body.volume + inl.inlay.volume, sp.report.volume]);
+  const flatI = K.inlayCut(sp.positions, sp.indices, painted, { depth: 2, fit: 0.5, flat: true, wall: 0.8 });
+  const onPlane = (m, pl) => { let n = 0; for (let i = 0; i < m.positions.length; i += 3) if (Math.abs((m.positions[i] - pl.point[0]) * pl.normal[0] + (m.positions[i + 1] - pl.point[1]) * pl.normal[1] + (m.positions[i + 2] - pl.point[2]) * pl.normal[2]) < 0.02) n++; return n; };
+  check('with a flat floor the inlay stands on one level base, the pocket floor is the same plane, and both pieces seal', flatI.flat && !!flatI.floor && K.edgeReport(flatI.body.indices).closed && K.edgeReport(flatI.inlay.indices).closed && onPlane(flatI.inlay, flatI.floor) > 100 && onPlane(flatI.body, flatI.floor) > 100 && flatI.depth > 1.5 && flatI.depth <= 2.001 && flatI.deepest >= flatI.depth, [onPlane(flatI.inlay, flatI.floor), onPlane(flatI.body, flatI.floor), flatI.depth, flatI.deepest]);
   const msgOf = (fn) => { try { fn(); return ''; } catch (e) { return e.message; } };
+  check('an inlay with no room for its pocket says so', msgOf(() => K.inlayCut(sp.positions, sp.indices, painted, { depth: 3, fit: 0.2, wall: 45 })).includes('No room'));
+  const selFromLoop = K.loopSelection(sp.positions, sp.indices, [drawn]);
+  check('a drawn line gives the smaller side as a selection', cnt(selFromLoop) > 0 && cnt(selFromLoop) < ntS2 / 2, cnt(selFromLoop));
   check('nothing painted, or everything, says so', msgOf(() => K.selectionSeg(sp.positions, sp.indices, new Uint8Array(ntS2))).includes('Nothing is painted') && msgOf(() => K.selectionSeg(sp.positions, sp.indices, new Uint8Array(ntS2).fill(1))).includes('whole part'));
   // A sunk face: the face across the wavy cut pushed 1 mm into the bigger piece, with a wall down from the line, so
   // the cap piece keeps a millimetre of thickness right to its edge. The cap piece gains about the face's area times
