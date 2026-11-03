@@ -4423,6 +4423,260 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     return { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
   }
 
+
+  /* ---------- shapes and exact plane clips ----------
+     Shapes (a cube, a ball, a tube, a cone, a ring) are added to the model to add material or to cut with, as the
+     guide's Shapes tool does. They are built to be closed solids: the round ones as lathes of a profile, the cube as
+     a box clipped by planes (its chamfers and roundings are more planes). clipMesh is an exact plane clip that gives
+     both sides with caps that mirror each other, which the booleans are built on. */
+  // Both sides of a mesh cut by a plane {o, n}: below (where (p - o)·n < 0) and above, each closed, with the same
+  // cap facing opposite ways. Crossing edges get one point each, computed the same way whichever way the edge is
+  // stored, and split quads take the same diagonal, so two copies of a face cut by the same plane split alike.
+  // The plane is moved by a few microns when a vertex sits on it (opts.shift forces a move, so several meshes can
+  // be cut by exactly the same plane); the move is reported in shift.
+  function clipMesh(P, I, plane, opts = {}) {
+    const nv = P.length / 3, nt = I.length / 3;
+    const n = norm3(plane.n), o = plane.o;
+    const b = bounds(P), scale = diag(b);
+    const tol = scale * 1e-6, W = scale * 2e-5;
+    const dist = new Float64Array(nv);
+    for (let i = 0, j = 0; i < nv; i++, j += 3) dist[i] = (P[j] - o[0]) * n[0] + (P[j + 1] - o[1]) * n[1] + (P[j + 2] - o[2]) * n[2];
+    let shift = 0;
+    if (opts.shift !== undefined) shift = opts.shift;
+    else {
+      const near = [];
+      for (let i = 0; i < nv; i++) if (dist[i] > -W && dist[i] < W) near.push(dist[i]);
+      if (near.some(d => d > -tol && d < tol)) {
+        near.push(-W, W); near.sort((a, b) => a - b);
+        let best = -1;
+        for (let k = 0; k + 1 < near.length; k++) { const gap = near[k + 1] - near[k]; if (gap > best) { best = gap; shift = (near[k] + near[k + 1]) / 2; } }
+      }
+    }
+    if (shift) for (let i = 0; i < nv; i++) dist[i] -= shift;
+    const F = frameFromNormal(n, [o[0] + n[0] * shift, o[1] + n[1] * shift, o[2] + n[2] * shift]);
+    // new points on crossing edges, keyed by the edge; the lerp runs from the lexicographically smaller end
+    const V = new F64List(nv * 3 + 64);
+    for (let i = 0; i < P.length; i++) V.a[i] = P[i];
+    V.n = P.length;
+    const emap = new PairMap(nt + 8);
+    const less = (a, b) => { const i = 3 * a, j = 3 * b; return P[i] < P[j] || (P[i] === P[j] && (P[i + 1] < P[j + 1] || (P[i + 1] === P[j + 1] && P[i + 2] < P[j + 2]))); };
+    const edgePoint = (i, j) => {
+      const lo = i < j ? i : j, hi = i < j ? j : i;
+      let id = emap.get(lo, hi);
+      if (id !== -1) return id;
+      const a = less(lo, hi) ? lo : hi, c = a === lo ? hi : lo; // from the smaller position to the larger
+      const t = dist[a] / (dist[a] - dist[c]);
+      id = V.push3(P[3 * a] + t * (P[3 * c] - P[3 * a]), P[3 * a + 1] + t * (P[3 * c + 1] - P[3 * a + 1]), P[3 * a + 2] + t * (P[3 * c + 2] - P[3 * a + 2]));
+      emap.set(lo, hi, id);
+      return id;
+    };
+    const below = new F64List(I.length), above = new F64List(I.length);
+    const segA = [], segB = [];
+    for (let t = 0; t < nt; t++) {
+      const a = I[3 * t], b2 = I[3 * t + 1], c = I[3 * t + 2];
+      const da = dist[a] < 0, db = dist[b2] < 0, dc = dist[c] < 0;
+      if (da === db && da === dc) { (da ? below : above).push3(a, b2, c); continue; }
+      let i0, i1, i2; // i0 alone on its side, (i0, i1, i2) in the triangle's winding
+      if (da === db) { i0 = c; i1 = a; i2 = b2; } else if (da === dc) { i0 = b2; i1 = c; i2 = a; } else { i0 = a; i1 = b2; i2 = c; }
+      const p01 = edgePoint(i0, i1), p02 = edgePoint(i0, i2);
+      const lone = dist[i0] < 0 ? below : above, pair = dist[i0] < 0 ? above : below;
+      lone.push3(i0, p01, p02);
+      if (less(i1, i2)) { pair.push3(p01, i1, p02); pair.push3(i1, i2, p02); } else { pair.push3(p01, i1, i2); pair.push3(p01, i2, p02); }
+      if (dist[i0] < 0) { segA.push(p02); segB.push(p01); } else { segA.push(p01); segB.push(p02); }
+    }
+    // the section loops, chained point to point, in the plane's frame
+    const np = V.n / 3;
+    const next = new Int32Array(np).fill(-1);
+    for (let s = 0; s < segA.length; s++) { if (next[segA[s]] !== -1) throw new Error('The surface is tangled where the plane crosses it, so it can’t be cut there.'); next[segA[s]] = segB[s]; }
+    const visited = new Uint8Array(np), loops = [];
+    const PA = V.a;
+    for (let p0 = nv; p0 < np; p0++) {
+      if (visited[p0] || next[p0] === -1) continue;
+      const ids = []; let q = p0;
+      while (!visited[q]) { visited[q] = 1; ids.push(q); q = next[q]; if (q === -1) throw new Error('The surface has a gap where the plane crosses it, so it can’t be cut there.'); }
+      if (q !== p0) throw new Error('The surface is tangled where the plane crosses it, so it can’t be cut there.');
+      if (ids.length < 3) continue;
+      const xy = new Float64Array(ids.length * 2);
+      for (let k = 0; k < ids.length; k++) { const j = 3 * ids[k]; const dx = PA[j] - F.o[0], dy = PA[j + 1] - F.o[1], dz = PA[j + 2] - F.o[2]; xy[2 * k] = dx * F.u[0] + dy * F.u[1] + dz * F.u[2]; xy[2 * k + 1] = dx * F.v[0] + dy * F.v[1] + dz * F.v[2]; }
+      loops.push(makeLoop(ids, null, xy));
+    }
+    // caps: one triangulation per area, given to the below side facing +n and to the above side facing -n
+    const capBelow = [], capAbove = [];
+    if (loops.length) {
+      const regions = buildRegions(loops);
+      for (const reg of regions) {
+        const ringIds = [loops[reg.outer].ids, ...reg.holes.map(h => loops[h].ids)];
+        const flat = [], holes = [], ids = [], ringXY = new Map();
+        for (let r = 0; r < ringIds.length; r++) {
+          if (r > 0) holes.push(ids.length);
+          const lp = r === 0 ? loops[reg.outer] : loops[reg.holes[r - 1]];
+          for (let k = 0; k < lp.ids.length; k++) { ids.push(lp.ids[k]); flat.push(lp.xy[2 * k], lp.xy[2 * k + 1]); ringXY.set(lp.ids[k], [lp.xy[2 * k], lp.xy[2 * k + 1]]); }
+        }
+        const loc = earcut(flat, holes);
+        let sum = 0;
+        for (let i = 0; i < loc.length; i += 3) sum += tri2(flat, loc[i], loc[i + 1], loc[i + 2]);
+        const wantCCW = !reg.inverted, flip = wantCCW ? sum < 0 : sum > 0;
+        const tris = [];
+        for (let i = 0; i < loc.length; i += 3) { if (flip) tris.push(ids[loc[i]], ids[loc[i + 2]], ids[loc[i + 1]]); else tris.push(ids[loc[i]], ids[loc[i + 1]], ids[loc[i + 2]]); }
+        for (const r of ringIds) fixTJunctions(tris, r);
+        const xyOf = (id) => ringXY.get(id);
+        splitThroughPoints(tris, ringIds, xyOf);
+        patchCap(tris, ringIds, xyOf, wantCCW);
+        for (let i = 0; i < tris.length; i += 3) { capBelow.push(tris[i], tris[i + 1], tris[i + 2]); capAbove.push(tris[i], tris[i + 2], tris[i + 1]); }
+      }
+    }
+    // each side's vertices, welded by position (a crossing point a hair from a vertex is that vertex once stored as
+    // float32), with the zero-area triangles that welding leaves dropped; capFrom is where the cap's triangles start
+    const wtol = Math.max(scale * 1e-7, 1e-9), inv = 1 / wtol;
+    const pack = (list, cap) => {
+      const nSurf = list.n, all = new Uint32Array(nSurf + cap.length);
+      all.set(list.a.subarray(0, nSurf)); all.set(cap, nSurf);
+      const remap = new Int32Array(np).fill(-1), keyOf = new Map(), pos = [];
+      const idOf = (v) => {
+        if (remap[v] !== -1) return remap[v];
+        const key = `${Math.round(PA[3 * v] * inv)},${Math.round(PA[3 * v + 1] * inv)},${Math.round(PA[3 * v + 2] * inv)}`;
+        let id = keyOf.get(key);
+        if (id === undefined) { id = pos.length / 3; keyOf.set(key, id); pos.push(PA[3 * v], PA[3 * v + 1], PA[3 * v + 2]); }
+        remap[v] = id; return id;
+      };
+      const idx = [], seen = new Set(); let capFrom = 0;
+      for (let i = 0; i < all.length; i += 3) {
+        if (i === nSurf) capFrom = idx.length;
+        const a = idOf(all[i]), b2 = idOf(all[i + 1]), c = idOf(all[i + 2]);
+        if (a === b2 || b2 === c || a === c) continue;
+        const key = a < b2 && a < c ? `${a},${b2},${c}` : b2 < c ? `${b2},${c},${a}` : `${c},${a},${b2}`; // the same triangle twice (welding can fold two slivers together) counts once
+        if (seen.has(key)) continue;
+        seen.add(key);
+        idx.push(a, b2, c);
+      }
+      if (nSurf === all.length) capFrom = idx.length;
+      return { positions: new Float32Array(pos), indices: new Uint32Array(idx), capFrom };
+    };
+    const lo = pack(below, capBelow), hi = pack(above, capAbove);
+    return { below: lo.indices.length ? { positions: lo.positions, indices: lo.indices, capFrom: lo.capFrom } : null, above: hi.indices.length ? { positions: hi.positions, indices: hi.indices, capFrom: hi.capFrom } : null, shift, crossed: segA.length > 0 };
+  }
+  // A box as a closed mesh
+  function boxMesh(min, max) {
+    const [x0, y0, z0] = min, [x1, y1, z1] = max;
+    const P = new Float32Array([x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0, x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1]);
+    const I = new Uint32Array([0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7]);
+    return { positions: P, indices: I };
+  }
+  // The solid inside every plane {o, n} (n pointing out), as a mesh: a box round the planes, clipped by each in turn
+  function polytopeMesh(planes, box) {
+    let m = boxMesh(box.min, box.max);
+    for (const pl of planes) {
+      const r = clipMesh(m.positions, m.indices, pl);
+      if (!r.below) return { positions: new Float32Array(0), indices: new Uint32Array(0) };
+      m = r.below;
+    }
+    const w = weld(m.positions, m.indices, 1e-9);
+    return { positions: w.positions, indices: w.indices };
+  }
+  // A profile of (r, z) points turned round the z axis in n steps. An open profile runs from the axis to the axis
+  // (a ball, a tube, a cone); a closed one (closed: true) is a loop off the axis (a ring). Closed solid, facing out.
+  function latheMesh(profile, n, closed = false) {
+    const m = profile.length, pos = [], idx = [];
+    const ringOf = [];
+    for (let k = 0; k < m; k++) {
+      const [r, z] = profile[k];
+      if (!closed && r <= 1e-9) { ringOf.push(-1 - pos.length / 3); pos.push(0, 0, z); continue; } // a pole
+      const base = pos.length / 3;
+      for (let i = 0; i < n; i++) { const a = (2 * Math.PI * i) / n; pos.push(r * Math.cos(a), r * Math.sin(a), z); }
+      ringOf.push(base);
+    }
+    const quad = (ka, kb) => {
+      const A = ringOf[ka], B = ringOf[kb];
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        if (A < 0 && B < 0) continue;
+        if (A < 0) { idx.push(-1 - A, B + i, B + j); continue; }
+        if (B < 0) { idx.push(A + i, -1 - B, A + j); continue; }
+        idx.push(A + i, B + i, B + j, A + i, B + j, A + j);
+      }
+    };
+    for (let k = 0; k + 1 < m; k++) quad(k, k + 1);
+    if (closed) quad(m - 1, 0);
+    const P = new Float32Array(pos), I = new Uint32Array(idx);
+    if (volume(P, I) < 0) flipAll(I);
+    return { positions: P, indices: I };
+  }
+  // Replace each convex corner of a 2D polyline (or loop) by a chamfer or an arc; corners on the axis (r = 0) stay
+  function shapedCorners(pts, closed, edge, size, arcSteps = 4) {
+    if (!edge || edge === 'sharp' || !(size > 0)) return pts;
+    const m = pts.length, out = [];
+    for (let k = 0; k < m; k++) {
+      const p = pts[k], prev = pts[(k - 1 + m) % m], next = pts[(k + 1) % m];
+      const first = !closed && k === 0, last = !closed && k === m - 1;
+      if (first || last || p[0] <= 1e-9) { out.push(p); continue; }
+      const d0 = [prev[0] - p[0], prev[1] - p[1]], d1 = [next[0] - p[0], next[1] - p[1]];
+      const l0 = Math.hypot(d0[0], d0[1]), l1 = Math.hypot(d1[0], d1[1]);
+      const s = Math.min(size, l0 / 2, l1 / 2);
+      if (s <= 1e-9) { out.push(p); continue; }
+      const a = [p[0] + d0[0] / l0 * s, p[1] + d0[1] / l0 * s], c = [p[0] + d1[0] / l1 * s, p[1] + d1[1] / l1 * s];
+      if (edge === 'chamfer') { out.push(a, c); continue; }
+      // a round: an arc from a to c tangent to both edges, as a quadratic curve through the corner
+      for (let i = 0; i <= arcSteps; i++) {
+        const u = i / arcSteps, w0 = (1 - u) * (1 - u), w1 = 2 * u * (1 - u), w2 = u * u;
+        out.push([w0 * a[0] + w1 * p[0] + w2 * c[0], w0 * a[1] + w1 * p[1] + w2 * c[1]]);
+      }
+    }
+    return out;
+  }
+  // A box with rounded edges and corners of radius r: the box (w - 2r) × (d - 2r) × (h - 2r) grown by a ball of
+  // radius r, sampled over a cube-shaped grid of directions (an odd count a side, so no direction lies exactly on an
+  // axis plane and the flat faces and the rounded edges are spanned by the grid's own quads).
+  function roundedBoxMesh(w, d, h, r, N = 9) {
+    const half = [w / 2 - r, d / 2 - r, h / 2 - r], pos = [], idx = [];
+    const faces = [[0, 1, 2, 1], [0, 1, 2, -1], [1, 2, 0, 1], [1, 2, 0, -1], [2, 0, 1, 1], [2, 0, 1, -1]]; // (a, b, fixed axis, sign)
+    for (const [a, b, c, s] of faces) {
+      const base = pos.length / 3;
+      for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+        const q = [0, 0, 0]; q[a] = -1 + (2 * i) / N; q[b] = -1 + (2 * j) / N; q[c] = s;
+        const l = Math.hypot(q[0], q[1], q[2]), u = [q[0] / l, q[1] / l, q[2] / l];
+        pos.push(Math.sign(u[0]) * half[0] + r * u[0], Math.sign(u[1]) * half[1] + r * u[1], Math.sign(u[2]) * half[2] + r * u[2]);
+      }
+      for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+        const p00 = base + i * (N + 1) + j, p10 = p00 + N + 1, p01 = p00 + 1, p11 = p10 + 1;
+        if (s > 0) idx.push(p00, p10, p11, p00, p11, p01); else idx.push(p00, p11, p10, p00, p01, p11);
+      }
+    }
+    const m = weld(new Float32Array(pos), new Uint32Array(idx), 1e-9);
+    if (volume(m.positions, m.indices) < 0) flipAll(m.indices);
+    return m;
+  }
+  // A shape centred on the origin, standing on z: { kind, w, d, h, inner, edge, edgeSize, segments }. w, d and h
+  // are the full width, depth and height (the round ones use w as the diameter; a cone's top is d; a ring's hole is inner).
+  function shapeMesh(s) {
+    const n = Math.max(8, Math.min(256, Math.round(s.segments || 64)));
+    const h = s.h, edge = s.edge || 'sharp', es = s.edgeSize || 0;
+    if (s.kind === 'cube') {
+      const w = s.w, d = s.d, planes = [];
+      const c = Math.min(es, (edge === 'chamfer' ? 0.5 : 0.98) * Math.min(w, d, h) / 2); // chamfers from opposite edges must not meet
+      if (edge === 'round' && c > 0) return roundedBoxMesh(w, d, h, c, Math.max(5, Math.min(21, Math.round(n / 6)) | 1));
+      const box = { min: [-w / 2, -d / 2, -h / 2], max: [w / 2, d / 2, h / 2] };
+      if (edge !== 'chamfer' || !(c > 0)) return boxMesh(box.min, box.max);
+      const half = [w / 2, d / 2, h / 2], push = (nrm, pt) => planes.push({ n: norm3(nrm), o: pt });
+      for (let ax = 0; ax < 3; ax++) for (const sa of [-1, 1]) for (const sb of [-1, 1]) { // the twelve edges, at 45°
+        const a1 = (ax + 1) % 3, a2 = (ax + 2) % 3, nrm = [0, 0, 0], pt = [0, 0, 0];
+        nrm[a1] = sa; nrm[a2] = sb; pt[a1] = sa * (half[a1] - c); pt[a2] = sb * half[a2];
+        push(nrm, pt);
+      }
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) push([sx, sy, sz], [sx * (half[0] - c), sy * half[1], sz * half[2]]); // the eight corners
+      return polytopeMesh(planes, box);
+    }
+    const r = s.w / 2;
+    if (s.kind === 'ball') {
+      const m = Math.max(6, Math.round(n / 2)), prof = [];
+      for (let i = 0; i <= m; i++) { const a = Math.PI * i / m; prof.push([r * Math.sin(a), -r * Math.cos(a)]); }
+      prof[0][0] = 0; prof[m][0] = 0;
+      return latheMesh(prof, n);
+    }
+    if (s.kind === 'tube') return latheMesh(shapedCorners([[0, -h / 2], [r, -h / 2], [r, h / 2], [0, h / 2]], false, edge, es), n);
+    if (s.kind === 'cone') { const r2 = Math.max(0, (s.d || 0) / 2); return latheMesh(shapedCorners([[0, -h / 2], [r, -h / 2], [r2, h / 2], [0, h / 2]], false, edge, es), n); }
+    if (s.kind === 'ring') { const ri = Math.max(0.01, Math.min(s.inner / 2, r - 0.01)); return latheMesh(shapedCorners([[ri, -h / 2], [r, -h / 2], [r, h / 2], [ri, h / 2]], true, edge, es), n, true); }
+    throw new Error(`Unknown shape: ${s.kind}`);
+  }
   return {
     parseSTL, parseOBJ, prepareMesh, fillHoles, edgeReport, volume, bounds, diag,
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
@@ -4431,6 +4685,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, loopFrame, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, sphereTriangles, snapSelectionToRegions, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
+    clipMesh, boxMesh, polytopeMesh, latheMesh, shapeMesh,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;

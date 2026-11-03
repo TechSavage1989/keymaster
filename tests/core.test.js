@@ -659,6 +659,49 @@ console.log('export formats and projects');
   check('a ZIP that isn’t a project says so', msg.includes('isn’t a Keymaster project'), msg);
 }
 
+console.log('shapes and plane clips');
+{
+  const closedVol = (m) => ({ closed: K.edgeReport(m.indices).closed, vol: K.volume(m.positions, m.indices) });
+  const near = (a, b, pct) => Math.abs(a - b) <= Math.abs(b) * pct;
+  const cube = closedVol(K.shapeMesh({ kind: 'cube', w: 20, d: 10, h: 5 }));
+  check('a cube is a closed box of the right volume', cube.closed && near(cube.vol, 1000, 1e-6), cube);
+  const ch = closedVol(K.shapeMesh({ kind: 'cube', w: 30, d: 10, h: 8, edge: 'chamfer', edgeSize: 3 }));
+  check('a chamfered cube is closed and smaller than the box', ch.closed && ch.vol < 2400 && ch.vol > 1500, ch);
+  const big = closedVol(K.shapeMesh({ kind: 'cube', w: 10, d: 10, h: 10, edge: 'chamfer', edgeSize: 20 }));
+  check('a chamfer bigger than the cube is held back so the chamfers never meet', big.closed && big.vol > 500, big);
+  const rd = closedVol(K.shapeMesh({ kind: 'cube', w: 20, d: 20, h: 20, edge: 'round', edgeSize: 5 }));
+  check('a rounded cube is closed, within 2% of its exact volume', rd.closed && near(rd.vol, 1000 + 3000 + 120 * Math.PI * 25 / 4 + 4 / 3 * Math.PI * 125, 0.02), rd);
+  const ball = closedVol(K.shapeMesh({ kind: 'ball', w: 20, h: 20 }));
+  check('a ball is closed, within 2% of 4/3 π r³', ball.closed && near(ball.vol, 4 / 3 * Math.PI * 1000, 0.02), ball);
+  const tube = closedVol(K.shapeMesh({ kind: 'tube', w: 10, h: 20 }));
+  check('a tube is closed, within 1% of π r² h', tube.closed && near(tube.vol, Math.PI * 25 * 20, 0.01), tube);
+  const tubeR = closedVol(K.shapeMesh({ kind: 'tube', w: 10, h: 20, edge: 'round', edgeSize: 1 }));
+  check('a tube with rounded rims is closed and a little smaller', tubeR.closed && tubeR.vol < tube.vol && tubeR.vol > 0.95 * tube.vol, tubeR);
+  const cone = closedVol(K.shapeMesh({ kind: 'cone', w: 10, d: 0, h: 12 }));
+  check('a cone to a point is closed, within 1% of π r² h / 3', cone.closed && near(cone.vol, Math.PI * 25 * 12 / 3, 0.01), cone);
+  const frustum = closedVol(K.shapeMesh({ kind: 'cone', w: 10, d: 4, h: 12, edge: 'chamfer', edgeSize: 1 }));
+  check('a cut-off cone with chamfered rims is closed', frustum.closed && frustum.vol > 0, frustum);
+  const ring = closedVol(K.shapeMesh({ kind: 'ring', w: 20, inner: 12, h: 4 }));
+  check('a ring is closed, within 1% of π (R² − r²) h', ring.closed && near(ring.vol, Math.PI * (100 - 36) * 4, 0.01), ring);
+  const ringR = closedVol(K.shapeMesh({ kind: 'ring', w: 20, inner: 12, h: 4, edge: 'round', edgeSize: 1 }));
+  check('a ring with rounded edges is closed', ringR.closed && ringR.vol < ring.vol && ringR.vol > 0.9 * ring.vol, ringR);
+  // the exact clip: both sides closed, the volumes add up, and the two caps mirror each other exactly
+  const knot = K.prepareMesh(K.torusKnot());
+  const c = K.clipMesh(knot.positions, knot.indices, { o: [1, -2, 0.5], n: [0.3, 0.5, 0.8] });
+  const lo = closedVol(c.below), hi = closedVol(c.above);
+  check('a plane clip gives two closed solids whose volumes add up to the whole', lo.closed && hi.closed && near(lo.vol + hi.vol, knot.report.volume, 1e-4) && lo.vol > 0 && hi.vol > 0, (lo, hi, knot.report.volume));
+  const capBelow = Array.from(c.below.indices.subarray(c.below.capFrom)), capAbove = Array.from(c.above.indices.subarray(c.above.capFrom));
+  check('each side’s cap starts where capFrom says, with the same count of triangles', capBelow.length === capAbove.length && capBelow.length > 0);
+  const posKey = (m, i) => `${m.positions[3 * i]},${m.positions[3 * i + 1]},${m.positions[3 * i + 2]}`;
+  const setBelow = new Set(); for (let i = 0; i < capBelow.length; i += 3) setBelow.add([posKey(c.below, capBelow[i]), posKey(c.below, capBelow[i + 1]), posKey(c.below, capBelow[i + 2])].join('|'));
+  let mirrored = 0; for (let i = 0; i < capAbove.length; i += 3) if (setBelow.has([posKey(c.above, capAbove[i]), posKey(c.above, capAbove[i + 2]), posKey(c.above, capAbove[i + 1])].join('|'))) mirrored++;
+  check('every cap triangle on one side is the mirror of one on the other, point for point', mirrored === capAbove.length / 3, (mirrored, capAbove.length / 3));
+  const merged = K.prepareMesh(K.mergeMeshes([c.below, c.above])), rejoined = K.repairMesh(merged.positions, merged.indices);
+  check('welded back together and with the twin cap faces dropped, the two sides are the knot again', rejoined.report.closed && rejoined.duplicates === capBelow.length / 3 * 2 && near(K.volume(rejoined.positions, rejoined.indices), knot.report.volume, 1e-4), (rejoined.report, rejoined.duplicates, capBelow.length / 3));
+  const miss = K.clipMesh(knot.positions, knot.indices, { o: [0, 0, 100], n: [0, 0, 1] });
+  check('a plane that misses the mesh leaves one side whole and the other empty', miss.below && !miss.above && !miss.crossed && near(K.volume(miss.below.positions, miss.below.indices), knot.report.volume, 1e-9));
+}
+
 console.log('split to fit the bed');
 {
   const box = (sx, sy, sz) => ({ min: [0, 0, 0], max: [sx, sy, sz], size: [sx, sy, sz], center: [sx / 2, sy / 2, sz / 2] });
