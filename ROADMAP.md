@@ -24,6 +24,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
+- Isolate a painted area (1.40): hide everything but the painted faces, so the rest of the model stays out of the way of the brush and clicks; the cut still uses the whole model.
 - Projects, 3MF and an assembly sheet (1.39): save and reopen a project with every part, its joints and your settings; export all parts as one 3MF; export the STLs with an assembly sheet that pairs the pieces by joint; roadmap items 9 and 14.
 - Reduce detail (1.38): a lighter model within 0.02 to 0.1 mm of the original, so dense sculpts paint and cut faster; one undo step.
 - Engraved joint numbers (1.37): Number the joints engraves the same number on both faces of each cut, clear of the keys, so the pieces of a big kit pair up; roadmap item 12.
