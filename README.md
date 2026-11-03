@@ -15,6 +15,7 @@
 
 ## Features
 
+- **One row of cut tools.** Plane, Regions, Paint, Draw, Suggest and Fit bed sit in a row at the top of the right panel, each with its own controls under it; the Joints section folds to a one-line summary when a tool needs the room, and the one yellow button at the foot always does what the tool is ready to do.
 - **Live cut preview.** Drag the arrow to slide the cut, and the blue rings or the plane itself to tilt it (Shift for 5° steps or fine control). The toolbar under the view takes an exact position and X, Y and Z angles. Everything fits on one screen, with no scrolling. The cut face appears as a hatched section while you drag, even on dense sculpts.
 - **Cut as many times as you need.** Every piece lands in the parts list and can be cut again. Undo and redo cover every step.
 - **Keys that fit.** Choose pegs (tapered by any amount, right down to a point, with a hole that matches or stays straight), dowel holes with printable pins, or magnet pockets. Keys come in seven shapes: round, square, hexagon, cross, oval, slot, and a D-shape that only fits one way round. Shaped keys line up with each area's long side, and the fit gap is even all the way round. Keys are placed automatically, and you can click the cut face to add one, drag to move it, or right-click to remove it.
