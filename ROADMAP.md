@@ -24,6 +24,8 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Keys sized to fit each area by default, within printable limits for resin or filament (keys down to 1 mm on resin), with standard magnet sizes. Tested on 25 to 40 mm miniatures.
 - Tested on real figure sculpts (130k to 190k triangles): about 1,700 cuts per sweep, every part sealed. Handles overlapping inner solids, loose specks, microscopic folds and voids.
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
+- Pictures on the assembly sheet (1.48): each part beside its row, and the pieces spread apart along their cuts at the top.
+- View from a side and a light/dark switch (1.50).
 - Printer presets and Start over (1.49): common printers' build volumes set the bed and the type in one pick; Start over brings back the model as opened.
 - Pictures on the assembly sheet (1.45): each part beside its row, and the pieces spread apart along their cuts at the top.
 - A tool-first right panel (1.44): one row of cut tools (Plane, Regions, Paint, Draw, Suggest, Fit bed) with each tool's controls under it, a Joints section that folds to a summary, one yellow button at the foot for whatever the tool is ready to do, and the model settings in a section of their own; no floating panels.

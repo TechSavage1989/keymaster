@@ -121,6 +121,23 @@ with sync_playwright() as p:
     print('    areas on cut face:', areas)
     pg.screenshot(path=str(OUT / 'shot_cut.png'))
 
+    # look from a side, the top or the bottom
+    check('the view tools offer a View from list', pg.locator('#viewFrom option').count() == 7 and pg.input_value('#viewFrom') == '')
+    pg.select_option('#viewFrom', 'top'); pg.wait_for_timeout(600)
+    dt = pg.evaluate("KeymasterDebug.cameraDir()")
+    check('Top looks straight down at the part, and the list goes back to its label', dt[2] > 0.99 and pg.input_value('#viewFrom') == '', dt)
+    pg.select_option('#viewFrom', 'front'); pg.wait_for_timeout(600)
+    df = pg.evaluate("KeymasterDebug.cameraDir()")
+    check('Front looks at the part from the front', df[1] < -0.99 and abs(df[2]) < 0.05, df)
+    pg.click('[data-act=done]'); pg.keyboard.press('f'); pg.wait_for_timeout(600)  # back to the usual view, with nothing chosen
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(600)
+    # light or dark: the system's choice until the button is pressed, then kept
+    check('the theme button starts on the system choice (light here)', pg.get_attribute('#themeBtn', 'aria-pressed') == 'false' and pg.evaluate("document.documentElement.dataset.theme || ''") == '')
+    pg.click('#themeBtn'); pg.wait_for_timeout(100)
+    check('pressing it switches to dark and remembers it', pg.evaluate("document.documentElement.dataset.theme") == 'dark' and pg.get_attribute('#themeBtn', 'aria-pressed') == 'true' and pg.evaluate("localStorage.getItem('keymaster.theme')") == 'dark')
+    pg.click('#themeBtn'); pg.wait_for_timeout(100)
+    check('pressing it again switches to light', pg.evaluate("document.documentElement.dataset.theme") == 'light' and pg.get_attribute('#themeBtn', 'aria-pressed') == 'false')
+    pg.evaluate("localStorage.removeItem('keymaster.theme'); delete document.documentElement.dataset.theme")
     # idle: nothing should redraw when nothing changes (guards against work inside the frame loop)
     pg.wait_for_timeout(800)
     r0 = pg.evaluate('window.__renders')
