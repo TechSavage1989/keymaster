@@ -42,17 +42,44 @@
 
 ## Screenshots
 
-**Plugs: each area of the cut face stands out into a matching pocket**
+### Cutting and keys
 
-<img src="docs/images/plugs.png" alt="Plugs: each area of the cut face stands out into a matching pocket" width="900">
+<table>
+<tr><td width="50%" valign="top"><b>Plugs: each area of the cut face stands out into a matching pocket</b><br><img src="docs/images/plugs.png" alt="Plugs: each area of the cut face stands out into a matching pocket" width="440"></td><td width="50%" valign="top"><b>Customise any key: one key turned into a hexagon dowel</b><br><img src="docs/images/customise-a-key.png" alt="Customise any key: one key turned into a hexagon dowel" width="440"></td></tr>
+<tr><td width="50%" valign="top"><b>Checked before you cut: a cut that would leave a sliver is held back, with Cut anyway</b><br><img src="docs/images/too-thin-warning.png" alt="Checked before you cut: a cut that would leave a sliver is held back, with Cut anyway" width="440"></td><td width="50%" valign="top"><b>Cut pieces with their joints, spread apart in the exploded view</b><br><img src="docs/images/exploded-parts.png" alt="Cut pieces with their joints, spread apart in the exploded view" width="440"></td></tr>
+</table>
 
-**Cut pieces with their joints, spread apart in the exploded view**
+### Suggested cuts
 
-<img src="docs/images/exploded-parts.png" alt="Cut pieces with their joints, spread apart in the exploded view" width="900">
+<table>
+<tr><td width="50%" valign="top"><b>Find cut spots: lettered pins and a list of what each cut frees</b><br><img src="docs/images/suggested-cuts.png" alt="Find cut spots: lettered pins and a list of what each cut frees" width="440"></td><td width="50%" valign="top"><b>Cut at a spot: the narrowest cut through a clicked point</b><br><img src="docs/images/cut-at-a-spot.png" alt="Cut at a spot: the narrowest cut through a clicked point" width="440"></td></tr>
+</table>
 
-**Split to fit the bed: the straight cuts that make every piece fit your printer**
+### Surface regions and curved cuts
 
-<img src="docs/images/split-to-fit-bed.png" alt="Split to fit the bed: the straight cuts that make every piece fit your printer" width="900">
+<table>
+<tr><td width="50%" valign="top"><b>Surface regions: click the head to split it off along its outline, with a peg</b><br><img src="docs/images/surface-regions.png" alt="Surface regions: click the head to split it off along its outline, with a peg" width="440"></td><td width="50%" valign="top"><b>Shift-click adds the neck, so both regions come off as one piece</b><br><img src="docs/images/regions-shift-click.png" alt="Shift-click adds the neck, so both regions come off as one piece" width="440"></td></tr>
+<tr><td width="50%" valign="top"><b>Draw a cut line: clicked points joined along the surface, keys on the curved face</b><br><img src="docs/images/drawn-cut-line.png" alt="Draw a cut line: clicked points joined along the surface, keys on the curved face" width="440"></td><td width="50%" valign="top"><b>Edit a seam: the picked line turned into handles to drag and smooth</b><br><img src="docs/images/seam-edit.png" alt="Edit a seam: the picked line turned into handles to drag and smooth" width="440"></td></tr>
+</table>
+
+### Painting and inlays
+
+<table>
+<tr><td width="50%" valign="top"><b>Paint an area with the brush, then split off the painted area</b><br><img src="docs/images/painted-area.png" alt="Paint an area with the brush, then split off the painted area" width="440"></td><td width="50%" valign="top"><b>Inlay cut: a pocket in the head and the matching inlay, to print in another colour</b><br><img src="docs/images/inlay-cut.png" alt="Inlay cut: a pocket in the head and the matching inlay, to print in another colour" width="440"></td></tr>
+</table>
+
+### Numbered joints, export and assembly
+
+<table>
+<tr><td width="50%" valign="top"><b>Number the joints: ticked in the key settings before a cut</b><br><img src="docs/images/number-the-joints.png" alt="Number the joints: ticked in the key settings before a cut" width="440"></td><td width="50%" valign="top"><b>The joint number engraved on the cut face</b><br><img src="docs/images/numbered-joints.png" alt="The joint number engraved on the cut face" width="440"></td></tr>
+<tr><td width="50%" valign="top"><b>STLs + assembly sheet: each part, its size, volume and the parts its joints pair with</b><br><img src="docs/images/assembly-sheet.png" alt="STLs + assembly sheet: each part, its size, volume and the parts its joints pair with" width="440"></td><td width="50%" valign="top"><b>Split to fit the bed: the straight cuts that make every piece fit your printer</b><br><img src="docs/images/split-to-fit-bed.png" alt="Split to fit the bed: the straight cuts that make every piece fit your printer" width="440"></td></tr>
+</table>
+
+### Model tools
+
+<table>
+<tr><td width="50%" valign="top"><b>Repair: a tangled model is untangled as it opens</b><br><img src="docs/images/repair-surface.png" alt="Repair: a tangled model is untangled as it opens" width="440"></td><td width="50%" valign="top"><b>Reduce detail: the sample knot at half its triangles, within 0.1 mm</b><br><img src="docs/images/reduce-detail.png" alt="Reduce detail: the sample knot at half its triangles, within 0.1 mm" width="440"></td></tr>
+</table>
 
 ## Getting started
 
