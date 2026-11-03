@@ -542,6 +542,15 @@ console.log('cut suggestions');
   const ballV = 4 / 3 * Math.PI * 1728, halfBar = Math.PI * 6.25 * 18;
   check('the narrow point frees one ball and half the bar, cutting one area', !!fbBell && Math.abs(fbBell.piece - ballV - halfBar) < 0.15 * ballV && fbBell.areas.length === 1 && fbBell.extra === 0 && Math.abs(fbBell.piece + fbBell.rest - bell.report.volume) < 0.05 * bell.report.volume, fbBell && [fbBell.piece, fbBell.rest, fbBell.areas.length]);
   check('the suggestion carries what it frees, and the area to cut', !!top.freed && Math.abs(top.freed - fbBell.piece) < 1e-6 * ballV + 1 && top.areas.length === 1, [top.freed, top.areas]);
+  // click to cut here: a spot on the bar's surface gives the cut square across the bar; a spot on a ball's side
+  // gives the cleanest cut through it for the piece it frees, never a sliver shaved off the surface
+  const u0 = norm(cr(axis, [0, 0, 1])), onBar = [axis[0] * 30 + u0[0] * 2.5, axis[1] * 30 + u0[1] * 2.5, axis[2] * 30 + u0[2] * 2.5];
+  const hereBar = K.cutHere(bell.positions, bell.indices, onBar, 70);
+  check('cut here on the bar: square across it, 5 mm wide, freeing a ball, one area', !!hereBar && angleDeg(hereBar.normal, axis) < 6 && Math.abs(hereBar.width - 5) < 0.6 && hereBar.areas.length === 1 && Math.abs(hereBar.freed - ballV - halfBar) < 0.15 * ballV, hereBar && [hereBar.width, angleDeg(hereBar.normal, axis), hereBar.freed]);
+  const onBall = [axis[0] * 12 + u0[0] * 12, axis[1] * 12 + u0[1] * 12, axis[2] * 12 + u0[2] * 12];
+  const hereBall = K.cutHere(bell.positions, bell.indices, onBall, 70);
+  check('cut here on a ball’s side frees a real piece, not a sliver', !!hereBall && hereBall.freed > 0.1 * ballV && hereBall.width > 8, hereBall && [hereBall.width, hereBall.freed]);
+  check('cut here far from the surface gives nothing', K.cutHere(bell.positions, bell.indices, [200, 200, 200], 70) === null);
   // a join: a 12 mm ball standing on a 30 mm disc has no narrow point, but the ball's foot is an area a dozen
   // times smaller than the disc's, so a cut there is suggested, freeing the ball
   const stand = lathe(tt => { const z = tt * 20; return z < 10 ? 15 : Math.abs(z - 14) < 6 ? Math.max(0.05, Math.sqrt(36 - (z - 14) * (z - 14))) : 0.05; }, 20, [0, 0, 1]);
