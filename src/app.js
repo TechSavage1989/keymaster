@@ -482,13 +482,14 @@
     state.cut.labels = an.base.error ? [] : an.base.regions.map((r, ri) => ({ samples: K.regionSamples(an.base, ri), x: 0, y: 0 }));
     state.cut.thin = an.base.error ? [] : K.thinAreas(an, minWall());
     state.cut.plugs = an.base.error || state.cfg.type !== 'plug' ? [] : K.planPlugs(an, coreCfg());
-    if (state.cut.focus && !an.base.error) { // a narrow-point suggestion: cut just the limb it found, leave the rest joined
+    if (state.cut.focus && !an.base.error) { // a narrow-point suggestion: cut just the areas that free the piece, leave the rest joined
       planeGroup.updateMatrixWorld(true);
-      const l = planeGroup.worldToLocal(state.cut.focus.clone());
-      const ri = K.regionAt(an.base, l.x, l.y), shown = shownAreas();
-      if (ri >= 0 && shown.length > 1) {
-        for (const j of shown) if (j !== ri) state.cut.skip.add(j);
-        toast('Only the narrow part will be cut. Tick other areas to cut them too.');
+      const keep = new Set();
+      for (const f of state.cut.focus) { const l = planeGroup.worldToLocal(f.clone()); const ri = K.regionAt(an.base, l.x, l.y); if (ri >= 0) keep.add(ri); }
+      const shown = shownAreas();
+      if (keep.size && shown.length > keep.size) {
+        for (const j of shown) if (!keep.has(j)) state.cut.skip.add(j);
+        toast(keep.size === 1 ? 'Only the narrow part will be cut. Tick other areas to cut them too.' : `Only the ${keep.size} areas that free the piece will be cut. Tick other areas to cut them too.`);
       }
       state.cut.focus = null;
     }
@@ -773,7 +774,7 @@
       await nextFrame();
       return suggestRun === token && state.selectedId === p.id;
     };
-    const scale = K.diag(p.bbox), dirs = K.sweepDirections(p.positions), steps = dirs.length + 3;
+    const scale = K.diag(p.bbox), dirs = K.sweepDirections(p.positions), steps = dirs.length + 4;
     let found = [];
     if (!(await still(0.02))) return;
     for (let i = 0; i < dirs.length; i++) {
@@ -784,10 +785,13 @@
     if (!(await still((dirs.length + 1) / steps))) return;
     const creases = K.creasePlanes(p.positions, p.indices, dirs, scale, K.creaseEdges(p.positions, p.indices));
     if (!(await still((dirs.length + 2) / steps))) return;
+    // regions worth splitting off along their outline (an arm, a head, a backpack), with the regions settings in use
+    const regions = K.regionCuts(p.positions, p.indices, regionsFor(p)).map(r => ({ ...r, fold: state.regions.fold, angle: state.regions.angle }));
+    if (!(await still((dirs.length + 3) / steps))) return;
     const shells = K.separateShells(p.positions, p.indices);
     const items = [];
     if (shells.length) items.push({ kind: 'shells', count: shells.length });
-    items.push(...necks.concat(creases).sort((a, b) => b.score - a.score).slice(0, 9));
+    items.push(...necks.concat(creases, regions).sort((a, b) => b.score - a.score).slice(0, 9));
     state.suggest = { partId: p.id, status: 'done', progress: 1, items, active: -1 };
     suggestCache.set(p.id, state.suggest);
     suggestRun = null;
@@ -796,14 +800,18 @@
   // Suggestions are lettered (A, B, C…) so they can't be mixed up with the numbered areas of a cut face.
   function suggestMark(s, i) { const off = s.items[0] && s.items[0].kind === 'shells' ? 1 : 0; return s.items[i].kind === 'shells' ? '✂' : String.fromCharCode(65 + i - off); }
   function suggestText(it) {
+    const frees = it.freed ? `, frees a piece of ${fmtVol(it.freed)}` : '';
     if (it.kind === 'shells') return ['Split into separate pieces', `${it.count} pieces that don’t touch, so no cut is needed`];
-    if (it.kind === 'neck') return ['Narrow point', `About ${fmt(it.width)} mm across`];
-    return ['Seam or panel line', `Runs along creases for ${Math.round(it.coverage * 100)}% of the cut`];
+    if (it.kind === 'neck') return ['Narrow point', `About ${fmt(it.width)} mm across${frees}`];
+    if (it.kind === 'join') return ['Where a part joins', `About ${fmt(it.width)} mm across${frees}`];
+    if (it.kind === 'region') return ['Split off a region', `Along its outline (${it.loops === 1 ? 'one line' : `${it.loops} lines`}, ${fmt(it.length)} mm)${frees}`];
+    return ['Seam or panel line', `Runs along creases for ${Math.round(it.coverage * 100)}% of the cut${frees}`];
   }
+  function fmtVol(v) { return v >= 1000 ? `${fmt(v / 1000)} cm³` : `${Math.round(v)} mm³`; }
   function suggestSection() {
     const s = state.suggest;
     let body;
-    if (!s) body = `<p class="muted small">Keymaster can look for natural places to cut: narrow points like wrists, ankles and necks, seams and panel lines, and separate pieces.</p>
+    if (!s) body = `<p class="muted small">Keymaster can look for natural places to cut: narrow points like wrists, ankles and necks, where a limb or an accessory joins, surface regions to split off along their outline, seams and panel lines, and separate pieces.</p>
       <button class="btn" data-act="find-cuts">Find cut spots</button>`;
     else if (s.status === 'running') body = `<div class="progress" role="progressbar" aria-label="Looking for cut spots"><span id="suggestBar" style="width:${Math.round(s.progress * 100)}%"></span></div>
       <p class="muted small">Looking at the shape of the model…</p>`;
@@ -823,7 +831,7 @@
   function placeSuggestPins() {
     if (!pinLayer || !pinLayer.children.length) return;
     const s = state.suggest;
-    const show = s && !state.regions.on && !ptr.ring && !ptr.tilt && !tc.dragging;
+    const show = s && !ptr.ring && !ptr.tilt && !tc.dragging;
     pinLayer.hidden = !show;
     if (!show) return;
     camera.updateMatrixWorld();
@@ -841,6 +849,18 @@
     if (!it) return;
     s.active = i;
     if (it.kind === 'shells') { splitShells(); return; }
+    if (it.kind === 'region') { // a curved cut: show the regions and pick this one, as a click on it would
+      const p = selectedPart();
+      if (!p) return;
+      if (it.fold !== undefined) { state.regions.fold = it.fold; state.regions.angle = it.angle; const sl = $('#regionsAngle'); if (sl) { sl.value = it.fold; $('#regionsAngleOut').textContent = `${it.fold}°`; } }
+      if (!state.regions.on) { setRegions(true); } else if (state.paint.on) setPainting(false);
+      if (state.draw.on) setDrawing(false);
+      state.regions.last = { partId: p.id, clicks: [it.point] };
+      pickCutLine(p, it.point, false);
+      renderInspector(); renderSuggestPins();
+      return;
+    }
+    if (state.regions.on) setRegions(false);
     const pt = new THREE.Vector3(...it.point), n = new THREE.Vector3(...it.normal).normalize();
     if (n.dot(camera.position.clone().sub(pt)) < 0) n.negate(); // keep the clear side facing you
     planeGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
@@ -848,7 +868,8 @@
     computeSliderRange();
     onPlaneMoved();
     state.cut.auto = true; state.cut.skip.clear(); state.cut.active = -1;
-    state.cut.focus = it.kind === 'neck' ? pt : null;
+    // a narrow point or join cuts the areas that free the piece (the limb, plus a strap over it) and leaves the rest joined
+    state.cut.focus = it.areas && it.areas.length ? it.areas.map(a => new THREE.Vector3(...a)) : null;
     scheduleAnalysis(0);
     renderInspector(); renderSuggestPins();
   }
