@@ -15,6 +15,7 @@
 
 ## Features
 
+- **One row of cut tools.** Plane, Regions, Paint, Draw, Suggest and Fit bed sit in a row at the top of the right panel, each with its own controls under it; the Joints section folds to a one-line summary when a tool needs the room, and the one yellow button at the foot always does what the tool is ready to do.
 - **Live cut preview.** Drag the arrow to slide the cut, and the blue rings or the plane itself to tilt it (Shift for 5° steps or fine control). The toolbar under the view takes an exact position and X, Y and Z angles. Everything fits on one screen, with no scrolling. The cut face appears as a hatched section while you drag, even on dense sculpts.
 - **Cut as many times as you need.** Every piece lands in the parts list and can be cut again. Undo and redo cover every step.
 - **Keys that fit.** Choose pegs (tapered by any amount, right down to a point, with a hole that matches or stays straight), dowel holes with printable pins, or magnet pockets. Keys come in seven shapes: round, square, hexagon, cross, oval, slot, and a D-shape that only fits one way round. Shaped keys line up with each area's long side, and the fit gap is even all the way round. Keys are placed automatically, and you can click the cut face to add one, drag to move it, or right-click to remove it.
@@ -53,7 +54,7 @@
 ### Suggested cuts
 
 <table>
-<tr><td width="50%" valign="top"><b>Find cut spots: lettered pins and a list of what each cut frees</b><br><img src="docs/images/suggested-cuts.png" alt="Find cut spots: lettered pins and a list of what each cut frees" width="440"></td><td width="50%" valign="top"><b>Cut at a spot: the narrowest cut through a clicked point</b><br><img src="docs/images/cut-at-a-spot.png" alt="Cut at a spot: the narrowest cut through a clicked point" width="440"></td></tr>
+<tr><td width="50%" valign="top"><b>Suggest: lettered pins and a list of what each cut frees</b><br><img src="docs/images/suggested-cuts.png" alt="Suggest: lettered pins and a list of what each cut frees" width="440"></td><td width="50%" valign="top"><b>Cut at a spot: the narrowest cut through a clicked point</b><br><img src="docs/images/cut-at-a-spot.png" alt="Cut at a spot: the narrowest cut through a clicked point" width="440"></td></tr>
 </table>
 
 ### Surface regions and curved cuts
@@ -72,14 +73,14 @@
 ### Numbered joints, export and assembly
 
 <table>
-<tr><td width="50%" valign="top"><b>Number the joints: ticked in the key settings before a cut</b><br><img src="docs/images/number-the-joints.png" alt="Number the joints: ticked in the key settings before a cut" width="440"></td><td width="50%" valign="top"><b>The joint number engraved on the cut face</b><br><img src="docs/images/numbered-joints.png" alt="The joint number engraved on the cut face" width="440"></td></tr>
+<tr><td width="50%" valign="top"><b>Number the joints: ticked in the Joints section before a cut</b><br><img src="docs/images/number-the-joints.png" alt="Number the joints: ticked in the Joints section before a cut" width="440"></td><td width="50%" valign="top"><b>The joint number engraved on the cut face</b><br><img src="docs/images/numbered-joints.png" alt="The joint number engraved on the cut face" width="440"></td></tr>
 <tr><td width="50%" valign="top"><b>STLs + assembly sheet: each part, its size, volume and the parts its joints pair with</b><br><img src="docs/images/assembly-sheet.png" alt="STLs + assembly sheet: each part, its size, volume and the parts its joints pair with" width="440"></td><td width="50%" valign="top"><b>Split to fit the bed: the straight cuts that make every piece fit your printer</b><br><img src="docs/images/split-to-fit-bed.png" alt="Split to fit the bed: the straight cuts that make every piece fit your printer" width="440"></td></tr>
 </table>
 
 ### Model tools
 
 <table>
-<tr><td width="50%" valign="top"><b>Repair: a tangled model is untangled as it opens</b><br><img src="docs/images/repair-surface.png" alt="Repair: a tangled model is untangled as it opens" width="440"></td><td width="50%" valign="top"><b>Reduce detail: the sample knot at half its triangles, within 0.1 mm</b><br><img src="docs/images/reduce-detail.png" alt="Reduce detail: the sample knot at half its triangles, within 0.1 mm" width="440"></td></tr>
+<tr><td width="50%" valign="top"><b>Repair: a tangled model is untangled as it opens</b><br><img src="docs/images/repair-surface.png" alt="Repair: a tangled model is untangled as it opens" width="440"></td><td width="50%" valign="top"><b>Reduce detail: the pawn at an eighth of its triangles, still within 0.1 mm</b><br><img src="docs/images/reduce-detail.png" alt="Reduce detail: the pawn at an eighth of its triangles, still within 0.1 mm" width="440"></td></tr>
 </table>
 
 ## Getting started

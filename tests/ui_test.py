@@ -84,6 +84,11 @@ def check(name, cond, extra=''):
     results.append((name, bool(cond)))
     print(('  ok  ' if cond else '  FAIL ') + name + (('  ' + str(extra)) if extra and not cond else ''))
 
+def joints_open(pg):
+    # the Joints section folds up while the regions, paint or draw tool is in use; open it to work its settings
+    if pg.locator('details[data-sec=joints]').count() and not pg.evaluate("document.querySelector('details[data-sec=joints]').open"):
+        pg.click('details[data-sec=joints] > summary'); pg.wait_for_timeout(150)
+
 with sync_playwright() as p:
     b = p.chromium.launch()
     pg = b.new_page(viewport={'width': 1440, 'height': 900}, accept_downloads=True)
@@ -568,9 +573,11 @@ with sync_playwright() as p:
     dumbbell_stl(str(OUT / 'dumbbell.stl'))
     pg.set_input_files('#fileInput', str(OUT / 'dumbbell.stl'))
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1 && document.querySelector('#partList .part-name').innerText.includes('dumbbell')", timeout=20000)
-    pg.click('#partList li[data-id] [data-act=select]')
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
+    check('the cut tools are offered in a row: plane, regions, paint, draw, suggest, fit bed', [b.get_attribute('data-tool') for b in pg.locator('#toolPanel [data-tool]').all()] == ['plane', 'regions', 'paint', 'draw', 'suggest', 'bed'] and pg.get_attribute('[data-tool=plane]', 'aria-pressed') == 'true')
+    pg.click('[data-tool=suggest]'); pg.wait_for_timeout(200)
     pg.wait_for_selector('[data-act=find-cuts]')
-    check('suggestions start with a find button and an explanation, in the left panel', 'narrow points like wrists' in pg.inner_text('#suggestPanel') and pg.locator('#suggestPanel [data-act=find-cuts]').count() == 1)
+    check('the Suggest tool starts with a find button and an explanation', 'narrow points like wrists' in pg.inner_text('#suggestPanel') and pg.locator('#suggestPanel [data-act=find-cuts]').count() == 1)
     pg.click('[data-act=find-cuts]')
     pg.wait_for_timeout(50)
     pg.wait_for_selector('.suggest-list, .suggest p:has-text("No clear")', timeout=30000)
@@ -587,7 +594,8 @@ with sync_playwright() as p:
     # choosing a region suggestion shows the regions and picks that region, as a click on it would
     pg.locator('#suggestPins .suggest-pin').nth(reg).click(); pg.wait_for_timeout(1500)
     infoR = pg.inner_text('#cutLineInfo')
-    check('choosing it turns regions on and picks the region, ready to split off', pg.get_attribute('#regionsBtn', 'aria-pressed') == 'true' and 'This region' in infoR and 'Split off this region' in infoR, infoR[:160])
+    check('choosing it turns regions on and picks the region, ready to split off', pg.get_attribute('#regionsBtn', 'aria-pressed') == 'true' and 'This region' in infoR and 'Split off this region' in pg.inner_text('#cutAction'), (infoR[:160], pg.inner_text('#cutAction')))
+    check('the suggestions stay in view while the region is picked', pg.get_attribute('[data-tool=suggest]', 'aria-pressed') == 'true' and pg.is_visible('#suggestPanel'))
     check('the pins stay on the model while regions show', not pg.evaluate("document.querySelector('#suggestPins').hidden"))
     pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
     pg.click('#regionsBtn'); pg.wait_for_selector('#tiltOut'); pg.wait_for_timeout(300)
@@ -637,7 +645,7 @@ with sync_playwright() as p:
     print('    surface regions:', count)
     check('showing surface regions counts them', pg.get_attribute('#regionsBtn', 'aria-pressed') == 'true' and 'region' in count and int(count.split()[0]) >= 3, count)
     # the hidden cut plane can't be grabbed: a drag where it would be orbits the view instead of tilting it
-    if pg.locator('[data-act=cut]').count() == 0:
+    if pg.locator('[data-act=keytype]').count() == 0:
         pg.locator('#partList li[data-id] [data-act=select]').first.click(); pg.wait_for_timeout(400)
     if pg.is_visible('#regionsPanel'):
         pg.click('#regionsBtn'); pg.wait_for_timeout(300)
@@ -659,12 +667,18 @@ with sync_playwright() as p:
     count80 = pg.inner_text('#regionsCount')
     check('a higher fold threshold finds no more regions', int(count80.split()[0]) <= int(count.split()[0]) and '45°' in pg.inner_text('#regionsAngleOut'), (count, count80))
     n_parts = pg.locator('#partList li[data-id]').count()
-    if pg.locator('[data-act=cut]').count() == 0:
-        pg.locator('#partList li[data-id] [data-act=select]').first.click()
-    pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(500)
+    if pg.locator('[data-act=keytype]').count() == 0:
+        pg.locator('#partList li[data-id] [data-act=select]').first.click(); pg.wait_for_timeout(300)
+    check('with regions showing, the foot of the panel waits for a pick instead of offering the flat cut', pg.locator('[data-act=cut]').count() == 0 and 'Pick a region' in pg.inner_text('#cutAction'), pg.inner_text('#cutAction'))
+    check('the Joints fold to a summary line while a region tool is in use', not pg.evaluate("document.querySelector('details[data-sec=joints]').open") and 'Pegs' in pg.inner_text('details[data-sec=joints] > summary') and pg.get_attribute('[data-tool=regions]', 'aria-pressed') == 'true', pg.inner_text('details[data-sec=joints] > summary'))
+    pg.click('details[data-sec=joints] > summary'); pg.wait_for_timeout(150)
+    check('opening it shows the key settings', pg.evaluate("document.querySelector('details[data-sec=joints]').open") and pg.is_visible('[data-act=keytype][data-value=peg]'))
+    pg.click('details[data-sec=joints] > summary'); pg.wait_for_timeout(150)
+    pg.click('[data-tool=plane]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(500)
+    check('choosing the Plane tool turns the regions off', pg.get_attribute('#regionsBtn', 'aria-pressed') == 'false' and not pg.is_visible('#regionsPanel') and pg.is_visible('#planeBar'))
     pg.click('[data-act=cut]')
     pg.wait_for_function(f"document.querySelectorAll('#partList li[data-id]').length > {n_parts}", timeout=15000)
-    check('cutting turns the regions off and cuts as usual', pg.get_attribute('#regionsBtn', 'aria-pressed') == 'false' and not pg.is_visible('#regionsPanel'))
+    check('and the flat cut works as usual', pg.locator('#partList li[data-id]').count() > n_parts)
     pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000)
     check('each piece gets its own regions after a cut', 'region' in pg.inner_text('#regionsCount'))
     pg.click('#regionsBtn'); pg.wait_for_timeout(200)
@@ -724,6 +738,8 @@ with sync_playwright() as p:
     pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam})"); pg.wait_for_timeout(100)
     pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
     check('Esc drops the picked line', pg.locator('[data-act=cut-line]').count() == 0)
+    pg.keyboard.press('Escape'); pg.wait_for_timeout(100)  # the pick chose the part, so a second Esc lets it go
+    check('a second Esc lets the part go', pg.locator('[data-act=keytype]').count() == 0)
     # with regions showing, the first click on a part chooses it (its key settings show), the next picks on it
     check('with no part chosen, the hint says to click one', 'Click a part to choose it' in pg.inner_text('#hint') and 'Click a part' in pg.inner_text('#cutLineInfo'))
     r1 = pg.evaluate(f"KeymasterDebug.regionClick(0, {seam})"); pg.wait_for_timeout(400)
@@ -736,8 +752,8 @@ with sync_playwright() as p:
     res3 = pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {mid})"); pg.wait_for_timeout(200)
     info3 = pg.inner_text('#cutLineInfo')
     print('    bar region:', res3, info3.replace('\n', ' ')[:150])
-    check('clicking a region offers to split it off along its whole outline', bool(res3) and res3['ok'] and res3['region'] is not None and res3['loops'] == 2 and res3['pieces'] == 3 and 'Split off this region' in info3, (res3, info3))
-    pg.click('[data-act=keytype][data-value=none]'); pg.wait_for_timeout(500)
+    check('clicking a region offers to split it off along its whole outline', bool(res3) and res3['ok'] and res3['region'] is not None and res3['loops'] == 2 and res3['pieces'] == 3 and 'Split off this region' in pg.inner_text('#cutAction'), (res3, info3))
+    joints_open(pg); pg.click('[data-act=keytype][data-value=none]'); pg.wait_for_timeout(500)
     check('changing a key setting re-runs the pick', pg.locator('[data-act=cut-line]').count() == 1 and 'No room' not in pg.inner_text('#cutLineInfo') and 'With' not in pg.inner_text('#cutLineInfo'), pg.inner_text('#cutLineInfo'))
     pg.click('[data-act=keytype][data-value=peg]'); pg.wait_for_timeout(500)
     pg.click('[data-act=cut-line]')
@@ -753,7 +769,7 @@ with sync_playwright() as p:
     resU = pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {ballPt}, true)"); pg.wait_for_timeout(200)
     infoU = pg.inner_text('#cutLineInfo')
     print('    bar + ball:', resU, infoU.replace('\n', ' ')[:150])
-    check('shift-clicking a ball adds it to the bar: one outline, two pieces', bool(resU) and resU['ok'] and resU['regions'] == 2 and resU['loops'] == 1 and resU['pieces'] == 2 and 'These 2 regions' in infoU and 'Split off these regions' in infoU, (resU, infoU))
+    check('shift-clicking a ball adds it to the bar: one outline, two pieces', bool(resU) and resU['ok'] and resU['regions'] == 2 and resU['loops'] == 1 and resU['pieces'] == 2 and 'These 2 regions' in infoU and 'Split off these regions' in pg.inner_text('#cutAction'), (resU, infoU))
     resU2 = pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {ballPt}, true)"); pg.wait_for_timeout(200)
     check('shift-clicking it again takes it out of the pick', bool(resU2) and resU2['regions'] == 1 and resU2['pieces'] == 3, resU2)
     pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {ballPt}, true)"); pg.wait_for_timeout(200)
@@ -798,7 +814,7 @@ with sync_playwright() as p:
     resP = pg.evaluate("KeymasterDebug.paintDone()"); pg.wait_for_timeout(200)
     infoP = pg.inner_text('#cutLineInfo')
     print('    painted area:', resP, infoP.replace('\n', ' ')[:150])
-    check('the painted area is picked: one outline, two pieces, Split off painted area', resP['ok'] and resP['painted'] and resP['loops'] == 1 and resP['pieces'] == 2 and 'painted area' in infoP and 'Split off painted area' in infoP, (resP, infoP))
+    check('the painted area is picked: one outline, two pieces, Split off painted area', resP['ok'] and resP['painted'] and resP['loops'] == 1 and resP['pieces'] == 2 and 'painted area' in infoP and 'Split off painted area' in pg.inner_text('#cutAction'), (resP, infoP))
     pg.click('[data-act=cut-line]')
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
     check('splitting off the painted area gives two pieces and stops painting', pg.locator('#partList li[data-id]').count() == 2 and 'painted area' in pg.inner_text('#toast') and pg.get_attribute('#paintBtn', 'aria-pressed') == 'false', pg.inner_text('#toast'))
@@ -844,8 +860,8 @@ with sync_playwright() as p:
     # the Largest key follows the model's size: 5 mm on a 50 mm dumbbell, 15 mm once it's 500 mm (an earlier test set
     # a size by hand, which would hold it; let it follow the model again)
     pg.evaluate("KeymasterDebug.sizeByHand(false)")
-    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(200)
     if pg.get_attribute('#regionsBtn', 'aria-pressed') == 'true': pg.click('#regionsBtn'); pg.wait_for_timeout(200)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(200)
     check('scaled up ten times, the Largest key grows to 15 mm', pg.input_value('input[data-cfg=diameter]') == '15', pg.input_value('input[data-cfg=diameter]'))
     pg.keyboard.press('Control+z'); pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1", timeout=15000); pg.wait_for_timeout(300)
     pg.click('#modelTools [data-act=scale][data-value="0.1"]'); pg.wait_for_timeout(500)
@@ -876,7 +892,7 @@ with sync_playwright() as p:
     resD = pg.evaluate("KeymasterDebug.closeDrawing()"); pg.wait_for_timeout(200)
     infoD = pg.inner_text('#cutLineInfo')
     print('    drawn line:', resD, infoD.replace('\n', ' ')[:150])
-    check('closing the drawn line picks it: two pieces, drawing off', resD['ok'] and resD['pieces'] == 2 and not resD['drawing'] and 'Cut along this line' in infoD and pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'false', (resD, infoD))
+    check('closing the drawn line picks it: two pieces, drawing off', resD['ok'] and resD['pieces'] == 2 and not resD['drawing'] and 'Cut along this line' in pg.inner_text('#cutAction') and pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'false', (resD, infoD))
     # a second drawn line adds to the pick, so several drawn lines cut together
     pg.click('#drawLineBtn'); pg.wait_for_timeout(100)
     check('drawing again keeps the picked line and says the next will be cut with it', 'cut together with the line' in pg.inner_text('#cutLineInfo'), pg.inner_text('#cutLineInfo'))
@@ -885,7 +901,7 @@ with sync_playwright() as p:
         q2 = [ax[k] * 44 + u[k] * rb2 * math.cos(a * math.pi / 180) + vv[k] * rb2 * math.sin(a * math.pi / 180) for k in range(3)]
         pg.evaluate(f"KeymasterDebug.drawPoint(0, {q2})")
     resD2 = pg.evaluate("KeymasterDebug.closeDrawing()"); pg.wait_for_timeout(200)
-    check('two drawn lines: cut along both, three pieces', resD2['ok'] and resD2['loops'] == 2 and resD2['pieces'] == 3 and 'Cut along these lines' in pg.inner_text('#cutLineInfo'), (resD2, pg.inner_text('#cutLineInfo')[:120]))
+    check('two drawn lines: cut along both, three pieces', resD2['ok'] and resD2['loops'] == 2 and resD2['pieces'] == 3 and 'Cut along these lines' in pg.inner_text('#cutAction'), (resD2, pg.inner_text('#cutLineInfo')[:120]))
     pg.keyboard.press('Escape'); pg.wait_for_timeout(100)
     for a in (0, 90, 180, 270):
         qq = [ax[k] * 20 + u[k] * rb * math.cos(a * math.pi / 180) + vv[k] * rb * math.sin(a * math.pi / 180) for k in range(3)]
@@ -893,6 +909,7 @@ with sync_playwright() as p:
     resD = pg.evaluate("KeymasterDebug.closeDrawing()"); pg.wait_for_timeout(200)
     check('after Esc a new drawn line starts afresh', resD.get('ok') and resD['loops'] == 1 and resD['pieces'] == 2, (resD, pg.inner_text('#toast'), pg.inner_text('#cutLineInfo')[:120]))
     # with regions showing, the pegs-on choice names the piece being split off, not the halves of a flat cut
+    joints_open(pg)
     check('with regions showing, Pegs on reads This piece / Other piece', 'This piece' in pg.inner_text('#inspector') and 'Other piece' in pg.inner_text('#inspector'), pg.inner_text('#inspector')[:200])
     pg.click('[data-act=cut-line]')
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
@@ -906,7 +923,7 @@ with sync_playwright() as p:
     resL = pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam2}, true)"); pg.wait_for_timeout(200)
     infoL = pg.inner_text('#cutLineInfo')
     print('    two seams:', resL, infoL.replace('\n', ' ')[:150])
-    check('shift-clicking a second seam cuts along both: three pieces', bool(resL) and resL['ok'] and resL['regions'] == 0 and resL['loops'] == 2 and resL['pieces'] == 3 and '2 lines' in infoL and 'Cut along these lines' in infoL, (resL, infoL))
+    check('shift-clicking a second seam cuts along both: three pieces', bool(resL) and resL['ok'] and resL['regions'] == 0 and resL['loops'] == 2 and resL['pieces'] == 3 and '2 lines' in infoL and 'Cut along these lines' in pg.inner_text('#cutAction'), (resL, infoL))
     pg.click('[data-act=cut-line]')
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 3", timeout=15000)
     check('cutting along both seams gives three pieces', pg.locator('#partList li[data-id]').count() == 3 and 'Cut along the lines into 3 pieces' in pg.inner_text('#toast'), pg.inner_text('#toast'))
@@ -922,7 +939,7 @@ with sync_playwright() as p:
     resT = pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {topT})"); pg.wait_for_timeout(200)
     infoT = pg.inner_text('#cutLineInfo')
     print('    flange face region:', resT, infoT.replace('\n', ' ')[:160])
-    check('a region too thin to print warns, and offers to split it off anyway', bool(resT) and resT['ok'] and resT['region'] is not None and 'thinner than' in infoT and 'Split it off anyway' in infoT, (resT, infoT))
+    check('a region too thin to print warns, and offers to split it off anyway', bool(resT) and resT['ok'] and resT['region'] is not None and 'thinner than' in infoT and 'Split it off anyway' in pg.inner_text('#cutAction'), (resT, infoT))
     pg.click('[data-act=cut-line]')
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 3", timeout=15000)
     check('splitting it off anyway gives the pieces (the flange face, and the ball in two), and says it went against the warning', pg.locator('#partList li[data-id]').count() == 3 and 'against the warning' in pg.inner_text('#toast'), pg.inner_text('#toast'))
@@ -952,7 +969,7 @@ with sync_playwright() as p:
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.click('#regionsBtn'); pg.wait_for_timeout(200)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
-    pg.click('[data-act=keytype][data-value=dowel]'); pg.wait_for_timeout(300)
+    joints_open(pg); pg.click('[data-act=keytype][data-value=dowel]'); pg.wait_for_timeout(300)
     pg.click('#regionsBtn'); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000)
     pg.evaluate("KeymasterDebug.pickCutLineAt(0, [8, 0, 40])"); pg.wait_for_timeout(200)
     check('dowels on a curved cut', 'dowel' in pg.inner_text('#cutLineInfo') and 'sized to fit' in pg.inner_text('#cutLineInfo'), pg.inner_text('#cutLineInfo'))
@@ -1048,7 +1065,9 @@ with sync_playwright() as p:
     if pg.locator('[data-act=done]').count(): pg.click('[data-act=done]'); pg.wait_for_timeout(200)
     for k, v in (('w', 60), ('d', 60), ('h', 60)):
         pg.fill(f'input[data-bed={k}]', str(v)); pg.press(f'input[data-bed={k}]', 'Tab'); pg.wait_for_timeout(100)
-    check('a part too big for the bed is reported, with Work out the cuts', 'too big for the bed' in pg.inner_text('#inspector') and pg.locator('[data-act=split-plan]').count() == 1, pg.inner_text('#inspector')[-300:])
+    check('a part too big for the bed is reported, with a way to the Fit bed tool', 'too big for the bed' in pg.inner_text('#inspector') and pg.locator('[data-act=tool][data-value=bed]').count() == 1, pg.inner_text('#inspector')[-300:])
+    pg.click('[data-act=tool][data-value=bed]'); pg.wait_for_timeout(200)
+    check('the Fit bed tool offers Work out the cuts', pg.get_attribute('[data-tool=bed]', 'aria-pressed') == 'true' and pg.locator('[data-act=split-plan]').count() == 1 and 'Work out the cuts' in pg.inner_text('#bedPanel'), pg.inner_text('#bedPanel'))
     plan = pg.evaluate("KeymasterDebug.splitPlan()"); pg.wait_for_timeout(300)
     check('the plan is one cut across X in the middle, two pieces that fit', bool(plan) and plan['planes'] == [[0, 50]] and plan['pieces'] == 2 and plan['fits'], plan)
     ins = pg.inner_text('#inspector')
