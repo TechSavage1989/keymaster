@@ -85,6 +85,8 @@ button, input, select { font: inherit; color: inherit; }
 .btn:hover { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
 .btn:disabled { opacity: .45; cursor: default; }
 canvas.is-aiming { cursor: crosshair; }
+.across-line { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+.across-line line { stroke: var(--cut); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 10 6; }
 .btn.small { min-height: 28px; padding: 3px 9px; font-size: 13px; }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
 .btn.ghost:hover { color: var(--ink); border-color: var(--line); }
@@ -468,6 +470,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
       </div>
       <div class="area-tags" id="areaTags" aria-label="Areas on the cut face"></div>
       <div class="drag-chip" id="dragChip" hidden></div>
+      <svg id="acrossLine" class="across-line" hidden aria-hidden="true"><line x1="0" y1="0" x2="0" y2="0"/></svg>
       <div class="suggest-pins" id="suggestPins" aria-label="Suggested cut spots"></div>
       <div class="regions-panel" id="regionsPanel" hidden>
         <div class="rp-head"><strong>Surface regions</strong><output id="regionsCount"></output></div>
