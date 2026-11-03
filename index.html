@@ -521,7 +521,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.55, build a2abe3. After an update, refresh the page and check this changes.">v1.55 · a2abe3</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.55, build d28fcc. After an update, refresh the page and check this changes.">v1.55 · d28fcc</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -7063,7 +7063,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   function placeSuggestPins() {
     if (!pinLayer || !pinLayer.children.length) return;
     const s = state.suggest;
-    const show = s && !ptr.ring && !ptr.tilt && !tc.dragging;
+    const show = s && !ptr.ring && !ptr.tilt && !tc.dragging && !['sculpt', 'shape', 'boolean', 'bed'].includes(state.tool); // the brushes and the gizmos want the model clear
     pinLayer.hidden = !show;
     if (!show) return;
     camera.updateMatrixWorld();
@@ -8266,6 +8266,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const idx = state.parts.indexOf(p);
     commit(state.parts.slice(0, idx).concat([q], state.parts.slice(idx + 1)), 'the sculpting');
     regionCache.delete(p.id); lineCache.clear(); suggestCache.delete(p.id);
+    if (state.suggest && state.suggest.partId === p.id) { state.suggest = null; renderSuggestPins(); } // the suggestions were found on the surface as it was
     refreshView(p.id); syncScene(); updateChrome(); renderParts();
   }
   // The painted area as a pick: its outline is always closed, so it always separates

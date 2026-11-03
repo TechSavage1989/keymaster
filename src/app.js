@@ -1075,7 +1075,7 @@
   function placeSuggestPins() {
     if (!pinLayer || !pinLayer.children.length) return;
     const s = state.suggest;
-    const show = s && !ptr.ring && !ptr.tilt && !tc.dragging;
+    const show = s && !ptr.ring && !ptr.tilt && !tc.dragging && !['sculpt', 'shape', 'boolean', 'bed'].includes(state.tool); // the brushes and the gizmos want the model clear
     pinLayer.hidden = !show;
     if (!show) return;
     camera.updateMatrixWorld();
@@ -2278,6 +2278,7 @@
     const idx = state.parts.indexOf(p);
     commit(state.parts.slice(0, idx).concat([q], state.parts.slice(idx + 1)), 'the sculpting');
     regionCache.delete(p.id); lineCache.clear(); suggestCache.delete(p.id);
+    if (state.suggest && state.suggest.partId === p.id) { state.suggest = null; renderSuggestPins(); } // the suggestions were found on the surface as it was
     refreshView(p.id); syncScene(); updateChrome(); renderParts();
   }
   // The painted area as a pick: its outline is always closed, so it always separates
