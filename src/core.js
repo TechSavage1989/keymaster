@@ -2675,6 +2675,37 @@ const KMCore = (() => {
     }
     return best ? { point: best, distance: bd } : null;
   }
+  /* ---------- split to fit the bed ----------
+     Flat cuts across the axes that make every piece fit the printer (the owner's large prints, and modelsplitter's
+     auto multi-plane). A piece can lie any way on the plate, so the model's extents are matched to the bed's
+     longest to longest; each axis then needs ceil(size / room) − 1 cuts, spaced evenly. */
+  // The plan: `bed` is {w, d, h}, `margin` is kept clear at every edge, `counts` (per axis) overrides the
+  // worked-out numbers (cuts by count, as the Multi-plane tool). Returns the counts, the planes ({axis, pos}),
+  // how many pieces, the size of each, and whether they fit.
+  function planBedCuts(bbox, bed, margin = 0, counts) {
+    const room = [bed.w, bed.d, bed.h].map(v => Math.max(1, v - 2 * margin)).sort((a, b) => a - b);
+    const order = [0, 1, 2].sort((a, b) => bbox.size[a] - bbox.size[b]); // the model's axes, smallest first
+    const n = [0, 0, 0];
+    order.forEach((ax, k) => { n[ax] = Math.max(0, Math.ceil(bbox.size[ax] / room[k] - 1e-9) - 1); });
+    if (counts) for (let k = 0; k < 3; k++) if (counts[k] !== undefined && counts[k] !== null && counts[k] !== '') n[k] = Math.max(0, counts[k] | 0);
+    const planes = [];
+    for (let ax = 0; ax < 3; ax++) for (let i = 1; i <= n[ax]; i++) planes.push({ axis: ax, pos: bbox.min[ax] + bbox.size[ax] * i / (n[ax] + 1) });
+    return { counts: n, planes, ...bedFit(bbox, planes, bed, margin) };
+  }
+  // What a set of planes gives: the number of pieces, the biggest piece's size (the widest gap between cuts on
+  // each axis) and whether every piece fits the bed.
+  function bedFit(bbox, planes, bed, margin = 0) {
+    const room = [bed.w, bed.d, bed.h].map(v => Math.max(1, v - 2 * margin)).sort((a, b) => a - b);
+    const biggest = [0, 1, 2].map(ax => {
+      const cuts = planes.filter(q => q.axis === ax).map(q => q.pos).filter(x => x > bbox.min[ax] && x < bbox.max[ax]).sort((a, b) => a - b);
+      let gap = 0, prev = bbox.min[ax];
+      for (const x of cuts.concat([bbox.max[ax]])) { gap = Math.max(gap, x - prev); prev = x; }
+      return gap;
+    });
+    const pieces = [0, 1, 2].reduce((acc, ax) => acc * (planes.filter(q => q.axis === ax && q.pos > bbox.min[ax] && q.pos < bbox.max[ax]).length + 1), 1);
+    const fits = biggest.slice().sort((a, b) => a - b).every((s, k) => s <= room[k] + 1e-9);
+    return { pieces, biggest, fits, room };
+  }
   // Which way, along the line's frame normal, the material of side 2 (the piece that doesn't hold the line's
   // forward edges) lies: +1 or -1.
   function intoSide2(xy) {
@@ -4108,7 +4139,7 @@ const KMCore = (() => {
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
