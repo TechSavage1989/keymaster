@@ -537,6 +537,19 @@ console.log('cut suggestions');
   check('dumbbell: the even bar counts as one narrow point', necks.filter(n => Math.abs(n.width - 5) < 1).length === 1, necks.map(n => n.width));
   const rb = K.cutMesh(bell.positions, bell.indices, K.frameFromNormal(top.normal, top.point), { scale: 70, cfg: cfgOf({}) });
   check('cutting at the suggestion splits the dumbbell in two sealed halves', rb.parts.length === 2 && allClosed(rb.parts));
+  // what the cut frees: one ball (with half the bar), cut on one area alone
+  const fbBell = K.freedBy(bell.positions, bell.indices, K.frameFromNormal(top.normal, top.point), 70);
+  const ballV = 4 / 3 * Math.PI * 1728, halfBar = Math.PI * 6.25 * 18;
+  check('the narrow point frees one ball and half the bar, cutting one area', !!fbBell && Math.abs(fbBell.piece - ballV - halfBar) < 0.15 * ballV && fbBell.areas.length === 1 && fbBell.extra === 0 && Math.abs(fbBell.piece + fbBell.rest - bell.report.volume) < 0.05 * bell.report.volume, fbBell && [fbBell.piece, fbBell.rest, fbBell.areas.length]);
+  check('the suggestion carries what it frees, and the area to cut', !!top.freed && Math.abs(top.freed - fbBell.piece) < 1e-6 * ballV + 1 && top.areas.length === 1, [top.freed, top.areas]);
+  // a join: a 12 mm ball standing on a 30 mm disc has no narrow point, but the ball's foot is an area a dozen
+  // times smaller than the disc's, so a cut there is suggested, freeing the ball
+  const stand = lathe(tt => { const z = tt * 20; return z < 10 ? 15 : Math.abs(z - 14) < 6 ? Math.max(0.05, Math.sqrt(36 - (z - 14) * (z - 14))) : 0.05; }, 20, [0, 0, 1]);
+  check('ball on a disc closed', stand.report.closed, stand.report);
+  const joins = findNecks(stand), joinAt = joins.find(j => j.point[2] > 9.5 && j.point[2] < 13 && angleDeg(j.normal, [0, 0, 1]) < 15);
+  const capV = Math.PI * 100 * (18 - 10) / 3;
+  check('the ball’s foot on the disc is found, square to it, freeing the ball', !!joinAt && joinAt.freed > 0.6 * capV && joinAt.freed < 1.2 * capV, joins.map(j => [j.kind, j.point.map(v => v.toFixed(1)).join(','), j.freed && j.freed.toFixed(0)]));
+  check('nothing frees only a speck, and nothing cuts the disc across', joins.every(j => j.freed >= 0.01 * stand.report.volume && j.point[2] > 9), joins.map(j => [j.kind, j.point[2].toFixed(1)]));
   // a plain cylinder has no narrow point
   const tube = lathe(tt => (tt < 0.02 || tt > 0.98 ? 3 : 6), 50, [0, 0, 1]);
   check('a straight cylinder has no narrow point', findNecks(tube).filter(n => n.width < 11).length === 0, findNecks(tube).map(n => n.width));
@@ -1054,6 +1067,11 @@ console.log('regions by folds, and splitting off a region');
   const bar = (() => { let best = -1, bl = -Infinity; for (let g = 0; g < segB.count; g++) { const l = K.regionLoops(bell.positions, bell.indices, segB, g); if (l.length === 2 && segB.areas[g] > bl) { bl = segB.areas[g]; best = g; } } return best; })();
   check('the dumbbell’s bar is a region with two loops', bar >= 0, segB.count);
   const rB = K.splitRegion(bell.positions, bell.indices, segB, bar, { minThickness: 1.2 });
+  // regions as cut suggestions: each ball comes off along one line and frees its own volume; the bar needs two
+  const rcB = K.regionCuts(bell.positions, bell.indices, segB);
+  const ballRC = rcB.filter(r => r.loops === 1 && r.region !== bar), barRC = rcB.find(r => r.region === bar);
+  check('both balls are suggested as regions to split off, one line each, each freeing a ball', ballRC.length === 2 && ballRC.every(r => Math.abs(r.piece - rB.parts[1].volume) < 0.1 * rB.parts[1].volume) && rcB[0].loops === 1, rcB.map(r => [r.region, r.loops, r.piece.toFixed(0), r.score.toFixed(2)]));
+  check('the bar is suggested with its two lines, freeing the bar', !!barRC && barRC.loops === 2 && Math.abs(barRC.piece - rB.parts[0].volume) < 0.15 * rB.parts[0].volume && barRC.score < rcB[0].score, barRC && [barRC.loops, barRC.piece, rB.parts[0].volume]);
   check('splitting off the bar gives three sealed pieces, the bar first, volume kept', rB.parts.length === 3 && rB.loops === 2 && allClosed(rB.parts) && rB.parts[0].volume < rB.parts[1].volume && Math.abs(sumVol(rB.parts) - bell.report.volume) / bell.report.volume < 1e-6, [rB.parts.map(q => q.volume.toFixed(0)), bell.report.volume]);
   // each piece carries a pull direction for the exploded view: the balls pull away from the bar, along the bar, in opposite directions; the bar (pulled both ways) has none
   const unit = (v) => v && Math.abs(Math.hypot(...v) - 1) < 1e-9, dotP = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];

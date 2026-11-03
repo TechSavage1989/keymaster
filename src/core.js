@@ -1648,7 +1648,11 @@ const KMCore = (() => {
     return Math.abs(A) > 1e-12 ? [cx / (3 * A), cy / (3 * A)] : [sec.loops[reg.outer].xy[0], sec.loops[reg.outer].xy[1]];
   }
   const planePoint = (F, x, y) => [F.o[0] + F.u[0] * x + F.v[0] * y, F.o[1] + F.u[1] * x + F.v[1] * y, F.o[2] + F.u[2] * x + F.v[2] * y];
-  // One direction's sweep: the narrow points found while following areas from slice to slice.
+  // One direction's sweep: the places to cut found while following areas from slice to slice. A narrow point
+  // (a wrist, an ankle, a neck) is an area smaller than the ones on both sides of it. A join (a shoulder, a hip,
+  // a head on a neck hidden by hair) is where an area meets one several times bigger: the chain starts or ends
+  // beside a much bigger area in the next slice, or drops or jumps sharply within itself. Each candidate carries
+  // `freed`, the volume (slice areas × step) on the smaller side, so a cut that only frees a thumb ranks low.
   function neckSweep(P, I, dir, scale, slices = 36) {
     const n = P.length / 3;
     let lo = Infinity, hi = -Infinity;
@@ -1663,7 +1667,7 @@ const KMCore = (() => {
       if (!sec.error) for (const reg of sec.regions) {
         if (reg.nested || reg.inverted || reg.area < minA * 0.25) continue;
         const [cx, cy] = regionCentroid(sec, reg);
-        L.push({ area: reg.area, c: planePoint(F, cx, cy), chain: -1 });
+        L.push({ area: reg.area, c: planePoint(F, cx, cy), chain: -1, k: layers.length, reg, sec, F });
       }
       layers.push(L);
     }
@@ -1686,18 +1690,47 @@ const KMCore = (() => {
         chains[r.chain].push(r);
       }
     }
+    let V = 0;
+    for (const L of layers) for (const r of L) V += r.area * step;
+    const minFreed = 0.01 * V; // a cut has to free at least 1% of the model
+    // is r's centre inside q's area (an area on the next slice), or within r's own radius of it?
+    const meets = (r, q) => {
+      const F = q.F, d = [r.c[0] - F.o[0], r.c[1] - F.o[1], r.c[2] - F.o[2]];
+      const x = d[0] * F.u[0] + d[1] * F.u[1] + d[2] * F.u[2], y = d[0] * F.v[0] + d[1] * F.v[1] + d[2] * F.v[2];
+      return regionContains(q.sec.loops, q.reg, x, y) || regionClearance(q.sec.loops, q.reg, x, y) < Math.sqrt(r.area / Math.PI) + step;
+    };
+    const JUMP = 2.5; // an area this many times bigger is another part
     const found = [];
     for (const ch of chains) {
-      if (ch.length < 5) continue;
-      for (let m = 2; m < ch.length - 2; m++) {
+      const cum = []; let acc = 0;
+      for (const r of ch) { acc += r.area * step; cum.push(acc); }
+      const total = acc, before = (m) => (m > 0 ? cum[m - 1] : 0), after = (m) => total - cum[m];
+      const push = (kind, m, big, freed) => {
+        if (freed < minFreed) return;
+        found.push({ kind, normal: dir.slice(), point: ch[m].c, area: ch[m].area, pinch: ch[m].area / big, freed });
+      };
+      // narrow points
+      if (ch.length >= 5) for (let m = 2; m < ch.length - 2; m++) {
         const a = ch[m].area;
         if (a < minA || a > ch[m - 1].area || a > ch[m + 1].area) continue;
-        let before = 0, after = 0;
-        for (let q = Math.max(0, m - 10); q < m; q++) before = Math.max(before, ch[q].area);
-        for (let q = m + 1; q < Math.min(ch.length, m + 11); q++) after = Math.max(after, ch[q].area);
-        const pinch = a / Math.min(before, after);
-        if (pinch < 0.6) found.push({ kind: 'neck', normal: dir.slice(), point: ch[m].c, area: a, pinch });
+        let wb = 0, wa = 0;
+        for (let q = Math.max(0, m - 10); q < m; q++) wb = Math.max(wb, ch[q].area);
+        for (let q = m + 1; q < Math.min(ch.length, m + 11); q++) wa = Math.max(wa, ch[q].area);
+        if (a / Math.min(wb, wa) < 0.6) push('neck', m, Math.min(wb, wa), Math.min(before(m), after(m)));
       }
+      if (ch.length < 2) continue;
+      // joins within the chain: a sharp drop (the rest of the chain is the smaller part) or jump (the start is)
+      // (the small side has to hold its size for another slice: the edge of a flat base jumps in area too)
+      const steady = (m, next) => ch[next] !== undefined && ch[next].area <= 1.5 * ch[m].area;
+      for (let m = 1; m < ch.length; m++) {
+        const a0 = ch[m - 1].area, a1 = ch[m].area;
+        if (a1 * JUMP <= a0 && a1 >= minA && steady(m, m + 1)) push('join', m, a0, after(m - 1));
+        else if (a0 * JUMP <= a1 && a0 >= minA && steady(m - 1, m - 2)) push('join', m - 1, a1, cum[m - 1]);
+      }
+      // joins at the chain's ends: a much bigger area on the slice before the start, or after the end
+      const first = ch[0], last = ch[ch.length - 1];
+      if (first.k > 0 && first.area >= minA && steady(0, 1)) for (const q of layers[first.k - 1]) if (q.area >= JUMP * first.area && meets(first, q)) { push('join', 0, q.area, total); break; }
+      if (last.k < layers.length - 1 && last.area >= minA && steady(ch.length - 1, ch.length - 2)) for (const q of layers[last.k + 1]) if (q.area >= JUMP * last.area && meets(last, q)) { push('join', ch.length - 1, q.area, total); break; }
     }
     return found;
   }
@@ -1711,16 +1744,99 @@ const KMCore = (() => {
     const [cx, cy] = regionCentroid(sec, sec.regions[ri]);
     return { area: sec.regions[ri].area, point: planePoint(F, cx, cy) };
   }
+  // What cutting the area at the frame's origin would free. The surface on the side the normal points to is
+  // flooded from that area's outline without crossing the plane; the areas of the plane it runs into are the
+  // ones that have to be cut with it (an arm's shoulder cut must also cut the strap over it), every other area
+  // can stay joined. Returns the piece's volume (the sum over its triangles with the caps added, and the caps lie
+  // in the plane through the origin, so they add nothing), the rest, the areas to cut (`areas`, as 3D points, and
+  // their total `cutArea`). With `whole` set the whole plane is cut and the two sides are measured instead.
+  function freedBy(P, I, F, scale, whole = false) {
+    const nt = I.length / 3, nv = P.length / 3, o = F.o, n = F.n, total = Math.abs(volume(P, I));
+    const s = new Float64Array(nv);
+    for (let i = 0; i < nv; i++) s[i] = (P[3 * i] - o[0]) * n[0] + (P[3 * i + 1] - o[1]) * n[1] + (P[3 * i + 2] - o[2]) * n[2];
+    const tetra = (t) => {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const ax = P[a] - o[0], ay = P[a + 1] - o[1], az = P[a + 2] - o[2], bx = P[b] - o[0], by = P[b + 1] - o[1], bz = P[b + 2] - o[2], cx = P[c] - o[0], cy = P[c + 1] - o[1], cz = P[c + 2] - o[2];
+      return ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+    };
+    const sideOf = (t) => { const pos = (s[I[3 * t]] > 0) + (s[I[3 * t + 1]] > 0) + (s[I[3 * t + 2]] > 0); return pos === 3 ? 1 : pos === 0 ? -1 : 0; };
+    if (whole) {
+      let vol = 0;
+      for (let t = 0; t < nt; t++) if (sideOf(t) > 0) vol += tetra(t);
+      const piece = Math.abs(vol) / 6;
+      return { piece, rest: Math.max(0, total - piece), areas: [], cutArea: 0 };
+    }
+    const sec = section(P, I, F, scale);
+    if (sec.error) return null;
+    const ri = regionAt(sec, 0, 0);
+    if (ri < 0) return null;
+    const tol = 1e-3 * scale;
+    // where each crossing triangle's piece of the outline lies, in the plane
+    const mid = (t) => {
+      let mx = 0, my = 0, mz = 0, c = 0;
+      for (let k = 0; k < 3; k++) {
+        const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3];
+        if ((s[a] > 0) === (s[b] > 0)) continue;
+        const f = s[a] / (s[a] - s[b]);
+        mx += P[3 * a] + (P[3 * b] - P[3 * a]) * f; my += P[3 * a + 1] + (P[3 * b + 1] - P[3 * a + 1]) * f; mz += P[3 * a + 2] + (P[3 * b + 2] - P[3 * a + 2]) * f; c++;
+      }
+      if (!c) return null;
+      mx = mx / c - o[0]; my = my / c - o[1]; mz = mz / c - o[2];
+      return [mx * F.u[0] + my * F.u[1] + mz * F.u[2], mx * F.v[0] + my * F.v[1] + mz * F.v[2]];
+    };
+    const seed = [];
+    for (let t = 0; t < nt; t++) {
+      if (sideOf(t)) continue;
+      const m = mid(t);
+      if (m && regionClearance(sec.loops, sec.regions[ri], m[0], m[1]) < tol) seed.push(t);
+    }
+    if (!seed.length) return null;
+    const nb = triangleAdjacency(P, I).nb, seen = new Uint8Array(nt), stack = [], touched = new Set();
+    for (const t of seed) for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && !seen[q] && sideOf(q) > 0) { seen[q] = 1; stack.push(q); } }
+    let vol = 0;
+    while (stack.length) {
+      const t = stack.pop();
+      vol += tetra(t);
+      for (let k = 0; k < 3; k++) {
+        const q = nb[3 * t + k];
+        if (q < 0 || seen[q]) continue;
+        if (sideOf(q) === 0) { touched.add(q); continue; } // never across the plane
+        seen[q] = 1; stack.push(q);
+      }
+    }
+    // the areas the piece is bounded by: every one the flood ran into
+    const needed = new Set();
+    for (const t of touched) {
+      const m = mid(t);
+      if (!m) continue;
+      for (let j = 0; j < sec.regions.length; j++) { const r = sec.regions[j]; if (!r.nested && !r.inverted && regionClearance(sec.loops, r, m[0], m[1]) < tol) { needed.add(j); break; } }
+    }
+    needed.delete(ri);
+    let cutArea = sec.regions[ri].area, extra = 0; const areas = [planePoint(F, ...regionCentroid(sec, sec.regions[ri]))];
+    for (const j of needed) { const r = sec.regions[j]; cutArea += r.area; extra = Math.max(extra, r.area); areas.push(planePoint(F, ...regionCentroid(sec, r))); }
+    const piece = Math.abs(vol) / 6;
+    return { area: sec.regions[ri].area, piece, rest: Math.max(0, total - piece), areas, cutArea, extra };
+  }
   // Merge narrow points found from several directions and tilt each plane until it sits square across the neck.
-  function refineNecks(P, I, found, scale, limit = 8) {
+  // Each is scored by how cleanly it separates (1 − pinch), how much it frees (`freed` as a share of the model:
+  // full marks from 8% up, so a thumb or a buckle never outranks an arm) and how many directions found it.
+  function refineNecks(P, I, found, scale, limit = 8, most = 24) {
     found.sort((a, b) => a.area - b.area);
     const groups = [];
     for (const f of found) {
       const g = groups.find(g => Math.hypot(f.point[0] - g.point[0], f.point[1] - g.point[1], f.point[2] - g.point[2]) < 0.8 * Math.sqrt(Math.max(f.area, g.area)));
-      if (g) { g.votes++; g.pinch = Math.min(g.pinch, f.pinch); } else groups.push({ ...f, votes: 1 });
+      if (g) { g.votes++; g.pinch = Math.min(g.pinch, f.pinch); g.freed = Math.max(g.freed || 0, f.freed || 0); if (f.kind === 'neck') g.kind = 'neck'; } else groups.push({ ...f, votes: 1 });
     }
+    const V = Math.abs(volume(P, I)) || 1;
+    const sizeOf = (g) => Math.sqrt(Math.min(1, (g.freed || 0) / V / 0.08));
+    const rough = (g) => (1 - g.pinch) * Math.min(1, 0.7 + 0.1 * g.votes) * (g.freed === undefined ? 1 : sizeOf(g));
+    // the final score: how much the cut frees (full marks from 8% of the model), how narrow the cut is for the
+    // piece it frees (cut area against the piece's volume^⅔: a ball cut through its middle scores 1.2, a limb at
+    // its joint well under 1), how clear the narrowing was, and how many directions found it
+    const score = (g, freed, cutArea) => { const ratio = cutArea / Math.pow(Math.max(freed, 1e-9), 2 / 3), q = 1 / (1 + ratio / 1.5); return sizeOf({ freed }) * Math.min(1, 0.7 + 0.1 * g.votes) * Math.sqrt(Math.max(0, 1 - g.pinch) * q); };
+    groups.sort((a, b) => rough(b) - rough(a));
     const out = [];
-    for (const g of groups) {
+    for (const g of groups.slice(0, most)) {
       let nrm = g.normal, p = g.point, area = g.area;
       for (const deg of [12, 6, 3, 1.5]) {
         let improved = true, guard = 0;
@@ -1734,7 +1850,13 @@ const KMCore = (() => {
           }
         }
       }
-      out.push({ kind: 'neck', normal: nrm, point: p, area, width: 2 * Math.sqrt(area / Math.PI), score: (1 - g.pinch) * Math.min(1, 0.5 + 0.1 * g.votes) });
+      // what the cut would really free, with the other areas of its plane left joined
+      const fb = freedBy(P, I, frameFromNormal(nrm, p), scale);
+      if (!fb) continue;
+      const freed = Math.min(fb.piece, fb.rest);
+      if (freed < 0.01 * V) continue; // frees only a speck (a thumb, a buckle)
+      if (fb.extra > 0.6 * fb.area) continue; // needs a second cut nearly as big as itself (both legs at once): a slice, not a joint
+      out.push({ kind: g.kind || 'neck', normal: nrm, point: p, area, width: 2 * Math.sqrt(area / Math.PI), freed, piece: fb.piece, areas: fb.areas, cutArea: fb.cutArea, extra: fb.extra, score: score(g, freed, fb.cutArea) });
     }
     out.sort((a, b) => b.score - a.score);
     // two groups can settle on the same neck after tilting
@@ -1747,8 +1869,10 @@ const KMCore = (() => {
       const off = Math.sqrt(Math.max(0, len * len - along * along));
       return par && off < 0.5 * Math.sqrt(Math.min(o.area, u.area)) && Math.abs(o.area - u.area) < 0.2 * Math.max(o.area, u.area);
     };
+    // and two cuts near each other that free nearly the same piece (a forearm at two spots) are one cut
+    const samePiece = (o, u) => Math.abs(o.piece - u.piece) < 0.15 * Math.max(o.piece, u.piece) && Math.hypot(o.point[0] - u.point[0], o.point[1] - u.point[1], o.point[2] - u.point[2]) < 4 * Math.max(o.width, u.width);
     const uniq = [];
-    for (const o of out) if (!uniq.some(u => sameNeck(o, u))) uniq.push(o);
+    for (const o of out) if (!uniq.some(u => sameNeck(o, u) || samePiece(o, u))) uniq.push(o);
     return uniq.slice(0, limit);
   }
   // Sharp inward creases (valleys between faces), as short segments.
@@ -1809,14 +1933,16 @@ const KMCore = (() => {
         const ri = regionAt(sec, px / (A || 1), py / (A || 1));
         let pin = planePoint(F, px / (A || 1), py / (A || 1));
         if (ri < 0 && sec.regions.length) { const big = sec.regions[0], c = regionCentroid(sec, big); pin = planePoint(F, c[0], c[1]); }
-        out.push({ kind: 'crease', normal: d.slice(), point: pin, length: w, coverage, score: coverage });
+        const fb = freedBy(P, I, F, scale, true);
+        if (!fb || Math.min(fb.piece, fb.rest) < 0.01 * Math.abs(volume(P, I))) continue; // only trims a sliver
+        out.push({ kind: 'crease', normal: d.slice(), point: pin, length: w, coverage, freed: Math.min(fb.piece, fb.rest), score: coverage });
       }
     }
     out.sort((a, c) => c.score - a.score);
     const uniq = [];
     for (const o of out) {
       const same = uniq.some(u => Math.abs(o.normal[0] * u.normal[0] + o.normal[1] * u.normal[1] + o.normal[2] * u.normal[2]) > 0.98 &&
-        Math.abs((o.point[0] - u.point[0]) * u.normal[0] + (o.point[1] - u.point[1]) * u.normal[1] + (o.point[2] - u.point[2]) * u.normal[2]) < 2 * bin);
+        Math.abs((o.point[0] - u.point[0]) * u.normal[0] + (o.point[1] - u.point[1]) * u.normal[1] + (o.point[2] - u.point[2]) * u.normal[2]) < Math.max(2 * bin, 0.025 * scale));
       if (!same) uniq.push(o);
     }
     return uniq.slice(0, limit);
@@ -2013,6 +2139,52 @@ const KMCore = (() => {
       }
     }
     return out;
+  }
+  // Regions worth splitting off along their outline, as cut suggestions: an arm, a head, a backpack. Each region
+  // whose outline closes is measured without cutting: its piece's volume (the region's triangles plus a cap over
+  // each outline fanned from that outline's centre, facing out) and its outlines' flattened area, scored like a
+  // flat cut (how much it frees, and how narrow the seam is for the piece). `point` is the region's innermost
+  // triangle, for a pin on the model and for picking the region with a click.
+  function regionCuts(P, I, seg, limit = 8) {
+    const nt = I.length / 3, total = Math.abs(volume(P, I)) || 1, outlines = regionOutlines(P, I, seg);
+    const byRegion = new Map();
+    for (const l of outlines) { if (!byRegion.has(l.region)) byRegion.set(l.region, []); byRegion.get(l.region).push(l); }
+    // the innermost triangle of each region: most steps from a border, over the triangle adjacency
+    const adj = triangleAdjacency(P, I), nb = adj.nb, hops = new Int32Array(nt).fill(-1), queue = [];
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q < 0 || seg.groupOf[q] !== seg.groupOf[t]) { hops[t] = 0; queue.push(t); break; } }
+    for (let i = 0; i < queue.length; i++) { const t = queue[i]; for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && hops[q] < 0 && seg.groupOf[q] === seg.groupOf[t]) { hops[q] = hops[t] + 1; queue.push(q); } } }
+    const inner = new Int32Array(seg.count).fill(-1);
+    for (let t = 0; t < nt; t++) { const g = seg.groupOf[t]; if (inner[g] < 0 || hops[t] > hops[inner[g]]) inner[g] = t; }
+    const out = [];
+    for (const [g, loops] of byRegion) {
+      if (!loops.every(l => l.closed) || inner[g] < 0) continue;
+      const ti0 = inner[g], o = [P[3 * I[3 * ti0]], P[3 * I[3 * ti0] + 1], P[3 * I[3 * ti0] + 2]];
+      const tet = (a, b, c) => { const ax = a[0] - o[0], ay = a[1] - o[1], az = a[2] - o[2], bx = b[0] - o[0], by = b[1] - o[1], bz = b[2] - o[2], cx = c[0] - o[0], cy = c[1] - o[1], cz = c[2] - o[2]; return ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx); };
+      const at = (v) => [P[3 * v], P[3 * v + 1], P[3 * v + 2]];
+      let vol = 0;
+      for (let t = 0; t < nt; t++) if (seg.groupOf[t] === g) vol += tet(at(I[3 * t]), at(I[3 * t + 1]), at(I[3 * t + 2]));
+      // each outline runs as the region's triangles do, so its cap runs the other way to face out
+      for (const l of loops) {
+        const m = l.verts.length; let cx = 0, cy = 0, cz = 0;
+        for (const v of l.verts) { cx += P[3 * v]; cy += P[3 * v + 1]; cz += P[3 * v + 2]; }
+        const c = [cx / m, cy / m, cz / m];
+        for (let i = 0; i < m; i++) vol += tet(c, at(l.verts[(i + 1) % m]), at(l.verts[i]));
+      }
+      const piece = Math.abs(vol) / 6, freed = Math.min(piece, total - piece);
+      if (freed < 0.01 * total) continue;
+      let cutArea = 0, length = 0;
+      for (const l of loops) {
+        const { xy } = loopFrame(P, l.verts), m = l.verts.length; let A = 0;
+        for (let i = 0, j = m - 1; i < m; j = i++) A += xy[2 * j] * xy[2 * i + 1] - xy[2 * i] * xy[2 * j + 1];
+        cutArea += Math.abs(A) / 2; length += l.length;
+      }
+      const ratio = cutArea / Math.pow(freed, 2 / 3), q = 1 / (1 + ratio / 1.5);
+      const score = Math.sqrt(Math.min(1, freed / total / 0.08)) * q;
+      const ti = inner[g], point = [(P[3 * I[3 * ti]] + P[3 * I[3 * ti + 1]] + P[3 * I[3 * ti + 2]]) / 3, (P[3 * I[3 * ti] + 1] + P[3 * I[3 * ti + 1] + 1] + P[3 * I[3 * ti + 2] + 1]) / 3, (P[3 * I[3 * ti] + 2] + P[3 * I[3 * ti + 1] + 2] + P[3 * I[3 * ti + 2] + 2]) / 3];
+      out.push({ kind: 'region', region: g, loops: loops.length, length, point, piece, freed, cutArea, score });
+    }
+    out.sort((a, b) => b.score - a.score);
+    return out.slice(0, limit);
   }
   // Every line a curved cut can follow: borders between two regions, and whole region outlines, without repeats.
   function cutLines(P, I, seg) {
@@ -3845,8 +4017,8 @@ const KMCore = (() => {
     parseSTL, parseOBJ, prepareMesh, fillHoles, edgeReport, volume, bounds, diag,
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
-    sweepDirections, neckSweep, refineNecks, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    sweepDirections, neckSweep, refineNecks, freedBy, creaseEdges, creasePlanes, separateShells,
+    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
