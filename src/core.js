@@ -3045,6 +3045,26 @@ const KMCore = (() => {
     }
     return out;
   }
+  // The sphere brush (modelsplitter's): every triangle whose centre lies within the radius, connected or not, so
+  // a dab reaches a layer behind (clothing over a body) that the surface brush stops at.
+  function sphereTriangles(P, I, centre, radius) {
+    const { C } = triangleAdjacency(P, I), r2 = radius * radius, out = [];
+    for (let t = 0; t < C.length / 3; t++) if ((C[3 * t] - centre[0]) ** 2 + (C[3 * t + 1] - centre[1]) ** 2 + (C[3 * t + 2] - centre[2]) ** 2 <= r2) out.push(t);
+    return out;
+  }
+  // Snap a selection to the surface regions: every region at least half painted (by area) is painted whole, the
+  // rest is cleared, so a rough stroke lands on the regions' borders.
+  function snapSelectionToRegions(P, I, sel, seg) {
+    const nt = I.length / 3, painted = new Float64Array(seg.count), total = new Float64Array(seg.count);
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]), area = Math.hypot(n[0], n[1], n[2]) / 2, g = seg.groupOf[t];
+      total[g] += area; if (sel[t]) painted[g] += area;
+    }
+    const out = new Uint8Array(nt);
+    for (let t = 0; t < nt; t++) { const g = seg.groupOf[t]; out[t] = total[g] > 0 && painted[g] >= 0.5 * total[g] ? 1 : 0; }
+    return out;
+  }
   // Grow a selection outward by `mm` across the surface (shrink: grow what isn't selected). Returns a new Uint8Array.
   function growSelection(P, I, sel, mm) {
     const { nb, C } = triangleAdjacency(P, I), nt = sel.length, dist = new Float64Array(nt).fill(Infinity), out = new Uint8Array(sel);
@@ -4406,7 +4426,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, sphereTriangles, snapSelectionToRegions, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
   };
