@@ -1002,6 +1002,7 @@ with sync_playwright() as p:
     pg.evaluate("() => { const r = document.querySelector('#brushSlider'); r.value = 80; r.dispatchEvent(new Event('input', {bubbles:true})); }"); big = float(pg.input_value('#brushSize'))
     pg.evaluate("() => { const r = document.querySelector('#brushSlider'); r.value = 20; r.dispatchEvent(new Event('input', {bubbles:true})); }"); small = float(pg.input_value('#brushSize'))
     check('the brush size slider sizes the brush, its box following', pg.is_visible('#brushSlider') and big > 3 * small > 0, (big, small))
+    check('the brush shows on the model while its size changes, with the pointer on the slider', pg.evaluate("KeymasterDebug.brushShape()")['ring'], pg.evaluate("KeymasterDebug.brushShape()"))
     pg.fill('#brushSize', '4'); pg.press('#brushSize', 'Tab'); pg.wait_for_timeout(100)
     check('the Surface brush shows as a ring on the face, the Sphere brush as a see-through ball', surf == {'ring': True, 'ball': False} and sph == {'ring': True, 'ball': True}, (surf, sph))
     pi = pg.evaluate("KeymasterDebug.pickInfo()")
@@ -1150,6 +1151,10 @@ with sync_playwright() as p:
     pg.keyboard.press('Backspace'); pg.wait_for_timeout(100)
     check('Backspace takes the last point back', '3 points' in pg.inner_text('#cutLineInfo'))
     pg.evaluate(f"KeymasterDebug.drawPoint(0, {q})"); pg.wait_for_timeout(100)
+    pg.evaluate("document.activeElement && document.activeElement.blur()")
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(100); after_undo = pg.inner_text('#cutLineInfo')
+    pg.keyboard.press('Control+Shift+z'); pg.wait_for_timeout(100); after_redo = pg.inner_text('#cutLineInfo')
+    check('while drawing, Ctrl+Z takes the last point back and Ctrl+Shift+Z puts it back; the undo button is live', '3 points' in after_undo and '4 points' in after_redo and not pg.evaluate("document.querySelector('#undoBtn').disabled") and pg.locator('#partList li[data-id]').count() == 1, (after_undo[:60], after_redo[:60]))
     resD = pg.evaluate("KeymasterDebug.closeDrawing()"); pg.wait_for_timeout(200)
     infoD = pg.inner_text('#cutLineInfo')
     print('    drawn line:', resD, infoD.replace('\n', ' ')[:150])
@@ -1271,6 +1276,9 @@ with sync_playwright() as p:
     if not pg.evaluate('KeymasterDebug.regionsOn()'):
         toggle_regions(pg); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000)
     pg.wait_for_timeout(300)
+    # (a lathe can only make this hem as a staircase, whose treads Sections now keeps as faces of their own: Parts finds the hem's seam)
+    by_before = 'folds' if pg.get_attribute('[data-act=regions-by][data-value=folds]', 'aria-pressed') == 'true' else 'form'
+    if by_before != 'form': pg.click('[data-act=regions-by][data-value=form]'); pg.wait_for_function("!KeymasterDebug.regionsLoading()", timeout=20000); pg.wait_for_timeout(300)
     res = pg.evaluate("KeymasterDebug.pickCutLineAt(0, [5.6, 0, 40.2])")
     pg.wait_for_timeout(200)
     info = pg.inner_text('#cutLineInfo')
@@ -1280,6 +1288,8 @@ with sync_playwright() as p:
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
     check('cutting along the wavy hem with pegs gives two pieces', pg.locator('#partList li[data-id]').count() == 2)
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
+    if by_before != 'form' and pg.locator('[data-act=regions-by][data-value=folds]').count(): pg.click(f'[data-act=regions-by][data-value={by_before}]'); pg.wait_for_function("!KeymasterDebug.regionsLoading()", timeout=20000); pg.wait_for_timeout(300)
     toggle_regions(pg); pg.wait_for_timeout(200)
     # a cut that would leave a sliver too thin to print is held back, and says which area and how to fix it
     boxes_stl(str(OUT / 'towers.stl'), [(0, 0, 0, 10, 10, 20), (20, 0, 0, 28, 10, 10.5)])
