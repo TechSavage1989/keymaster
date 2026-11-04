@@ -668,6 +668,20 @@ console.log('cut suggestions');
       const middle = K.cutMesh(BP, BI, K.frameFromNormal([0, 0, 1], [0, 0, 0.3]), { scale: 35, minThickness: 0.8 });
       const cw = K.cutPrintCheck(BP, wafer.parts, 0.8), cm = K.cutPrintCheck(BP, middle.parts, 0.8);
       check('the after-cut check finds the 0.3 mm wafer too thin to print, and the halves of a middle cut fine', cw.filter(b => b.thin).length === 1 && cm.every(b => !b.thin), { wafer: cw.map(b => +b.share.toFixed(2)), middle: cm.map(b => +b.share.toFixed(2)) }); }
+    // 1.72: a small block fused onto a big one (the owner's Father Rhinehardt: a hand lying on a book, the book fused
+    // into the robe, all grabbed as one) stays a region and a part of its own: small regions creased all round are
+    // kept, and what melts goes into the neighbour it flows into, never across a clear part boundary
+    { const book = K.shapeMesh({ kind: 'cube', w: 40, d: 30, h: 6 }), blk = K.shapeMesh({ kind: 'cube', w: 3, d: 2, h: 1.2 });
+      const bp = new Float64Array(blk.positions); for (let i = 0; i < bp.length; i += 3) { bp[i] += 5; bp[i + 1] += 4; bp[i + 2] += 3.4; }
+      const un = K.booleanWith(new Float64Array(book.positions), book.indices, { positions: bp, indices: blk.indices }, 'union');
+      const sub = K.subdivideMesh(un.positions, un.indices, { maxEdge: 0.6 }), Q = sub.positions, J = sub.indices, n2 = J.length / 3;
+      const c = (t, k) => (Q[3 * J[3 * t] + k] + Q[3 * J[3 * t + 1] + k] + Q[3 * J[3 * t + 2] + k]) / 3;
+      const onBlock = (t) => c(t, 2) > 3.05 && Math.abs(c(t, 0) - 5) < 1.6 && Math.abs(c(t, 1) - 4) < 1.1;
+      let nb = 0; for (let t = 0; t < n2; t++) if (onBlock(t)) nb++;
+      const top = [...Array(n2).keys()].find(t => onBlock(t) && c(t, 2) > 3.9);
+      const count = (seg) => { const g = seg.groupOf[top]; let on = 0, off = 0; for (let t = 0; t < n2; t++) if (seg.groupOf[t] === g) { if (onBlock(t)) on++; else off++; } return { on, off }; };
+      const sec = count(K.segmentSurface(Q, J, { angle: 60, fold: 15 })), part = count(K.segmentParts(Q, J, { ratio: 1.2, strength: 0.36, minFrac: 0.008 }));
+      check('a small block fused onto a big one: its top is a region of its own, and the block a part of its own', sec.on > 0 && sec.off === 0 && part.on >= 0.9 * nb && part.off < 0.1 * part.on, { sec, part, nb }); }
     // a plug fits a small area: a 3.4 mm rod's end with a 0.8 mm wall (a miniature's arm)
     const rod = K.shapeMesh({ kind: 'tube', w: 3.4, h: 20, segments: 48 }), pcfg = { type: 'plug', shape: 'round', diameter: 3, length: 3, margin: 0.8, clearance: 0.1, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 3, pegSide: 'below', perArea: 1, sizeMode: 'auto', sizeMin: 1.5 };
     const an = K.analyzePlane(rod.positions, rod.indices, K.frameFromNormal([0, 0, 1], [0, 0, 0.013]), pcfg, 20), pl = K.planPlugs(an, pcfg);

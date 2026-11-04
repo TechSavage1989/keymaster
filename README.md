@@ -15,6 +15,7 @@
 
 ## Features
 
+- **Parts that stop where they should.** A hand resting on a book, a book against a robe, a plate on an arm: where two parts meet at a clear crease they stay apart at Balanced and Fine, however small one of them is, so a click or a Fill takes just the part you meant.
 - **Cuts that slice clean.** A region or a painted area is cut along a smooth curve through the model's triangles, not along their edges, so the rim of the cut face and its sunk wall come out even, with no teeth or tiny points, and the pieces slide together. After every cut, Keymaster checks that no piece is left too thin behind its cut face to print.
 - **See the joint.** Under any pick, **Show: Both | This piece | Other piece** hides one side so you can look at the key or plug and the whole cut face; keys show while you paint, too.
 - **Picks that keep up.** Switch Find or Detail and your pick stays, so you can pick big parts at Balanced and add details at Fine. Shift-click a little bump the parts missed (a spike of a shoulder plate in the chest) to add just that bump, and holes the pick closes round fill themselves.

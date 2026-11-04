@@ -2092,6 +2092,7 @@ const KMCore = (() => {
   }
   function segmentSurface(P, I, opts = {}) {
     const angle = opts.angle === undefined ? 35 : opts.angle, minFrac = opts.minFrac === undefined ? 0.003 : opts.minFrac, fold = opts.fold;
+    const keepCreased = opts.keepCreased !== undefined ? !!opts.keepCreased : fold !== undefined; // (1.72) with a fold, regions creased all round are kept
     const nt = I.length / 3, nv = P.length / 3;
     const N = new Float64Array(nt * 3), A = new Float64Array(nt), C = fold !== undefined ? new Float64Array(nt * 3) : null;
     let total = 0;
@@ -2109,35 +2110,46 @@ const KMCore = (() => {
     for (let t = 0; t < nt; t++) par[t] = t;
     const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
     const cosA = Math.cos((angle * Math.PI) / 180), cosF = fold !== undefined ? Math.cos((fold * Math.PI) / 180) : cosA;
+    const np = pairs.length / 4, smooth = new Uint8Array(np);
     for (let i = 0; i < pairs.length; i += 4) {
       const s = pairs[i], q = pairs[i + 1];
       const dot = N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2];
       // a valley: the neighbour's centre lies on the outward side of this triangle's plane
       const valley = C && (C[3 * q] - C[3 * s]) * N[3 * s] + (C[3 * q + 1] - C[3 * s + 1]) * N[3 * s + 1] + (C[3 * q + 2] - C[3 * s + 2]) * N[3 * s + 2] > 0;
-      if (dot >= (valley ? cosF : cosA)) { const x = find(s), y = find(q); if (x !== y) par[x] = y; }
+      if (dot >= (valley ? cosF : cosA)) smooth[i / 4] = 1;
     }
+    for (let i = 0; i < np; i++) if (smooth[i]) { const x = find(pairs[4 * i]), y = find(pairs[4 * i + 1]); if (x !== y) par[x] = y; }
     // melt specks into the neighbour they share the most border with, smallest first, until none are left
     const minA = total * minFrac;
+    const sharpTurn = 40 * Math.PI / 180;
+    let keepWidth = 0; // a creased region kept must be at least this wide on average (its area over its outline): a median edge, and 0.4% of the model's size
+    if (keepCreased) { const L = []; for (let t = 0; t < nt; t += Math.max(1, Math.floor(nt / 3000))) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1]; L.push(Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2])); } L.sort((x, y) => x - y); keepWidth = Math.max(L[L.length >> 1] || 0, 0.004 * diag(bounds(P))); }
     for (let pass = 0; pass < 12; pass++) {
       const area = new Map();
       for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
-      const border = new Map();
+      const border = new Map(), tot = new Map(), turn = new Map();
       for (let i = 0; i < pairs.length; i += 4) {
         const x = find(pairs[i]), y = find(pairs[i + 1]);
         if (x === y) continue;
         const a = 3 * pairs[i + 2], b = 3 * pairs[i + 3], len = Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]);
-        for (const [g, h] of [[x, y], [y, x]]) { if (!border.has(g)) border.set(g, new Map()); const m = border.get(g); m.set(h, (m.get(h) || 0) + len); }
+        // with `keepCreased`, the length counted is the smooth part of the border (a speck joins what it runs into smoothly)
+        const w = keepCreased ? (smooth[i / 4] ? len : 0.02 * len) : len;
+        for (const [g, h] of [[x, y], [y, x]]) { if (!border.has(g)) border.set(g, new Map()); const m = border.get(g); m.set(h, (m.get(h) || 0) + w); }
+        if (keepCreased) { tot.set(x, (tot.get(x) || 0) + len); tot.set(y, (tot.get(y) || 0) + len); const s0 = pairs[i], q0 = pairs[i + 1], tr = len * Math.acos(Math.max(-1, Math.min(1, N[3 * s0] * N[3 * q0] + N[3 * s0 + 1] * N[3 * q0 + 1] + N[3 * s0 + 2] * N[3 * q0 + 2]))); turn.set(x, (turn.get(x) || 0) + tr); turn.set(y, (turn.get(y) || 0) + tr); }
       }
       const small = [...area.entries()].filter(([, a]) => a < minA).sort((a, b) => a[1] - b[1]);
       if (!small.length) break;
       let merged = 0;
-      for (const [g] of small) {
+      for (const [g, ga] of small) {
         const r = find(g);
         if (r !== g) continue; // already merged this pass
         const m = border.get(g);
         if (!m) continue;
         let best = -1, bl = -1;
         for (const [h, len] of m) { const hr = find(h); if (hr !== g && len > bl) { bl = len; best = hr; } }
+        // a region creased all round (the face of a book under a hand) is a part, however small: only a speck
+        // under a tenth of the smallest size, or one that meets a neighbour smoothly along a fifth of its border, melts
+        if (keepCreased && ga >= 0.1 * minA && bl < 0.2 * (tot.get(g) || 1) && ga >= keepWidth * (tot.get(g) || Infinity) && (turn.get(g) || 0) >= sharpTurn * (tot.get(g) || Infinity)) continue; // (and creased sharply, 40° on average round it, as a part's edge is: the arcs of a wavy ledge, folded gently against each other, still melt) // (and chunky: a thin band between two creases, as a lathe leaves where a bar meets a ball, still melts)
         if (best >= 0) { par[g] = best; merged++; }
       }
       if (!merged) break;
@@ -2387,12 +2399,13 @@ const KMCore = (() => {
     }
     // the edges between triangles, with their length and whether they are a concave crease at least `fold` deep
     const pairs = trianglePairs(I);
-    const ne = pairs.length / 4, elen = new Float64Array(ne), econcave = new Uint8Array(ne), econvex = new Uint8Array(ne), cosFold = Math.cos(fold);
+    const ne = pairs.length / 4, elen = new Float64Array(ne), eturn = new Float64Array(ne), econcave = new Uint8Array(ne), econvex = new Uint8Array(ne), cosFold = Math.cos(fold);
     for (let e = 0; e < ne; e++) {
       const s = pairs[4 * e], q = pairs[4 * e + 1], a = 3 * pairs[4 * e + 2], b = 3 * pairs[4 * e + 3];
       elen[e] = Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]);
       const dot = N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2];
       const valley = (C[3 * q] - C[3 * s]) * N[3 * s] + (C[3 * q + 1] - C[3 * s + 1]) * N[3 * s + 1] + (C[3 * q + 2] - C[3 * s + 2]) * N[3 * s + 2] > 1e-9;
+      eturn[e] = Math.acos(Math.max(-1, Math.min(1, dot)));
       econcave[e] = valley && dot < cosFold ? 1 : 0;
       econvex[e] = !valley && dot < cosFold ? 1 : 0;
     }
@@ -2418,8 +2431,8 @@ const KMCore = (() => {
         const e = cand[i], x = find(pairs[4 * e]), y = find(pairs[4 * e + 1]); if (x === y) continue;
         for (const r of [x, y]) if (!area.has(r)) { const sm = sumsOf(r); area.set(r, sm.a); xsum.set(r, sm.x); }
         const r = Math.min(x, y), s = Math.max(x, y), key = r * nt + s;
-        let b = border.get(key); if (!b) { b = { r, s, len: 0, concave: 0, convex: 0 }; border.set(key, b); }
-        b.len += elen[e]; if (econcave[e]) b.concave += elen[e]; if (econvex[e]) b.convex += elen[e];
+        let b = border.get(key); if (!b) { b = { r, s, len: 0, concave: 0, convex: 0, turn: 0 }; border.set(key, b); }
+        b.len += elen[e]; b.turn += elen[e] * eturn[e]; if (econcave[e]) b.concave += elen[e]; if (econvex[e]) b.convex += elen[e];
       }
       return { area, xsum, border };
     };
@@ -2450,13 +2463,23 @@ const KMCore = (() => {
           if (find(g) !== g) continue;
           const bs = by.get(g); if (!bs) continue;
           let best = null, bv = -Infinity;
-          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; const v = pickWeakest ? -strength(b, st) : b.len; if (v > bv) { bv = v; best = o; } }
+          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; const sb = pickWeakest ? strength(b, st) : 0; if (pickWeakest && sb >= keepStrong && st.area.get(g) >= 0.25 * keepArea) continue; /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
+          // (1.72) a small part clearly bounded all round (its weakest border still a crease or a step well past
+          // `strong`: a hand lying on a book, a clasp) stays a part: the owner's picks "grabbed too much" when such
+          // parts melted into what they touch. Only a speck under a tenth of the limit goes regardless.
+          if (best !== null && st.area.get(g) >= keepArea) {
+            let weak = Infinity, per = 0; for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; weak = Math.min(weak, strength(b, st)); per += b.len; }
+            if (weak >= keepStrong && st.area.get(g) >= keepWidth * per) continue;
+          }
           if (best !== null) { join(g, best); merged++; }
         }
         if (!merged) return;
       }
     };
-    melt(total * 0.003, false); // slivers the overlay leaves along creases
+    const keepStrong = opts.keepStrong !== undefined ? opts.keepStrong : Math.min(0.95, Math.max(0.6, strong + 0.15));
+    const keepArea = total * (opts.keepFrac !== undefined ? opts.keepFrac : minFrac / 4); // the smallest part kept for its creases: 1% of the surface at Big, 0.5% at Balanced, 0.2% at Fine
+    let keepWidth; { const L = []; for (let t = 0; t < nt; t += Math.max(1, Math.floor(nt / 3000))) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1]; L.push(Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2])); } L.sort((x, y) => x - y); keepWidth = Math.max(L[L.length >> 1] || 0, 0.004 * diag(bounds(P))); } // a kept part is chunky, not a band along a crease
+    melt(total * 0.003, true); // slivers the overlay leaves along creases (into the neighbour they are least separated from: by the longest border, a book's face went into the hand lying on it)
     // merge across weak borders, the weakest first, until every border is a part boundary
     for (let round = 0; round < 400; round++) {
       const st = stats();
