@@ -1641,6 +1641,22 @@
     if (res.warnings && res.warnings.length) toast(`Cut made anyway, into ${pieces} pieces. ${res.warnings.map(w => w.message).join(' ')}`, 'warn');
     else toast(`Cut into ${pieces} pieces${res.pins.length ? ` and ${res.pins.length} dowel pins` : ''}${numbered.length && !unmarked ? `, ${numbered.length === 1 ? `joint numbered ${numbered[0]}` : `joints numbered ${numbered.join(', ')}`}` : ''}.${unmarked ? ' The joint numbers didn’t fit here, so this cut has none.' : ''} Click a part to keep cutting.`);
   }
+  // The pieces of a flat cut of `p` (from cutMesh) become parts in its place, named A/B by side, each with its pull
+  // and the joint: what doCut does after the cut, for Split into parts' flat cuts too. Commits once; returns the parts made.
+  function adoptFlatCut(p, res, nrm, joint) {
+    const groups = { below: [], above: [], both: [] };
+    for (const c of res.parts) groups[c.side].push(c);
+    const made = [], joints = jointOf(p, joint);
+    const label = (side, i, count) => side === 'both' ? p.name : `${p.name} ${side === 'below' ? 'A' : 'B'}${count > 1 ? i + 1 : ''}`;
+    for (const side of ['both', 'below', 'above']) {
+      groups[side].sort((a, b) => b.volume - a.volume);
+      groups[side].forEach((c, i) => made.push(makePart({ name: label(side, i, groups[side].length), color: nextColor(), positions: c.positions, indices: c.indices, pull: side === 'below' ? [-nrm[0], -nrm[1], -nrm[2]] : side === 'above' ? nrm.slice() : null, joints })));
+    }
+    (res.pins || []).forEach((pin, i) => made.push(makePart({ name: `${p.name} pin ${i + 1}`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' })));
+    const idx = state.parts.indexOf(p);
+    commit(state.parts.slice(0, idx).concat(made, state.parts.slice(idx + 1)), 'the cut');
+    return made;
+  }
   function removeBadKeys() {
     state.cut.keys = state.cut.keys.filter((k, i) => state.cut.evals[i] && state.cut.evals[i].ok);
     state.cut.auto = false; state.cut.active = -1;
@@ -4395,14 +4411,13 @@
       renderAction();
       return;
     }
-    const cm3 = (v) => (v / 1000 >= 10 ? Math.round(v / 1000) : (v / 1000).toFixed(1));
+    const vols = pick.result.parts.map(q => fmtVol(q.volume)); // (1.76) a miniature's hand is mm³, not "0.0 cm³"
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
     const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
-    const vols = pick.result.parts.map(q => cm3(q.volume));
     const sinks = (pick.result.sinks || []).filter(s => s > 0.05), sunkLine = sinks.length ? ` The face is sunk ${fmt(Math.max(...sinks))} mm into the other piece${sinks.length < nl ? ' on ' + (sinks.length === 1 ? 'one line' : `${sinks.length} lines`) : ''}, so this piece keeps its thickness to the edge.` : state.cfg.sink > 0 ? ' There’s no room to sink the face here.' : '';
-    const what = region ? `${painted ? 'The painted area’s' : nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${painted || nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} cm³ and leaves ${vols.length === 2 ? `${vols[1]} cm³` : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')} cm³`}.`
-      : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]} cm³.`
-      : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')} cm³.`;
+    const what = region ? `${painted ? 'The painted area’s' : nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${painted || nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} and leaves ${vols.length === 2 ? vols[1] : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')}`}.`
+      : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]}.`
+      : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')}.`;
     const drawMore = state.draw.on && !state.draw.points.length ? `<p class="status muted">Drag across the part or click points again to add a line: it will be cut together with the ${nl === 1 ? 'line' : `${nl} lines`} already picked.</p>` : '';
     el.innerHTML = `${drawMore}${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}${sunkLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}${sunkLine}</span></p>`}
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
@@ -4520,7 +4535,7 @@
     // (splitCandidates: dips and crumbs dropped, the cleanest cut first, each with a neighbour to try alongside
     // when it alone would hook or is held at both ends), and the first that passes every check is cut. Six tries a
     // round at most: on the owner's reference figures most of the time had gone on regions that could never come off.
-    let splits = 0, refused = 0, rounds = 0;
+    let splits = 0, refused = 0, rounds = 0, flat = 0;
     const whole = Math.abs(p.volume || K.volume(p.positions, p.indices)); // pieces under 3% of this aren't parts
     for (; rounds < 12; rounds++) {
       busy(splits ? `Finding the parts of what is left (${splits} split off)` : 'Finding the parts'); await nextFrame();
@@ -4554,6 +4569,23 @@
         }
         if (cut) break;
       }
+      if (!cut && p) { // (1.76) nothing comes off along an outline (the parts hook, or are held at both ends): a flat cut at a
+        // narrow point instead, as the Suggest tool finds them (a neck, a waist, a limb's root), with keys and every check
+        busy(`Looking for a flat cut${splits ? ` (${splits} split off)` : ''}`); await nextFrame();
+        let flats = [];
+        try { flats = await coreTask('flatSplitCandidates', [p.positions, p.indices, { limit: 4 }]); } catch (err) { flats = []; }
+        for (const it of flats) {
+          let fr = null;
+          try { fr = await coreTask('flatSplit', [p.positions, p.indices, it, { cfg: coreCfg(), minThickness: minWall(), perArea: state.cfg.perArea }]); } catch (err) { fr = null; }
+          if (!fr || !fr.result || fr.result.parts.length < 2) { refused++; continue; }
+          const vols = fr.result.parts.map(q => Math.abs(q.volume));
+          if (Math.min(...vols) < 0.03 * whole) { refused++; continue; } // a crumb, not a part
+          const made = adoptFlatCut(p, fr.result, fr.F.n, { type: state.cfg.type, keys: fr.keys || 0, number: null });
+          splits++; cut = true; flat++;
+          p = made.filter(q => q.kind !== 'pin').sort((x, y) => y.volume - x.volume)[0] || null;
+          break;
+        }
+      }
       if (!cut || !p) break;
       state.selectedId = p.id; syncScene();
     }
@@ -4564,8 +4596,8 @@
     if (splits || loose) { state.selectedId = null; state.explode = Math.max(wasExplode, 0.35); applyExplode(); const ex = $('#explode'); if (ex) ex.value = state.explode; }
     syncScene(); renderParts(); renderInspector(); updateChrome();
     busy(null);
-    toast(splits || loose ? `${loose ? `${loose} loose pieces separated${splits ? ', then the biggest split' : ''}. ` : ''}${splits ? `Split into ${splits + 1} parts, each with its keys. ` : ''}Ctrl+Z undoes it.${refused ? ` ${refused} ${refused === 1 ? 'part' : 'parts'} couldn’t be split: too thin, hooked or not sealed.` : ''}` : refused ? 'No part could be split off: each is too thin, hooked or not sealed. Try the Regions tool to pick them by hand.' : 'Nothing to split: the model reads as one part. Try Regions with Sections, or a flat cut.', splits ? '' : 'warn');
-    return { splits, refused, loose, parts: state.parts.length };
+    toast(splits || loose ? `${loose ? `${loose} loose pieces separated${splits ? ', then the biggest split' : ''}. ` : ''}${splits ? `Split into ${splits + 1} parts, each with its keys${flat ? ` (${flat === 1 ? 'one' : flat} by a flat cut at a narrow point)` : ''}. ` : ''}Ctrl+Z undoes it.${refused ? ` ${refused} ${refused === 1 ? 'part' : 'parts'} couldn’t be split: too thin, hooked or not sealed.` : ''}` : refused ? 'No part could be split off: each is too thin, hooked or not sealed. Try the Regions tool to pick them by hand.' : 'Nothing to split: the model reads as one part. Try Regions with Sections, or a flat cut.', splits ? '' : 'warn');
+    return { splits, refused, loose, flat, parts: state.parts.length };
   }
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);

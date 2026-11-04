@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.75, build 9f73a7. After an update, refresh the page and check this changes.">v1.75 · 9f73a7</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.76, build 8486d3. After an update, refresh the page and check this changes.">v1.76 · 8486d3</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -2863,8 +2863,15 @@ const KMCore = (() => {
         if (thinT[t] && flatNb[t]) h[t] = 1;
       }
     }
-    for (let it = 0; it < 3; it++) { const g = new Float64Array(nt); for (let t = 0; t < nt; t++) { let sm = h[t], n = 1; for (let j = deg[t]; j < deg[t + 1]; j++) { sm += h[nb[j]]; n++; } g[t] = sm / n; } h = g; }
-    const out = new Uint8Array(nt); for (let t = 0; t < nt; t++) out[t] = h[t] > 0.6 ? 1 : 0;
+    // (1.76) no averaging across a seam: a flat panel (two or more coplanar triangles) takes one label for all of it,
+    // from its own triangles; only lone triangles are averaged, and only with lone neighbours. The three rings of
+    // averaging this replaced spread the book's label a few triangles out over the robe, so the border sat off the seam
+    // and every pick near the book took a band of robe with it (the owner: "random connected triangles are still being
+    // selected even when the topology clearly suggests separate parts")
+    const pSum = new Float64Array(nt), pA = new Float64Array(nt);
+    for (let t = 0; t < nt; t++) if (fn[ff(t)] > 1) { const r = ff(t); pSum[r] += h[t] * A[t]; pA[r] += A[t]; }
+    for (let it = 0; it < 3; it++) { const g = Float64Array.from(h); for (let t = 0; t < nt; t++) { if (fn[ff(t)] > 1) continue; let sm = h[t], n = 1; for (let j = deg[t]; j < deg[t + 1]; j++) { const q = nb[j]; if (fn[ff(q)] > 1) continue; sm += h[q]; n++; } g[t] = sm / n; } h = g; }
+    const out = new Uint8Array(nt); for (let t = 0; t < nt; t++) { const r = ff(t); out[t] = (fn[r] > 1 ? pSum[r] / (pA[r] || 1) : h[t]) > 0.6 ? 1 : 0; }
     { // a hard patch must have sharp edges in it (its length of edges turning over 30°, at least the side of a square
       // of its area): flat-paired facets of a low-poly robe, or a knot's even quads, have none and stay organic
       const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
@@ -3486,6 +3493,30 @@ const KMCore = (() => {
   // socket, the inside of a cloak) and is dropped; so is a piece under `minShare` of the model (a hair tuft) and the
   // body itself (`keep`, the biggest region). Each carries its neighbours, by shared border length, so a region
   // refused as hooked or held at both ends can be tried again together with one of them (a forearm with its hand).
+  // Flat cuts for Split into parts (1.76): the narrow points of what is left, as the Suggest tool finds them (a neck, a
+  // waist, a limb's root), best first. Regions that hook (an arm whose hand rests on the hip, a sword against the
+  // body) can't come off along their outline, and most of the owner's figures had ended a split with one of them.
+  function flatSplitCandidates(P, I, opts = {}) {
+    const scale = diag(bounds(P)), dirs = sweepDirections(P);
+    let found = [];
+    for (const d of dirs) found = found.concat(neckSweep(P, I, d, scale));
+    return refineNecks(P, I, found, scale).sort((a, b) => b.score - a.score).slice(0, opts.limit || 6);
+  }
+  // One such cut: the plane through the spot, only the areas that free the piece (`it.areas`) cut, keys or a plug
+  // sized to fit, the thickness and hook checks as the Plane tool's. { result, keys, plugs, F } or { error, code }.
+  function flatSplit(P, I, it, opts = {}) {
+    const scale = diag(bounds(P)), F = frameFromNormal(norm3(it.normal), it.point), cfg = opts.cfg;
+    const an = analyzePlane(P, I, F, cfg, scale);
+    if (an.base.error || !an.base.regions.length) return { error: 'The cut plane doesn’t pass through this part.' };
+    const keep = new Set();
+    for (const a of it.areas || []) { const d = [a[0] - F.o[0], a[1] - F.o[1], a[2] - F.o[2]], x = d[0] * F.u[0] + d[1] * F.u[1] + d[2] * F.u[2], y = d[0] * F.v[0] + d[1] * F.v[1] + d[2] * F.v[2]; const ri = regionAt(an.base, x, y); if (ri >= 0) keep.add(ri); }
+    const skip = new Set(); if (keep.size) an.base.regions.forEach((r, i) => { if (!keep.has(i)) skip.add(i); });
+    const keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : autoPlaceKeys(an, cfg, opts.perArea || 2, skip);
+    const plugs = cfg.type === 'plug' ? planPlugs(an, cfg, skip) : [];
+    let result;
+    try { result = cutMesh(P, I, F, { scale, cfg, keys, plugs, skip, minThickness: opts.minThickness || 0 }); } catch (err) { return { error: err.message, code: err.code || null }; }
+    return { result, F, keys: result.keysUsed || keys.length, plugs: plugs.filter(q => q.ok).length };
+  }
   function splitCandidates(P, I, seg, opts = {}) {
     // `whole`: the volume of the model as it was before any of it came off, so later rounds don't chop the
     // remainder into crumbs (on a 40 mm figure the twelfth piece was 0.02 cm³)
@@ -4145,7 +4176,8 @@ const KMCore = (() => {
       const eased = drawnLoop(P, I, smoothHandles(P, h, req.smooth || 2));
       if (eased && eased.verts.length >= 3) loop = eased;
     }
-    return { ...loop, stroke: true, normal: best.n, tilt: (angleOf(best.n) * 180) / Math.PI, ring: best.len };
+    // (1.76) the plane the ring lies in goes with the line, so slicing follows the plane exactly (ModelSplitter's line cut)
+    return { ...loop, stroke: true, normal: best.n, tilt: (angleOf(best.n) * 180) / Math.PI, ring: best.len, plane: { o: [...best.F.o], n: [...best.n] } };
   }
   /* ---------- engraved joint numbers ----------
      The same number on both mating faces of a cut (modelsplitter's joint numbers), so a kit of many pieces goes
@@ -4994,11 +5026,16 @@ const KMCore = (() => {
         }
       }
       const mid = [p1, p2].map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
-      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(c.cfg, c.keys, c.plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
-        const wedged = L > 1 && caps.filter(d => { const [a, b] = pair(d); return a === p1 && b === p2; }).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
+      // the other lines between these same pieces (an arm held at the shoulder and at the hand on the hip): a piece held
+      // at both ends may still come out along one of its joints, or between them, so those directions are tried too
+      const same = L > 1 ? caps.filter(d => d !== c && (([a, b]) => a === p1 && b === p2)(pair(d))) : [];
+      const also = (Math.hypot(...apart) > 1e-9 ? [apart] : []).concat(same.flatMap(d => [d.F.n, d.F.n.map(x => -x)]));
+      if (same.length) { const sum = [0, 0, 0]; for (const d of [c, ...same]) for (let k = 0; k < 3; k++) sum[k] += d.into2 * d.F.n[k]; if (Math.hypot(...sum) > 1e-9) also.push(sum); }
+      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(c.cfg, c.keys, c.plugs), also }).length) {
+        const wedged = same.length > 0; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
         // with keys the pieces must slide straight; would they come apart at a slant without them? Asked of these
         // same pieces, so a pick needn't build them all again without keys just to find out (half a neck pick's time)
-        const keyless = c.joined && opts.force && !wedged && !lockedPairs([p1, p2], F.n, tol, { anyDirection: true, distance: 3, also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length;
+        const keyless = c.joined && opts.force && !lockedPairs([p1, p2], F.n, tol, { anyDirection: true, distance: 3, also }).length;
         refuse(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
           : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked', wedged, keyless);
@@ -5247,7 +5284,7 @@ const KMCore = (() => {
   function sliceByField(P, I, f) {
     const nt = I.length / 3, nv = P.length / 3;
     const Pn = []; for (let i = 0; i < P.length; i++) Pn.push(P[i]);
-    const mid = new Map(), In = [], gOf = [];
+    const mid = new Map(), In = [], gOf = [], par = [];
     const cross = (a, b) => {
       const key = a < b ? a * nv + b : b * nv + a; let m = mid.get(key);
       if (m !== undefined) return m;
@@ -5260,16 +5297,71 @@ const KMCore = (() => {
     for (let t = 0; t < nt; t++) {
       let a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
       const sa = f[a] > 0, sb = f[b] > 0, sc = f[c] > 0;
-      if (sa === sb && sb === sc) { In.push(a, b, c); gOf.push(sa ? 1 : 0); continue; }
+      if (sa === sb && sb === sc) { In.push(a, b, c); gOf.push(sa ? 1 : 0); par.push(t); continue; }
       // turn the triangle so a is the lone vertex
       if (sb !== sa && sb !== sc) [a, b, c] = [b, c, a]; else if (sc !== sa && sc !== sb) [a, b, c] = [c, a, b];
       const x = cross(a, b), y = cross(a, c), ga = f[a] > 0 ? 1 : 0;
       In.push(a, x, y); gOf.push(ga);
       if (d2(x, c) <= d2(b, y)) { In.push(x, b, c, x, c, y); } else { In.push(x, b, y, y, b, c); }
-      gOf.push(1 - ga, 1 - ga);
+      gOf.push(1 - ga, 1 - ga); par.push(t, t, t);
     }
     const P2 = new (P.constructor === Float64Array ? Float64Array : Float32Array)(Pn), I2 = new Uint32Array(In), G = Int32Array.from(gOf);
-    return { P2, I2, G, added: mid.size };
+    return { P2, I2, G, added: mid.size, parent: Int32Array.from(par) };
+  }
+  // A stroke's lines sliced along their planes (ModelSplitter's line cut, the owner: "slice drawn lines is not slicing
+  // the topology as expected"): a stroke's line is the plane's ring walked along mesh edges, so the slice follows the
+  // plane itself and the cut is the plane's exact ring. Every vertex takes its distance from the plane (no band: clamped,
+  // a long edge's crossing point moved to its middle), the surface is sliced through every ring of the plane, and then
+  // the pieces are joined back across every ring but the stroke's own (the chain of crossed triangles from the line's
+  // vertices across shared edges: one ring, however close another runs, on a finger beside a finger or a fold of cloth).
+  // Several strokes cut together: each plane's own ring is the only one kept of it.
+  function slicePlaneLoops(P, I, loops, sel, cnt, cin, med) {
+    const nt = I.length / 3, nv = P.length / 3, vt = vertexTriangles(P, I), pr = trianglePairs(I);
+    const tnb = new Int32Array(nt + 1); for (let i = 0; i < pr.length; i += 4) { tnb[pr[i] + 1]++; tnb[pr[i + 1] + 1]++; }
+    for (let t = 0; t < nt; t++) tnb[t + 1] += tnb[t];
+    const fill = tnb.slice(0, nt), tto = new Int32Array(tnb[nt]); for (let i = 0; i < pr.length; i += 4) { tto[fill[pr[i]]++] = pr[i + 1]; tto[fill[pr[i + 1]]++] = pr[i]; }
+    const f = new Float64Array(nv), chain = new Uint8Array(nt), skipV = new Uint8Array(nv); // (skipV: another plane's vertices are left out of this one's sign vote)
+    for (let li = 0; li < loops.length; li++) {
+      const loop = loops[li], vs = loop.verts; if (vs.length < 3) return null;
+      const { o, n } = loop.plane, dz = (v) => (P[3 * v] - o[0]) * n[0] + (P[3 * v + 1] - o[1]) * n[1] + (P[3 * v + 2] - o[2]) * n[2];
+      const crossed = new Uint8Array(nt), seenT = new Uint8Array(nt), queue = [];
+      for (let t = 0; t < nt; t++) { const a = dz(I[3 * t]) > 0, b = dz(I[3 * t + 1]) > 0, c = dz(I[3 * t + 2]) > 0; if (a !== b || b !== c) crossed[t] = 1; }
+      for (const v of vs) for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const t = vt.tri[j]; if (crossed[t] && !seenT[t]) { seenT[t] = 1; queue.push(t); } }
+      for (let h = 0; h < queue.length; h++) { const t = queue[h]; for (let j = tnb[t]; j < tnb[t + 1]; j++) { const u = tto[j]; if (crossed[u] && !seenT[u]) { seenT[u] = 1; queue.push(u); } } }
+      if (!queue.length) return null;
+      // which way round: the side the line bounds, by the chain's own vertices
+      let agree = 0, disagree = 0;
+      for (const t of queue) for (let k = 0; k < 3; k++) { const v = I[3 * t + k], d = dz(v); if (Math.abs(d) > 0.5 * med && cnt[v] && (cin[v] === 0 || cin[v] === cnt[v])) { if ((d > 0) === (cin[v] > 0)) agree++; else disagree++; } }
+      const flip = disagree > agree ? -1 : 1;
+      if (li === 0) { for (let v = 0; v < nv; v++) { const d = dz(v); f[v] = d === 0 ? -flip * 1e-9 * med : flip * d; } } // (a vertex on the plane goes with the side below it, as `crossed` counts it)
+      else { // a later plane cuts the first's field where its own ring runs: the sign of the field is kept, the size from this plane
+        for (const t of queue) for (let k = 0; k < 3; k++) { const v = I[3 * t + k]; if (!skipV[v]) { const d = dz(v); f[v] = d === 0 ? -flip * 1e-9 * med : flip * d; } }
+        for (const t of queue) for (let k = 0; k < 3; k++) skipV[I[3 * t + k]] = 1;
+      }
+      for (const t of queue) chain[t] = 1;
+    }
+    const { P2, I2, G, added, parent } = sliceByField(P, I, f);
+    const nt2 = G.length;
+    // the pieces, joined across every crossing but the chains' own (an edge inside a chain triangle with both ends new)
+    const pr2 = trianglePairs(I2), par = new Int32Array(nt2); for (let t = 0; t < nt2; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < pr2.length; i += 4) {
+      const a = pr2[i], b = pr2[i + 1], va = pr2[i + 2], vb = pr2[i + 3];
+      if (parent[a] === parent[b] && chain[parent[a]] && va >= nv && vb >= nv) continue; // the stroke's own crossing
+      const x = find(a), y = find(b); if (x !== y) par[x] = y;
+    }
+    // side 1: of the pieces the rings separate (loose shells stay side 0; splitRegions takes those inside the pick with
+    // it), those holding more of the side the lines bound than not; failing that, every one but the biggest (the line
+    // walked may have cut corners, so the side it bounds can be a poor guide)
+    const touched = new Set(); for (let i = 0; i < pr2.length; i += 4) { const a = pr2[i], b = pr2[i + 1]; if (parent[a] === parent[b] && chain[parent[a]] && pr2[i + 2] >= nv && pr2[i + 3] >= nv) { touched.add(find(a)); touched.add(find(b)); } }
+    const vote = new Map(); for (let t = 0; t < nt2; t++) { const r = find(t); if (!touched.has(r)) continue; if (!vote.has(r)) vote.set(r, [0, 0]); vote.get(r)[sel[parent[t]] ? 1 : 0]++; }
+    let side = new Set(); for (const [r, [out, inn]] of vote) if (inn > out) side.add(r);
+    if (!side.size || side.size === vote.size) { let big = -1; for (const [r, [out, inn]] of vote) if (big < 0 || out + inn > vote.get(big)[0] + vote.get(big)[1]) big = r; side = new Set([...vote.keys()].filter(r => r !== big)); }
+    for (let t = 0; t < nt2; t++) G[t] = side.has(find(t)) ? 1 : 0;
+    let g1 = 0; for (const x of G) g1 += x; if (!g1 || g1 === nt2) return null;
+    const s2 = bordersFromGroups(P2, I2, G), l2 = groupLoops(P2, I2, s2, [1]);
+    if (!l2.length || l2.some(l => !l.closed) || l2.length !== loops.length) return null;
+    return { P: P2, I: I2, seg: s2, groups: [1], loops: l2.map(l => ({ ...l, drawn: true })), added };
   }
   // A drawn line sliced through the triangles (the owner: "any drawn cuts must actually slice new vertexes into the
   // model"): a line drawn by hand, or a stroke, runs along the mesh's own edges, so on a coarse mesh it steps from
@@ -5293,6 +5385,8 @@ const KMCore = (() => {
     L.sort((x, y) => x - y); const med = L[L.length >> 1] || 1;
     const adj = vertexAdjacency(P, I), band = 4 * med, f = new Float64Array(nv);
     for (let v = 0; v < nv; v++) f[v] = cin[v] * 2 >= cnt[v] ? band : -band;
+    const nearAll = new Uint8Array(nv);
+    if (loops.every(l => l.plane)) return slicePlaneLoops(P, I, loops, sel, cnt, cin, med);
     for (const loop of loops) {
       const vs = loop.verts, m = vs.length; if (m < 3) continue;
       let pts = vs.map(v => [P[3 * v], P[3 * v + 1], P[3 * v + 2]]);
@@ -5318,15 +5412,37 @@ const KMCore = (() => {
         if (d > 0.5 * med && cnt[v] && (cin[v] === 0 || cin[v] === cnt[v])) { if ((side > 0) === (cin[v] > 0)) agree++; else disagree++; }
       }
       const flip = disagree > agree ? -1 : 1;
-      for (const [v, [side, d]] of sideOf) f[v] = flip * side * Math.min(band, Math.max(d, 1e-7 * med));
+      for (const [v, [side, d]] of sideOf) { f[v] = flip * side * Math.min(band, Math.max(d, 1e-7 * med)); nearAll[v] = 1; }
+    }
+    { // islands: a vertex piece of one sign under 2% of the smaller side, cut off by a noisy normal or a fold, takes the
+      // sign round it (as in sliceRegionPick), so the slice gives the lines drawn and no specks beside them
+      const par = new Int32Array(nv); for (let v = 0; v < nv; v++) par[v] = v;
+      const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+      for (let v = 0; v < nv; v++) for (let j = adj.start[v]; j < adj.start[v + 1]; j++) { const w = adj.to[j]; if ((f[v] > 0) === (f[w] > 0)) { const x = find(v), y = find(w); if (x !== y) par[x] = y; } }
+      const size = new Map(); let pos = 0;
+      for (let v = 0; v < nv; v++) { const r = find(v); size.set(r, (size.get(r) || 0) + 1); if (f[v] > 0) pos++; }
+      const small = Math.max(6, 0.02 * Math.min(pos, nv - pos)), big = [new Map(), new Map()]; // (never the biggest piece of a sign: a fingertip's whole side is a few vertices)
+      for (const [r, n] of size) { const k = f[r] > 0 ? 1 : 0, c = big[k]; if (!c.size || n > [...c.values()][0]) { c.clear(); c.set(r, n); } }
+      for (let v = 0; v < nv; v++) { const r = find(v), k = f[v] > 0 ? 1 : 0; if (cnt[v] && !big[k].has(r) && size.get(r) < small && ((f[v] > 0) !== (cin[v] * 2 >= cnt[v]) || nearAll[v])) f[v] = -f[v]; }
     }
     const { P2, I2, G, added } = sliceByField(P, I, f);
     let g1 = 0; for (const x of G) g1 += x; if (!g1 || g1 === G.length) return null;
-    const s2 = bordersFromGroups(P2, I2, G), l2 = groupLoops(P2, I2, s2, [1]);
+    let s2 = bordersFromGroups(P2, I2, G), l2 = groupLoops(P2, I2, s2, [1]);
+    if (l2.length > loops.length) { // a patch the slice cut off beside the line (a fold the plane grazes) goes to the side round it
+      const nt2 = G.length, pr = trianglePairs(I2), par = new Int32Array(nt2); for (let t = 0; t < nt2; t++) par[t] = t;
+      const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+      for (let i = 0; i < pr.length; i += 4) { const a = pr[i], b = pr[i + 1]; if (G[a] === G[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
+      const size = new Map(), touch = new Set(); for (let t = 0; t < nt2; t++) { const r = find(t); size.set(r, (size.get(r) || 0) + 1); }
+      for (let i = 0; i < pr.length; i += 4) if (G[pr[i]] !== G[pr[i + 1]]) { touch.add(find(pr[i])); touch.add(find(pr[i + 1])); }
+      const keep = [0, 1].map(k => { let br = -1, bn = 0; for (const r of touch) if (G[r] === k && size.get(r) > bn) { bn = size.get(r); br = r; } return br; });
+      for (let t = 0; t < nt2; t++) { const r = find(t); if (touch.has(r) && r !== keep[G[t]] && size.get(r) < 0.25 * size.get(keep[G[t]])) G[t] = 1 - G[t]; }
+      s2 = bordersFromGroups(P2, I2, G); l2 = groupLoops(P2, I2, s2, [1]);
+    }
     if (!l2.length || l2.some(l => !l.closed) || l2.length !== loops.length) return null;
     const triArea = (Q, J, t) => { const a = 3 * J[3 * t], b = 3 * J[3 * t + 1], c = 3 * J[3 * t + 2]; const n = cross3([Q[b] - Q[a], Q[b + 1] - Q[a + 1], Q[b + 2] - Q[a + 2]], [Q[c] - Q[a], Q[c + 1] - Q[a + 1], Q[c + 2] - Q[a + 2]]); return Math.hypot(n[0], n[1], n[2]) / 2; };
     let a0 = 0, a1 = 0; for (let t = 0; t < nt; t++) if (sel[t]) a0 += triArea(P, I, t); for (let t = 0; t < G.length; t++) if (G[t]) a1 += triArea(P2, I2, t);
-    if (a1 < 0.75 * a0 || a1 > 1.33 * a0) return null;
+    const slack = loops.reduce((q, l) => q + (l.length || 0), 0) * 3 * med; // (a band three edges wide along the line: a small piece's share moves a lot)
+    if (!loops.every(l => l.plane) && Math.abs(a1 - a0) > Math.max(0.33 * a0, slack)) return null; // (a stroke's ring is the plane's own; the line it walked may have cut corners)
     return { P: P2, I: I2, seg: s2, groups: [1], loops: l2.map(l => ({ ...l, drawn: true })), added };
   }
   // A region pick sliced along a smooth curve through the triangles (the owner: "the application should be able to
@@ -5561,7 +5677,7 @@ const KMCore = (() => {
     if (first) {
       const w = guards(first);
       if (!w.length) { out.result = first; return out; }
-      if ((out.keys || out.plugs) && !w.some(x => x.code === 'thin' || x.wedged) && w.some(x => x.code === 'locked' && x.keyless)) { // locked with joints, and the same pieces would come apart at a slant without them: built again without the joints
+      if ((out.keys || out.plugs) && !w.some(x => x.code === 'thin') && !w.some(x => x.code === 'locked' && !x.keyless)) { // (1.76: a piece held at both ends too, when it slides out along one of its joints without them) // locked with joints, and the same pieces would come apart at a slant without them: built again without the joints
         let second = null; try { second = run(false, true); } catch (err) { second = null; }
         if (second) { const w2 = guards(second); dropJoints('locked'); out.result = second; if (w2.length) out.forced = w2[0].message; return out; }
       }
@@ -5790,7 +5906,9 @@ const KMCore = (() => {
     const box = (g) => [g.gx0, g.gy0, g.gx0 + g.nx * g.cell, g.gy0 + g.ny * g.cell];
     const ba = box(ga), bb = box(gb), x0 = Math.max(ba[0], bb[0]), y0 = Math.max(ba[1], bb[1]), x1 = Math.min(ba[2], bb[2]), y1 = Math.min(ba[3], bb[3]);
     if (x1 <= x0 || y1 <= y0) return true;
-    const s0 = Math.max(step, Math.sqrt(((x1 - x0) * (y1 - y0)) / 30000)), grip = Math.max(tol, 0.05);
+    // (1.76) a clash counts from 0.05 mm, or a quarter of a percent of the pair's size: printed plastic gives that much, and on
+    // a figure scaled to 150 mm a hook of a tenth of a millimetre on an arm against the body had refused every split
+    const s0 = Math.max(step, Math.sqrt(((x1 - x0) * (y1 - y0)) / 30000)), grip = Math.max(tol, 0.05, 0.0025 * Math.hypot(x1 - x0, y1 - y0));
     const scan = (s) => {
       const nx = Math.ceil((x1 - x0) / s) + 1, ny = Math.ceil((y1 - y0) / s) + 1;
       const fwd = new Uint8Array(nx * ny), back = new Uint8Array(nx * ny), rest = new Uint8Array(nx * ny);
@@ -7507,7 +7625,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups,
+    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups,
   };
 })();
 
@@ -9156,6 +9274,22 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const pieces = made.filter(m => m.kind !== 'pin').length;
     if (res.warnings && res.warnings.length) toast(`Cut made anyway, into ${pieces} pieces. ${res.warnings.map(w => w.message).join(' ')}`, 'warn');
     else toast(`Cut into ${pieces} pieces${res.pins.length ? ` and ${res.pins.length} dowel pins` : ''}${numbered.length && !unmarked ? `, ${numbered.length === 1 ? `joint numbered ${numbered[0]}` : `joints numbered ${numbered.join(', ')}`}` : ''}.${unmarked ? ' The joint numbers didn’t fit here, so this cut has none.' : ''} Click a part to keep cutting.`);
+  }
+  // The pieces of a flat cut of `p` (from cutMesh) become parts in its place, named A/B by side, each with its pull
+  // and the joint: what doCut does after the cut, for Split into parts' flat cuts too. Commits once; returns the parts made.
+  function adoptFlatCut(p, res, nrm, joint) {
+    const groups = { below: [], above: [], both: [] };
+    for (const c of res.parts) groups[c.side].push(c);
+    const made = [], joints = jointOf(p, joint);
+    const label = (side, i, count) => side === 'both' ? p.name : `${p.name} ${side === 'below' ? 'A' : 'B'}${count > 1 ? i + 1 : ''}`;
+    for (const side of ['both', 'below', 'above']) {
+      groups[side].sort((a, b) => b.volume - a.volume);
+      groups[side].forEach((c, i) => made.push(makePart({ name: label(side, i, groups[side].length), color: nextColor(), positions: c.positions, indices: c.indices, pull: side === 'below' ? [-nrm[0], -nrm[1], -nrm[2]] : side === 'above' ? nrm.slice() : null, joints })));
+    }
+    (res.pins || []).forEach((pin, i) => made.push(makePart({ name: `${p.name} pin ${i + 1}`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' })));
+    const idx = state.parts.indexOf(p);
+    commit(state.parts.slice(0, idx).concat(made, state.parts.slice(idx + 1)), 'the cut');
+    return made;
   }
   function removeBadKeys() {
     state.cut.keys = state.cut.keys.filter((k, i) => state.cut.evals[i] && state.cut.evals[i].ok);
@@ -11911,14 +12045,13 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       renderAction();
       return;
     }
-    const cm3 = (v) => (v / 1000 >= 10 ? Math.round(v / 1000) : (v / 1000).toFixed(1));
+    const vols = pick.result.parts.map(q => fmtVol(q.volume)); // (1.76) a miniature's hand is mm³, not "0.0 cm³"
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
     const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
-    const vols = pick.result.parts.map(q => cm3(q.volume));
     const sinks = (pick.result.sinks || []).filter(s => s > 0.05), sunkLine = sinks.length ? ` The face is sunk ${fmt(Math.max(...sinks))} mm into the other piece${sinks.length < nl ? ' on ' + (sinks.length === 1 ? 'one line' : `${sinks.length} lines`) : ''}, so this piece keeps its thickness to the edge.` : state.cfg.sink > 0 ? ' There’s no room to sink the face here.' : '';
-    const what = region ? `${painted ? 'The painted area’s' : nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${painted || nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} cm³ and leaves ${vols.length === 2 ? `${vols[1]} cm³` : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')} cm³`}.`
-      : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]} cm³.`
-      : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')} cm³.`;
+    const what = region ? `${painted ? 'The painted area’s' : nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${painted || nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} and leaves ${vols.length === 2 ? vols[1] : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')}`}.`
+      : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]}.`
+      : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')}.`;
     const drawMore = state.draw.on && !state.draw.points.length ? `<p class="status muted">Drag across the part or click points again to add a line: it will be cut together with the ${nl === 1 ? 'line' : `${nl} lines`} already picked.</p>` : '';
     el.innerHTML = `${drawMore}${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}${sunkLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}${sunkLine}</span></p>`}
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
@@ -12036,7 +12169,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     // (splitCandidates: dips and crumbs dropped, the cleanest cut first, each with a neighbour to try alongside
     // when it alone would hook or is held at both ends), and the first that passes every check is cut. Six tries a
     // round at most: on the owner's reference figures most of the time had gone on regions that could never come off.
-    let splits = 0, refused = 0, rounds = 0;
+    let splits = 0, refused = 0, rounds = 0, flat = 0;
     const whole = Math.abs(p.volume || K.volume(p.positions, p.indices)); // pieces under 3% of this aren't parts
     for (; rounds < 12; rounds++) {
       busy(splits ? `Finding the parts of what is left (${splits} split off)` : 'Finding the parts'); await nextFrame();
@@ -12070,6 +12203,23 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
         }
         if (cut) break;
       }
+      if (!cut && p) { // (1.76) nothing comes off along an outline (the parts hook, or are held at both ends): a flat cut at a
+        // narrow point instead, as the Suggest tool finds them (a neck, a waist, a limb's root), with keys and every check
+        busy(`Looking for a flat cut${splits ? ` (${splits} split off)` : ''}`); await nextFrame();
+        let flats = [];
+        try { flats = await coreTask('flatSplitCandidates', [p.positions, p.indices, { limit: 4 }]); } catch (err) { flats = []; }
+        for (const it of flats) {
+          let fr = null;
+          try { fr = await coreTask('flatSplit', [p.positions, p.indices, it, { cfg: coreCfg(), minThickness: minWall(), perArea: state.cfg.perArea }]); } catch (err) { fr = null; }
+          if (!fr || !fr.result || fr.result.parts.length < 2) { refused++; continue; }
+          const vols = fr.result.parts.map(q => Math.abs(q.volume));
+          if (Math.min(...vols) < 0.03 * whole) { refused++; continue; } // a crumb, not a part
+          const made = adoptFlatCut(p, fr.result, fr.F.n, { type: state.cfg.type, keys: fr.keys || 0, number: null });
+          splits++; cut = true; flat++;
+          p = made.filter(q => q.kind !== 'pin').sort((x, y) => y.volume - x.volume)[0] || null;
+          break;
+        }
+      }
       if (!cut || !p) break;
       state.selectedId = p.id; syncScene();
     }
@@ -12080,8 +12230,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     if (splits || loose) { state.selectedId = null; state.explode = Math.max(wasExplode, 0.35); applyExplode(); const ex = $('#explode'); if (ex) ex.value = state.explode; }
     syncScene(); renderParts(); renderInspector(); updateChrome();
     busy(null);
-    toast(splits || loose ? `${loose ? `${loose} loose pieces separated${splits ? ', then the biggest split' : ''}. ` : ''}${splits ? `Split into ${splits + 1} parts, each with its keys. ` : ''}Ctrl+Z undoes it.${refused ? ` ${refused} ${refused === 1 ? 'part' : 'parts'} couldn’t be split: too thin, hooked or not sealed.` : ''}` : refused ? 'No part could be split off: each is too thin, hooked or not sealed. Try the Regions tool to pick them by hand.' : 'Nothing to split: the model reads as one part. Try Regions with Sections, or a flat cut.', splits ? '' : 'warn');
-    return { splits, refused, loose, parts: state.parts.length };
+    toast(splits || loose ? `${loose ? `${loose} loose pieces separated${splits ? ', then the biggest split' : ''}. ` : ''}${splits ? `Split into ${splits + 1} parts, each with its keys${flat ? ` (${flat === 1 ? 'one' : flat} by a flat cut at a narrow point)` : ''}. ` : ''}Ctrl+Z undoes it.${refused ? ` ${refused} ${refused === 1 ? 'part' : 'parts'} couldn’t be split: too thin, hooked or not sealed.` : ''}` : refused ? 'No part could be split off: each is too thin, hooked or not sealed. Try the Regions tool to pick them by hand.' : 'Nothing to split: the model reads as one part. Try Regions with Sections, or a flat cut.', splits ? '' : 'warn');
+    return { splits, refused, loose, flat, parts: state.parts.length };
   }
   function cutAlongPick() {
     const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId);

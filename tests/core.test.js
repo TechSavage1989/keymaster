@@ -999,7 +999,19 @@ console.log('form: the parts of a figure by thickness');
       const cen = small ? K.bounds(small.positions).center : null;
       check(`a stroke across ${name} wraps a line round it (tilted no more than 30°) that cuts it off sealed, the volumes adding up`, !!L && L.closed && L.tilt <= 30.5 && parts.length === 2 && parts.every(x => K.edgeReport(x.indices).closed && x.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002 && side(cen), { err, tilt: L && L.tilt, n: parts.length, cen }); }
     const far = K.strokeLoop(P, I, { o: [500, 500, 500], n: [0, 0, 1], scale: D });
-    check('a stroke that misses the part gives no line', far === null); }
+    check('a stroke that misses the part gives no line', far === null);
+    // 1.76: a stroke's line is sliced along its plane: the cut is the plane's exact ring through new points, the surface
+    // stays sealed with its volume, only the stroke's ring is cut (the plane crosses the other arm too), and it cuts sealed
+    { const L = K.strokeLoop(P, I, { o: near([21, 0, 10.5]), n: [1, 0, 0.15], scale: D }), sl = L && K.sliceDrawnLoops(P, I, [L]);
+      const pl = L && L.plane, off = (Q, verts) => Math.max(...verts.map(v => Math.abs((Q[3 * v] - pl.o[0]) * pl.n[0] + (Q[3 * v + 1] - pl.o[1]) * pl.n[1] + (Q[3 * v + 2] - pl.o[2]) * pl.n[2])));
+      const nv0 = P.length / 3, vol0 = K.volume(P, I), med = 2.5; // (the figure's edges are about 2.5 mm)
+      const cs = sl && K.splitRegions(sl.P, sl.I, sl.seg, [1], { force: true }), vs = cs ? cs.parts.reduce((a, q) => a + q.volume, 0) : 0;
+      check('a stroke sliced along its plane: sealed, the same volume, one ring of new points on the plane (within an eighth of an edge), and the pieces cut sealed', !!sl && K.edgeReport(sl.I).closed && Math.abs(K.volume(sl.P, sl.I) - vol0) / vol0 < 1e-6 && sl.loops.length === 1 && sl.loops[0].verts.every(v => v >= nv0) && off(sl.P, sl.loops[0].verts) < 0.13 * med && off(P, L.verts) > 0.3 && !!cs && cs.parts.length === 2 && cs.parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vs - vol0) / vol0 < 0.002, { plane: !!pl, edge: L && off(P, L.verts), sliced: sl && off(sl.P, sl.loops[0].verts), loops: sl && sl.loops.length }); } }
+  // 1.76: Split into parts' flat fallback: the figure's narrow points, and a flat cut at the best one with keys, sealed, the volumes adding up
+  { const cfg = { type: 'peg', shape: 'round', diameter: 3, length: 4, clearance: 0.2, margin: 0.8, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 1.5, printer: 'fdm', pegSide: 'below', perArea: 1, align: true, turn: 0, sizeMax: 3 };
+    const flats = K.flatSplitCandidates(P, I, { limit: 3 }), tried = flats.map(it => K.flatSplit(P, I, it, { cfg, minThickness: 0.8, perArea: 1 })), good = tried.find(r => r.result);
+    const vol0 = K.volume(P, I), vs = good ? good.result.parts.reduce((a, q) => a + q.volume, 0) : 0;
+    check('the flat fallback finds narrow points and cuts one with keys: sealed pieces, the volumes adding up', flats.length >= 1 && !!good && good.result.parts.length >= 2 && good.result.parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vs - vol0) / vol0 < 1e-3, { flats: flats.length, errors: tried.map(r => r.error || 'ok'), keys: good && good.keys }); }
   // the separate pieces of a pick: two arms apart are two, an arm with the torso one
   { const regionOf = (name) => { const m = new Map(); for (let t = 0; t < nt; t++) if (partOf(t) === name) m.set(ps.groupOf[t], (m.get(ps.groupOf[t]) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]; };
     const armR = regionOf('arm R'), armL = regionOf('arm L'), torso = regionOf('torso');
