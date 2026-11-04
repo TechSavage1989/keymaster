@@ -2567,6 +2567,63 @@ const KMCore = (() => {
     out.sort((a, b) => b.score - a.score);
     return out.slice(0, limit);
   }
+  // What Split into parts should try, best first, measured without cutting (from the owner's ten reference figures,
+  // where most of the time went on regions that could never come off): each region, or set of regions, as the piece
+  // its outline would free (its triangles closed by a fan per outline). A negative piece is a dip or a recess (an eye
+  // socket, the inside of a cloak) and is dropped; so is a piece under `minShare` of the model (a hair tuft) and the
+  // body itself (`keep`, the biggest region). Each carries its neighbours, by shared border length, so a region
+  // refused as hooked or held at both ends can be tried again together with one of them (a forearm with its hand).
+  function splitCandidates(P, I, seg, opts = {}) {
+    // `whole`: the volume of the model as it was before any of it came off, so later rounds don't chop the
+    // remainder into crumbs (on a 40 mm figure the twelfth piece was 0.02 cm³)
+    const nt = I.length / 3, total = Math.abs(volume(P, I)) || 1, minShare = opts.minShare === undefined ? 0.015 : opts.minShare, floor = Math.max(minShare * total, (opts.minWhole === undefined ? 0.03 : opts.minWhole) * (opts.whole || 0));
+    const keep = opts.keep !== undefined ? opts.keep : seg.areas.indexOf(Math.max(...seg.areas));
+    const outlines = regionOutlines(P, I, seg), byRegion = new Map();
+    for (const l of outlines) { if (!byRegion.has(l.region)) byRegion.set(l.region, []); byRegion.get(l.region).push(l); }
+    // neighbours by shared border length
+    const nbr = new Map(), b = seg.borders;
+    for (let e = 0; e < b.length / 4; e++) {
+      const g1 = seg.groupOf[b[4 * e]], g2 = seg.groupOf[b[4 * e + 1]], a = 3 * b[4 * e + 2], c = 3 * b[4 * e + 3], len = Math.hypot(P[a] - P[c], P[a + 1] - P[c + 1], P[a + 2] - P[c + 2]);
+      for (const [x, y] of [[g1, g2], [g2, g1]]) { if (!nbr.has(x)) nbr.set(x, new Map()); nbr.get(x).set(y, (nbr.get(x).get(y) || 0) + len); }
+    }
+    const o = bounds(P).center, at = (v) => [P[3 * v], P[3 * v + 1], P[3 * v + 2]];
+    const tet = (a, bb, c) => { const ax = a[0] - o[0], ay = a[1] - o[1], az = a[2] - o[2], bx = bb[0] - o[0], by = bb[1] - o[1], bz = bb[2] - o[2], cx = c[0] - o[0], cy = c[1] - o[1], cz = c[2] - o[2]; return ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx); };
+    const triVol = new Float64Array(seg.count);
+    for (let t = 0; t < nt; t++) triVol[seg.groupOf[t]] += tet(at(I[3 * t]), at(I[3 * t + 1]), at(I[3 * t + 2]));
+    const measure = (groups) => {
+      const loops = groups.length === 1 ? (byRegion.get(groups[0]) || []) : groupLoops(P, I, seg, groups);
+      if (!loops.length || !loops.every(l => l.closed)) return null;
+      let vol = 0; for (const g of groups) vol += triVol[g];
+      let cutArea = 0, length = 0;
+      for (const l of loops) {
+        const m = l.verts.length; let cx = 0, cy = 0, cz = 0;
+        for (const v of l.verts) { cx += P[3 * v]; cy += P[3 * v + 1]; cz += P[3 * v + 2]; }
+        const c = [cx / m, cy / m, cz / m];
+        for (let i = 0; i < m; i++) vol += tet(c, at(l.verts[(i + 1) % m]), at(l.verts[i]));
+        const { xy } = loopFrame(P, l.verts); let A = 0;
+        for (let i = 0, j = m - 1; i < m; j = i++) A += xy[2 * j] * xy[2 * i + 1] - xy[2 * i] * xy[2 * j + 1];
+        cutArea += Math.abs(A) / 2; length += l.length;
+      }
+      const piece = vol / 6;
+      if (piece <= 0) return { groups, dip: true };
+      if (piece < floor || piece > 0.85 * total) return { groups, small: piece < floor };
+      const ratio = cutArea / Math.pow(piece, 2 / 3);
+      return { groups, piece, share: piece / total, cutArea, length, loops: loops.length, ratio, score: Math.sqrt(Math.min(1, piece / total / 0.08)) / (1 + ratio / 1.5) };
+    };
+    const out = [], skipped = { dip: 0, small: 0, open: 0 };
+    for (let g = 0; g < seg.count; g++) {
+      if (g === keep) continue;
+      const m = measure([g]);
+      if (!m) { skipped.open++; continue; }
+      if (m.dip) { skipped.dip++; continue; }
+      if (!m.score) { skipped.small++; continue; }
+      m.neighbours = [...(nbr.get(g) || new Map()).entries()].filter(([h]) => h !== keep).sort((x, y) => y[1] - x[1]).map(([h]) => h);
+      m.alts = m.neighbours.slice(0, 2).map(h => measure([g, h])).filter(x => x && x.score).map(x => x.groups); // the region with a neighbour, to try when it alone is hooked or wedged
+      out.push(m);
+    }
+    out.sort((x, y) => y.score - x.score);
+    return { candidates: out, skipped, measure };
+  }
   // Every line a curved cut can follow: borders between two regions, and whole region outlines, without repeats.
   function cutLines(P, I, seg) {
     const all = borderLoops(P, seg).concat(regionOutlines(P, I, seg)), seen = new Set(), out = [];
@@ -5881,7 +5938,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, plainData, strokeLoop, pickComponents,
+    segmentParts, regionBorderCurves, planPick, plainData, strokeLoop, pickComponents, splitCandidates,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;

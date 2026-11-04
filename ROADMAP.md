@@ -26,6 +26,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
 - Pictures on the assembly sheet (1.48): each part beside its row, and the pieces spread apart along their cuts at the top.
 - The look (1.59): filmic tone mapping, a soft shadow under the model, framing that takes in the exploded pieces.
+- Split into parts that works on real figures (1.65): tested on the owner's ten reference sculpts; planned candidates, no dips or crumbs, neighbour retries, two to four times faster.
 - A stroke that wraps a cut round a part, a colour per separate picked piece, Shift-click with box select (1.64).
 - Picks in the background, box select, clearer picks, Detail, a ModelSplitter look (1.63).
 - Parts that make sense, found faster (1.62): thickness and creases together with only strong borders kept, sampled thickness in a background worker, smooth soft outlines, the plane out of the way while loading, one Regions control, the tool row fixed at the top.
