@@ -2718,7 +2718,7 @@ const KMCore = (() => {
       const m = measure(run.sort((a, b) => a - b));
       if (m && m.score && m.share <= 0.4) { m.neighbours = []; m.alts = []; m.run = true; m.score *= 0.6; out.push(m); } // after the single parts: tried when they are held at both ends // a limb, not most of the model round a small body
     }
-    out.sort((x, y) => y.score - x.score);
+    out.sort((x, y) => (x.run ? 1 : 0) - (y.run ? 1 : 0) || y.score - x.score); // single parts first, the runs after them
     return { candidates: out, skipped, measure };
   }
   // Every line a curved cut can follow: borders between two regions, and whole region outlines, without repeats.
@@ -6369,7 +6369,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick,
+    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, unpinchGroups,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;

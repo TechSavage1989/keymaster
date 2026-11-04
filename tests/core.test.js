@@ -639,6 +639,24 @@ console.log('cut suggestions');
     const cfg = { type: 'none' }, req = { loops, regions: [1, 2], seg: { groupOf: seg.groupOf, count: seg.count, borders: seg.borders }, cfg, minThickness: 0.8, sink: 0, perArea: 1, numberJoints: false, joint: 1, smooth: true };
     const out = K.planPick(P, I, req), parts = out.result ? out.result.parts : [], ps = parts.reduce((a, q) => a + q.volume, 0);
     check('a pick cut along the smoothed line is sealed, the volumes adding up', !out.error && parts.length === 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(ps - whole) / whole < 0.005, { error: out.error, n: parts.length, ps, whole }); }
+  { // 1.70: regions that touch themselves at a point are unpinched; a region's outline re-routed smooth still cuts sealed
+    const ball = K.prepareMesh(uvSphere(10, 48, 32)), P = ball.positions, I = ball.indices, nt = I.length / 3;
+    const cz = (t) => (P[3 * I[3 * t] + 2] + P[3 * I[3 * t + 1] + 2] + P[3 * I[3 * t + 2] + 2]) / 3, cx = (t) => (P[3 * I[3 * t]] + P[3 * I[3 * t + 1]] + P[3 * I[3 * t + 2]]) / 3;
+    // two caps of region 1 that meet at one vertex: the triangles round a vertex on the equator split by quadrant
+    const g = new Int32Array(nt); for (let t = 0; t < nt; t++) g[t] = (cz(t) > 0) === (cx(t) > 0) ? 1 : 0;
+    const before = K.groupLoops(P, I, K.bordersFromGroups(P, I, g), [1]).every(l => l.closed);
+    const changed = K.unpinchGroups(P, I, g), after = K.groupLoops(P, I, K.bordersFromGroups(P, I, g), [1]);
+    check('a region that touches itself at a point is unpinched, so its outline closes', !before && changed > 0 && after.length > 0 && after.every(l => l.closed), { before, changed, loops: after.length });
+    // a ragged cap re-routed: a closed smooth outline, the cut sealed with the volumes adding up
+    const r = new Int32Array(nt); for (let t = 0; t < nt; t++) r[t] = cz(t) > 4 + ((t * 7919) % 7) * 0.3 ? 1 : 0;
+    K.unpinchGroups(P, I, r); // as the part finders leave it
+    const seg = K.bordersFromGroups(P, I, r), sr = K.smoothRegionPick(P, I, seg, [1]);
+    const cut = sr && K.splitRegions(P, I, sr.seg, sr.groups, { force: true }), vol = cut ? cut.parts.reduce((a, q) => a + q.volume, 0) : 0, whole = K.volume(P, I);
+    check('a ragged region outline re-routed smooth gives a closed line that cuts sealed, the volumes adding up', !!sr && sr.loops.every(l => l.closed) && cut.parts.length === 2 && cut.parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - whole) / whole < 0.002, { loops: sr && sr.loops.length, vol, whole });
+    // a plug fits a small area: a 3.4 mm rod's end with a 0.8 mm wall (a miniature's arm)
+    const rod = K.shapeMesh({ kind: 'tube', w: 3.4, h: 20, segments: 48 }), pcfg = { type: 'plug', shape: 'round', diameter: 3, length: 3, margin: 0.8, clearance: 0.1, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 3, pegSide: 'below', perArea: 1, sizeMode: 'auto', sizeMin: 1.5 };
+    const an = K.analyzePlane(rod.positions, rod.indices, K.frameFromNormal([0, 0, 1], [0, 0, 0.013]), pcfg, 20), pl = K.planPlugs(an, pcfg);
+    check('a plug fits a 3.4 mm limb with a 0.8 mm wall', pl.length === 1 && pl[0].ok, pl.map(q => q.reason || q.depth)); }
   { // each piece lists the triangles of the original it holds (the inner ball's with its host), every triangle once, in order
     const m = K.prepareMesh(K.mergeMeshes([uvSphere(10, 24, 16), uvSphere(10, 24, 16, [40, 0, 0]), uvSphere(3, 12, 8, [40, 0, 0])]));
     const sh = K.separateShells(m.positions, m.indices), nt = m.indices.length / 3, seen = new Uint8Array(nt);
