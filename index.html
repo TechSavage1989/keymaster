@@ -543,7 +543,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.61, build 56dc57. After an update, refresh the page and check this changes.">v1.61 · 56dc57</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.62, build 16103f. After an update, refresh the page and check this changes.">v1.62 · 16103f</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -590,7 +590,6 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
       <div class="view-tools" id="viewTools" hidden>
         <select id="viewFrom" class="view-from" aria-label="Look from" title="Look at the model from a side, the top or the bottom"><option value="" selected>View from…</option><option value="front">Front</option><option value="back">Back</option><option value="left">Left</option><option value="right">Right</option><option value="top">Top</option><option value="bottom">Bottom</option></select>
         <button class="icon-btn" id="frameBtn" aria-label="Frame the model" title="Frame the model (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="10" cy="10" r="2.5" fill="currentColor"/></svg></button>
-        <button class="icon-btn" id="regionsBtn" aria-label="Show surface regions" aria-pressed="false" title="Show surface regions: where the surface turns sharply, like polygroups"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h6.5v5H3zM10.5 4.5H17v8h-6.5zM3 10.5h6.5v5H3zM10.5 13.5H17v2h-6.5z" fill="currentColor" opacity=".35"/><path d="M3 4.5h14v11H3zM9.5 4.5v11M3 10h6.5M10.5 13h6.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
         <button class="icon-btn" id="flatBtn" aria-label="Show faces" aria-pressed="false" title="Show faces: flat shading, so every face of the mesh shows"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7z" fill="currentColor" opacity=".25"/><path d="M10 2.5l7 4-7 4-7-4zM10 10.5v7M3 6.5v7l7 4M17 6.5v7l-7 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
         <button class="icon-btn" id="wireBtn" aria-label="Show wireframe" aria-pressed="false" title="Show wireframe"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7zM10 2.5v15M3 6.5l14 7M17 6.5l-14 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
       </div>
@@ -640,7 +639,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
   <div id="suggestPanel" hidden></div>
   <div id="bedPanel" hidden></div>
   <div class="regions-panel" id="regionsPanel" hidden>
-    <div class="rp-row rp-by"><span class="lbl">Find parts by</span><div class="seg" role="group" aria-label="Find parts by"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="The thickness under the surface: limbs, a head, a torso, a weapon are told apart by how thick they are">Form</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Where the surface folds inward: cloth meeting skin, collars, belts, cuffs">Folds</button></div><output id="regionsCount"></output></div>
+    <div class="rp-row rp-by"><span class="lbl">Find parts by</span><div class="seg" role="group" aria-label="Find parts by"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="The parts of a figure: limbs, a head, a torso, a weapon, a hat, clothing, told apart by the thickness under the surface and the creases between them">Parts</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Where the surface folds inward: cloth meeting skin, collars, belts, cuffs">Folds</button></div><output id="regionsCount"></output></div>
     <div class="rp-row rp-ratio"><label class="slider" title="How different in thickness two parts must be to be told apart: lower finds more parts, higher fewer"><span class="lbl">Tell apart at</span><input type="range" id="regionsRatio" min="15" max="80" step="5" value="35" aria-label="How different in thickness two parts must be to be told apart"><output id="regionsRatioOut">35%</output></label></div>
     <div class="rp-row rp-fold" hidden><label class="slider" title="Where the surface folds inward more sharply than this, it is split into regions, like ZBrush polygroups"><span class="lbl">Split at folds over</span><input type="range" id="regionsAngle" min="5" max="45" step="5" value="15" aria-label="Split the surface where it folds inward more sharply than this"><output id="regionsAngleOut">15°</output></label></div>
     <div class="btn-row"><label class="inline-num" title="Push the cut face this far into the other piece, with a wall down from the line, so the piece keeps its thickness to the edge. 0 turns it off."><span class="lbl">Sink face</span><input type="number" id="sinkDepth" min="0" step="0.2" value="1" aria-label="Sink the cut face into the other piece by this much"><span class="unit">mm</span></label></div>
@@ -699,7 +698,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/TransformControls.js"></script>
-<script>
+<script id="kmCoreScript">
 /* Keymaster geometry core. Pure JavaScript, no dependencies, so it can be tested in Node
    and later moved into a Web Worker unchanged. Units are millimeters throughout. */
 const KMCore = (() => {
@@ -2861,10 +2860,32 @@ const KMCore = (() => {
   // The thickness under every vertex: the median distance to the far wall over rays in a cone round the inward
   // normal, smoothed a little over the surface. NaN where no ray meets a wall (an open or inverted surface).
   function shapeDiameter(P, I, opts = {}) {
-    const nv = P.length / 3, b = bounds(P), D = diag(b), grid = meshGrid(P, I, opts.cells || 48), vt = vertexTriangles(P, I), adj = vertexAdjacency(P, I);
+    const nv = P.length / 3, nt = I.length / 3, b = bounds(P), D = diag(b);
+    const grid = meshGrid(P, I, opts.cells || Math.max(48, Math.min(96, Math.round(Math.cbrt(nt) * 1.2)))), vt = vertexTriangles(P, I), adj = vertexAdjacency(P, I);
     const cone = ((opts.cone === undefined ? 45 : opts.cone) * Math.PI) / 180, rays = opts.rays || 12;
     const out = new Float32Array(nv), fn = [0, 0, 0];
+    // Rays are cast from a spread of vertices (one per cell of a grid sized to the sample count), never more than
+    // `samples` of them, and the rest take the value of their nearest sampled neighbour before the smoothing: the
+    // thickness is read per part, so a sample every millimetre or two is plenty, and a 500k-triangle sculpt took
+    // twenty seconds when every vertex cast its rays.
+    const samples = opts.samples === undefined ? 16000 : opts.samples;
+    let sampled = null;
+    if (samples > 0 && nv > samples) {
+      let area = 0;
+      for (let t = 0; t < nt; t++) {
+        const a = 3 * I[3 * t], c = 3 * I[3 * t + 1], d = 3 * I[3 * t + 2];
+        const n = cross3([P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]], [P[d] - P[a], P[d + 1] - P[a + 1], P[d + 2] - P[a + 2]]);
+        area += Math.hypot(n[0], n[1], n[2]) / 2;
+      }
+      const cell = Math.max(D * 1e-4, Math.sqrt(area / samples)), seen = new Set();
+      sampled = new Uint8Array(nv);
+      for (let v = 0; v < nv; v++) {
+        const key = `${Math.floor((P[3 * v] - b.min[0]) / cell)},${Math.floor((P[3 * v + 1] - b.min[1]) / cell)},${Math.floor((P[3 * v + 2] - b.min[2]) / cell)}`;
+        if (!seen.has(key)) { seen.add(key); sampled[v] = 1; }
+      }
+    }
     for (let v = 0; v < nv; v++) {
+      if (sampled && !sampled[v]) { out[v] = NaN; continue; }
       let nx = 0, ny = 0, nz = 0;
       for (let e = vt.start[v]; e < vt.start[v + 1]; e++) { faceNormal(P, I, vt.tri[e], fn); nx += fn[0]; ny += fn[1]; nz += fn[2]; }
       const l = Math.hypot(nx, ny, nz); if (!(l > 0)) { out[v] = NaN; continue; }
@@ -2883,6 +2904,11 @@ const KMCore = (() => {
       const keep = t0 > 0 ? hits.filter(h => h > t0 / 2.5 && h < t0 * 2.5) : hits;
       keep.sort((x, y) => x - y);
       out[v] = keep[keep.length >> 1];
+    }
+    if (sampled) { // the vertices that cast no rays take the thickness of the nearest sampled one, over the surface
+      const queue = new Int32Array(nv); let head = 0, tail = 0;
+      for (let v = 0; v < nv; v++) if (sampled[v] && out[v] > 0) queue[tail++] = v;
+      while (head < tail) { const v = queue[head++]; for (let e = adj.start[v]; e < adj.start[v + 1]; e++) { const u = adj.to[e]; if (!(out[u] > 0)) { out[u] = out[v]; queue[tail++] = u; } } }
     }
     // a little smoothing in log space, so one stray ray doesn't make a bump; holes filled from neighbours
     let cur = new Float32Array(nv); for (let v = 0; v < nv; v++) cur[v] = out[v] > 0 ? Math.log(out[v]) : NaN;
@@ -2974,6 +3000,110 @@ const KMCore = (() => {
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
     seg.levels = centres.map(c => Math.exp(c)); seg.sdf = sdf;
+    return seg;
+  }
+  /* ---------- parts: form and folds together ----------
+     The owner's "arms, legs, tools in hand, feet, bases, hats, clothing borders, backpacks": a part is bounded
+     by a real feature. The thickness runs (segmentForm) and the crease regions (segmentSurface with the fold)
+     are laid over each other, and then neighbouring regions are merged, weakest border first, until every
+     border left is strong: concave along most of its length (a collar, an armpit, a hat's brim, a shirt's hem),
+     a step in thickness (an arm against a torso, a sword against a hand), or a neck (a border short against the
+     smaller region's size: a head on a neck, a base under a foot). A convex ridge or a thickness wobble in the
+     middle of a smooth body is not a part boundary, so those borders go. */
+  function segmentParts(P, I, opts = {}) {
+    const nt = I.length / 3, nv = P.length / 3, ratio = opts.ratio || 1.35, minFrac = opts.minFrac === undefined ? 0.02 : opts.minFrac;
+    const fold = ((opts.fold === undefined ? 15 : opts.fold) * Math.PI) / 180, strong = opts.strength === undefined ? 0.5 : opts.strength;
+    const form = segmentForm(P, I, { ...opts, minFrac: 0.004 });
+    const sdf = form.sdf;
+    const creases = segmentSurface(P, I, { angle: opts.angle || 60, fold: opts.fold === undefined ? 15 : opts.fold, minFrac: 0.003 });
+    // triangle areas, normals, centroids and log thickness
+    const A = new Float64Array(nt), X = new Float64Array(nt), N = new Float64Array(nt * 3), C = new Float64Array(nt * 3);
+    let total = 0;
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]), L = Math.hypot(n[0], n[1], n[2]);
+      A[t] = L / 2; total += L / 2; if (L > 0) { N[3 * t] = n[0] / L; N[3 * t + 1] = n[1] / L; N[3 * t + 2] = n[2] / L; }
+      for (let k = 0; k < 3; k++) C[3 * t + k] = (P[a + k] + P[b + k] + P[c + k]) / 3;
+      let s = 0, m = 0; for (const v of [I[3 * t], I[3 * t + 1], I[3 * t + 2]]) if (sdf && sdf[v] > 0) { s += Math.log(sdf[v]); m++; }
+      X[t] = m ? s / m : 0;
+    }
+    // the edges between triangles, with their length and whether they are a concave crease at least `fold` deep
+    const first = new Map(), pairs = [];
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a; const f = first.get(key); if (f === undefined) first.set(key, t); else { first.delete(key); pairs.push(f, t, a, b); } }
+    const ne = pairs.length / 4, elen = new Float64Array(ne), econcave = new Uint8Array(ne), econvex = new Uint8Array(ne), cosFold = Math.cos(fold);
+    for (let e = 0; e < ne; e++) {
+      const s = pairs[4 * e], q = pairs[4 * e + 1], a = 3 * pairs[4 * e + 2], b = 3 * pairs[4 * e + 3];
+      elen[e] = Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]);
+      const dot = N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2];
+      const valley = (C[3 * q] - C[3 * s]) * N[3 * s] + (C[3 * q + 1] - C[3 * s + 1]) * N[3 * s + 1] + (C[3 * q + 2] - C[3 * s + 2]) * N[3 * s + 2] > 1e-9;
+      econcave[e] = valley && dot < cosFold ? 1 : 0;
+      econvex[e] = !valley && dot < cosFold ? 1 : 0;
+    }
+    // both labellings laid over each other: a region is a connected run with one form level and one crease region
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    const same = (s, q) => form.groupOf[s] === form.groupOf[q] && creases.groupOf[s] === creases.groupOf[q];
+    for (let e = 0; e < ne; e++) if (same(pairs[4 * e], pairs[4 * e + 1])) { const x = find(pairs[4 * e]), y = find(pairs[4 * e + 1]); if (x !== y) par[x] = y; }
+    // region sums and the borders between regions, rebuilt after each round of merging
+    const stats = () => {
+      const area = new Map(), xsum = new Map(), border = new Map(); // border: "r,s" -> { r, s, len, concave, convex }
+      for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); xsum.set(r, (xsum.get(r) || 0) + X[t] * A[t]); }
+      for (let e = 0; e < ne; e++) {
+        const x = find(pairs[4 * e]), y = find(pairs[4 * e + 1]); if (x === y) continue;
+        const r = Math.min(x, y), s = Math.max(x, y), key = r * nt + s;
+        let b = border.get(key); if (!b) { b = { r, s, len: 0, concave: 0, convex: 0 }; border.set(key, b); }
+        b.len += elen[e]; if (econcave[e]) b.concave += elen[e]; if (econvex[e]) b.convex += elen[e];
+      }
+      return { area, xsum, border };
+    };
+    const gap = Math.log(ratio);
+    // how much a border looks like a part boundary, 0 to 1
+    const strength = (b, st) => {
+      const ar = st.area.get(b.r), as = st.area.get(b.s), small = Math.min(ar, as);
+      const concave = b.len > 0 ? b.concave / b.len : 0, convex = b.len > 0 ? b.convex / b.len : 0;
+      // a step in thickness (1 at the ratio the levels are told apart at); along a convex ridge (a plate's rim, a
+      // box's edge) the thickness reading jumps by itself, so a ridge is never taken for a part boundary
+      const neckRaw = 1 - Math.min(1, b.len / (2 * Math.sqrt(Math.PI * small))); // 1 when the border is tiny against the smaller region's girth
+      const neck = neckRaw * (1 - convex);
+      // a thickness step counts in full only with something on the surface to back it (a valley along part of the
+      // border, or a narrowing): across a flat plate the reading drifts from thick by a wall to thin at the rim,
+      // and a hat's brim came out as four rings
+      const support = Math.min(1, 0.35 + 1.5 * concave + 1.5 * neckRaw);
+      const step = Math.min(1, Math.abs(st.xsum.get(b.r) / ar - st.xsum.get(b.s) / as) / gap) * (1 - convex) * support;
+      return Math.max(concave, step, neck);
+    };
+    const melt = (limit, pickWeakest) => { // regions under `limit` of the area go into a neighbour: the one sharing the most border, or the weakest border
+      for (let pass = 0; pass < 30; pass++) {
+        const st = stats(), by = new Map();
+        for (const b of st.border.values()) { if (!by.has(b.r)) by.set(b.r, []); if (!by.has(b.s)) by.set(b.s, []); by.get(b.r).push(b); by.get(b.s).push(b); }
+        const small = [...st.area.entries()].filter(([, a]) => a < limit).sort((a, b) => a[1] - b[1]);
+        if (!small.length) return;
+        let merged = 0;
+        for (const [g] of small) {
+          if (find(g) !== g) continue;
+          const bs = by.get(g); if (!bs) continue;
+          let best = null, bv = -Infinity;
+          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; const v = pickWeakest ? -strength(b, st) : b.len; if (v > bv) { bv = v; best = o; } }
+          if (best !== null) { par[g] = find(best); merged++; }
+        }
+        if (!merged) return;
+      }
+    };
+    melt(total * 0.003, false); // slivers the overlay leaves along creases
+    // merge across weak borders, the weakest first, until every border is a part boundary
+    for (let round = 0; round < 400; round++) {
+      const st = stats();
+      let weakest = null, wv = strong;
+      for (const b of st.border.values()) { const v = strength(b, st); if (v < wv) { wv = v; weakest = b; } }
+      if (!weakest) break;
+      par[find(weakest.s)] = find(weakest.r);
+    }
+    melt(total * minFrac, true); // what is left small joins the neighbour it is least separated from
+    const groupOf = new Int32Array(nt), ids = new Map();
+    for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
+    const seg = bordersFromGroups(P, I, groupOf);
+    seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
+    seg.levels = form.levels; seg.sdf = sdf;
     return seg;
   }
   // Every edge longer than maxEdge split at its middle, the triangles beside it with it (one split edge gives two
@@ -4446,6 +4576,55 @@ const KMCore = (() => {
     return best < 0 ? -1 : seg.groupOf[best];
   }
 
+  // The borders as smooth curves for display: the border edges are chained into polylines (ending where three or
+  // more regions meet), each chain is rounded by two passes of corner cutting (Chaikin), and the points are lifted
+  // off the surface along the normals of the triangles beside them. Mesh-edge zigzags made the plain lines ugly.
+  function regionBorderCurves(P, I, seg, lift, passes = 2) {
+    const b = seg.borders, ne = b.length / 4, nv = P.length / 3;
+    const nrm = new Float64Array(nv * 3), fn = [0, 0, 0], deg = new Int32Array(nv), adjE = new Map();
+    for (let e = 0; e < ne; e++) {
+      const va = b[4 * e + 2], vb = b[4 * e + 3];
+      for (const t of [b[4 * e], b[4 * e + 1]]) { faceNormal(P, I, t, fn); for (const v of [va, vb]) { nrm[3 * v] += fn[0]; nrm[3 * v + 1] += fn[1]; nrm[3 * v + 2] += fn[2]; } }
+      deg[va]++; deg[vb]++;
+      if (!adjE.has(va)) adjE.set(va, []); if (!adjE.has(vb)) adjE.set(vb, []);
+      adjE.get(va).push(e); adjE.get(vb).push(e);
+    }
+    const pt = (v) => { const l = Math.hypot(nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]) || 1; return [P[3 * v] + (nrm[3 * v] / l) * lift, P[3 * v + 1] + (nrm[3 * v + 1] / l) * lift, P[3 * v + 2] + (nrm[3 * v + 2] / l) * lift]; };
+    const used = new Uint8Array(ne), chains = [];
+    const other = (e, v) => (b[4 * e + 2] === v ? b[4 * e + 3] : b[4 * e + 2]);
+    const walk = (e0, v0) => { // from vertex v0 along edge e0 through degree-2 vertices
+      const verts = [v0]; let e = e0, v = v0;
+      while (true) {
+        used[e] = 1; v = other(e, v); verts.push(v);
+        if (deg[v] !== 2 || v === v0) break;
+        const es = adjE.get(v); e = es[0] === e ? es[1] : es[0];
+        if (used[e]) break;
+      }
+      return verts;
+    };
+    for (let v = 0; v < nv; v++) if (deg[v] && deg[v] !== 2) for (const e of adjE.get(v)) if (!used[e]) chains.push({ verts: walk(e, v), closed: false });
+    for (let e = 0; e < ne; e++) if (!used[e]) { const verts = walk(e, b[4 * e + 2]); chains.push({ verts, closed: verts[0] === verts[verts.length - 1] }); } // loops with no junction
+    const out = [];
+    for (const ch of chains) {
+      let pts = ch.verts.map(pt);
+      if (ch.closed && pts.length > 1) pts.pop();
+      for (let pass = 0; pass < passes && pts.length > 2; pass++) {
+        const next = [];
+        const n = pts.length, last = ch.closed ? n : n - 1;
+        if (!ch.closed) next.push(pts[0]);
+        for (let i = 0; i < last; i++) {
+          const p = pts[i], q = pts[(i + 1) % n];
+          next.push([0.75 * p[0] + 0.25 * q[0], 0.75 * p[1] + 0.25 * q[1], 0.75 * p[2] + 0.25 * q[2]]);
+          next.push([0.25 * p[0] + 0.75 * q[0], 0.25 * p[1] + 0.75 * q[1], 0.25 * p[2] + 0.75 * q[2]]);
+        }
+        if (!ch.closed) next.push(pts[n - 1]);
+        pts = next;
+      }
+      const n = pts.length, last = ch.closed ? n : n - 1;
+      for (let i = 0; i < last; i++) { const p = pts[i], q = pts[(i + 1) % n]; out.push(p[0], p[1], p[2], q[0], q[1], q[2]); }
+    }
+    return new Float32Array(out);
+  }
   // Border edges as line segments, nudged a hair off the surface so they draw on top of it.
   function regionBorderLines(P, I, seg, lift) {
     const b = seg.borders, out = new Float32Array((b.length / 4) * 6), N = (t) => {
@@ -6222,6 +6401,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
+    segmentParts, regionBorderCurves,
   };
 })();
 
@@ -8045,7 +8225,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { planeShown: () => planeShown(), sectionLoops: () => sectionLines.children.length, sectionShown: () => !!(sectionLines.visible && planeGroup.visible), axisDots: () => AXIS_DOTS.map(d => ({ view: d.el.dataset.view, behind: d.el.classList.contains('is-behind'), z: d.el.style.zIndex })), ringOpacity: () => [rings.x.material.opacity, rings.y.material.opacity], hoverAt(i, point) { const p = state.parts[i]; setHoverRegion(p, point ? K.regionAtPoint(p.positions, p.indices, regionsFor(p), point) : -1); return { g: state.regions.hover ? state.regions.hover.g : -1, text: ($('#regionHover') || {}).textContent || '', shown: !!$('#regionHover') && !$('#regionHover').hidden }; }, selectClick(i) { if (i === null) { selectPart(null); return null; } const p = state.parts[i]; if (state.shellPick && p.id === state.shellPick.partId) { const sh = shellsOf(p), k = shellAtFace(p, sh[arguments[1] || 0].tris[0]); toggleShell(k); return k; } selectPart(p.id); return state.selectedId; }, planeAt: () => [planeGroup.position.x, planeGroup.position.y, planeGroup.position.z, planeGroup.quaternion.x, planeGroup.quaternion.y, planeGroup.quaternion.z, planeGroup.quaternion.w].map(v => +v.toFixed(3)).join(','), gizmo: () => ({ attached: !!tc.object, rings: gripGroup.visible }), shellPick() { const sp = state.shellPick, p = sp && state.parts.find(q => q.id === sp.partId); return sp ? { chosen: [...sp.chosen].sort(), n: shellsOf(p).length, colours: new Set(Array.from(views.get(p.id).geom.attributes.color.array).map((v, i, a) => i % 3 === 0 ? a.slice(i, i + 3).map(c => Math.round(c * 50)).join(',') : null).filter(Boolean)).size } : null; }, hoverRegion() { return state.regions.hover ? state.regions.hover.g : -1; }, async autoSplit() { const r = await autoSplit(); return r ? { ...r, closed: state.parts.every(q => K.edgeReport(q.indices).closed), toast: $('#toast').innerText } : null; }, partColours() { return state.parts.map(q => q.color); }, regionColours() { const p = selectedPart(), v = p && views.get(p.id); if (!v || !v.geom.attributes.color) return { colours: 0, vertexColors: !!(v && v.mat.vertexColors) }; const a = v.geom.attributes.color.array, set = new Set(); for (let i = 0; i < a.length; i += 9) set.add(a[i].toFixed(3) + ',' + a[i + 1].toFixed(3) + ',' + a[i + 2].toFixed(3)); return { colours: set.size, vertexColors: v.mat.vertexColors, borders: !!v.borders, part: p.color }; }, sculptAt(partIndex, point, opts = {}) { const part = state.parts[partIndex]; if (state.selectedId !== part.id) selectPart(part.id); if (state.tool !== 'sculpt') setTool('sculpt'); Object.assign(state.sculpt, opts.mode ? { mode: opts.mode } : {}, opts.size ? { size: opts.size, sized: true } : {}, opts.strength ? { strength: opts.strength } : {}); const v = views.get(part.id), start = K.nearestTriangle(part.positions, part.indices, point, K.diag(part.bbox) * 0.05); stroke = { partId: part.id, P: part.positions.slice(), moved: 0 }; for (let i = 0; i < (opts.dabs || 1); i++) { const r = K.sculptDab(stroke.P, part.indices, { centre: point, radius: state.sculpt.size, strength: state.sculpt.strength, mode: state.sculpt.mode, reverse: !!opts.reverse, start, mask: state.sculpt.useMask && state.sculpt.mask && state.sculpt.mask.partId === part.id ? state.sculpt.mask.sel : null }); stroke.moved += r.moved.length; if (v && r.tris.length) K.refreshCreased(stroke.P, part.indices, r.tris, v.geom.attributes.position.array, v.geom.attributes.normal.array, 38); } const moved = stroke.moved; endSculpt(); const q = state.parts[partIndex]; return { moved, volume: q.volume, closed: K.edgeReport(q.indices).closed, tris: q.tris, tool: state.tool, mask: !!(state.sculpt.mask && state.sculpt.mask.partId === q.id) }; }, markerBounds() { const out = []; for (const g of keyGroup.children) for (const m of g.children) { if (!m.geometry || !m.geometry.attributes.position) continue; const a = m.geometry.attributes.position.array, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]; for (let i = 0; i < a.length; i += 3) for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], a[i + k]); max[k] = Math.max(max[k], a[i + k]); } out.push({ kind: m instanceof THREE.Mesh ? 'Mesh' : 'Line', min: [min[0] + g.position.x, min[1] + g.position.y, min[2]], max: [max[0] + g.position.x, max[1] + g.position.y, max[2]] }); } return out; }, plugRings() { return plugsShown().filter(q => q.ok).map(q => { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const [x, y] of q.base) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } return { x: q.x, y: q.y, min: [x0, y0], max: [x1, y1], depth: q.depth }; }); }, async boolean(op) { if (op) state.bool.op = op; if (state.tool !== 'boolean') setTool('boolean'); const sh = booleanShape(); const part = await doBoolean(); return part ? { name: part.name, tris: part.tris, volume: part.volume, closed: K.edgeReport(part.indices).closed, parts: state.parts.length, tool: state.tool, shape: sh ? sh.name : null } : { error: $('#toast').innerText, parts: state.parts.length, tool: state.tool, shape: sh ? sh.name : null }; }, addShape(kind) { const p = addShape(kind); return { id: p.id, name: p.name, size: p.bbox.size, tris: p.tris }; }, setShape(fields) { const p = setShape(fields); return p ? { size: p.bbox.size, center: p.bbox.center, tris: p.tris, volume: p.volume, closed: K.edgeReport(p.indices).closed } : null; }, shapeMode(m) { state.shapeMode = m; attachGizmo(); renderInspector(); return tc.mode; }, panelWidths, setPanelWidth(side, px) { setPanelWidth(side, px); savePanels(); renderInspector(); return panelWidths(); }, cameraDir() { const d = camera.position.clone().sub(orbit.target).normalize(); return [d.x, d.y, d.z]; }, setTool(t) { setTool(t); return state.tool; }, tool() { return state.tool; }, cutAcross(x0, y0, x1, y1) { const r = canvas.getBoundingClientRect(); setAcross(true); const out = cutAcross(r.left + x0, r.top + y0, r.left + x1, r.top + y1); return out ? { ...out, selected: !!selectedPart(), regions: state.regions.on } : null; }, movePick(dir, mm) { if (mm) { state.moveBy = mm; const i = $('#moveLineBy'); if (i) i.value = mm; } movePick(dir); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, flatHere() { flatFromPick(); return { regions: state.regions.on, focus: state.cut.focus ? state.cut.focus.length : 0 }; }, paintMode(mode) { state.paint.mode = mode; renderPaintTools(); updateHint(); return state.paint.mode; }, paintFill(on) { state.paint.fill = !!on; renderPaintTools(); updateHint(); return state.paint.fill; }, regionTriangles(partIndex, point) { const part = state.parts[partIndex], seg = regionsFor(part), g = seg.groupOf[K.nearestTriangle(part.positions, part.indices, point)]; let n = 0; for (const x of seg.groupOf) if (x === g) n++; return n; }, paintIsolate() { paintEdit('paint-isolate'); const p = selectedPart(), v = p && views.get(p.id); return { shown: v && v.isoMap ? v.isoMap.length : 0, isolated: !!state.paint.iso }; }, paintShowAll() { paintEdit('paint-show'); const p = selectedPart(), v = p && views.get(p.id); return { indexed: !!(v && v.geom.index), isolated: !!state.paint.iso }; }, inlayCut() { inlayFromPick(); return true; }, splitPlan() { planSplit(null); const b = modelBounds(); return state.split.planes ? { planes: state.split.planes.map(q => [q.axis, +q.pos.toFixed(2)]), ...K.bedFit(b, state.split.planes, state.bed, SPLIT_MARGIN) } : null; }, seamEdit() { startSeamEdit(); return state.edit ? state.edit.loops.map(l => l.pts.length) : null; }, seamDrag(li, i, point) { moveHandle(li, i, point); ptr.handle = { li, i }; endHandle(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', length: pk.loops.reduce((s, l) => s + l.length, 0), handle: state.edit.loops[li].pts[i] } : null; }, seamSmooth(passes) { smoothSeam(passes); const pk = state.regions.pick; return pk ? { ok: !!pk.result, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, cutHereAt(partIndex, point) { const part = state.parts[partIndex]; const it = K.cutHere(part.positions, part.indices, point, K.diag(part.bbox)); if (!it) return null; addHereSuggestion(part, it); return { width: it.width, freed: it.freed, areas: it.areas.length, normal: it.normal }; }, explodeOffsets() { return state.parts.map(p => { const v = views.get(p.id); return { pull: p.pull, at: v ? [v.mesh.position.x - v.offset.x, v.mesh.position.y - v.offset.y, v.mesh.position.z - v.offset.z] : null }; }); }, regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintLetGo() { previewPainted(); const pk = state.regions.pick; return pk ? { preview: !!pk.preview, loops: pk.loops.length, error: pk.error || '' } : null; }, paintDone() { pickPainted(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { borderSegments() { const p = selectedPart(), v = p && views.get(p.id); if (!v || !v.borders) return null; const seg = regionsFor(p); return { curve: v.borders.geometry.attributes.position.array.length / 6, edges: seg.borders.length / 4, opacity: v.borders.material.opacity }; }, coreWorker: () => !!coreWorker && !coreWorkerBroken, toggleRegions() { toggleRegions(); }, regionsOn: () => !!state.regions.on, regionsLoading: () => !!state.regions.loading, planeShown: () => planeShown(), sectionLoops: () => sectionLines.children.length, sectionShown: () => !!(sectionLines.visible && planeGroup.visible), axisDots: () => AXIS_DOTS.map(d => ({ view: d.el.dataset.view, behind: d.el.classList.contains('is-behind'), z: d.el.style.zIndex })), ringOpacity: () => [rings.x.material.opacity, rings.y.material.opacity], hoverAt(i, point) { const p = state.parts[i]; setHoverRegion(p, point ? K.regionAtPoint(p.positions, p.indices, regionsFor(p), point) : -1); return { g: state.regions.hover ? state.regions.hover.g : -1, text: ($('#regionHover') || {}).textContent || '', shown: !!$('#regionHover') && !$('#regionHover').hidden }; }, selectClick(i) { if (i === null) { selectPart(null); return null; } const p = state.parts[i]; if (state.shellPick && p.id === state.shellPick.partId) { const sh = shellsOf(p), k = shellAtFace(p, sh[arguments[1] || 0].tris[0]); toggleShell(k); return k; } selectPart(p.id); return state.selectedId; }, planeAt: () => [planeGroup.position.x, planeGroup.position.y, planeGroup.position.z, planeGroup.quaternion.x, planeGroup.quaternion.y, planeGroup.quaternion.z, planeGroup.quaternion.w].map(v => +v.toFixed(3)).join(','), gizmo: () => ({ attached: !!tc.object, rings: gripGroup.visible }), shellPick() { const sp = state.shellPick, p = sp && state.parts.find(q => q.id === sp.partId); return sp ? { chosen: [...sp.chosen].sort(), n: shellsOf(p).length, colours: new Set(Array.from(views.get(p.id).geom.attributes.color.array).map((v, i, a) => i % 3 === 0 ? a.slice(i, i + 3).map(c => Math.round(c * 50)).join(',') : null).filter(Boolean)).size } : null; }, hoverRegion() { return state.regions.hover ? state.regions.hover.g : -1; }, async autoSplit() { const r = await autoSplit(); return r ? { ...r, closed: state.parts.every(q => K.edgeReport(q.indices).closed), toast: $('#toast').innerText } : null; }, partColours() { return state.parts.map(q => q.color); }, regionColours() { const p = selectedPart(), v = p && views.get(p.id); if (!v || !v.geom.attributes.color) return { colours: 0, vertexColors: !!(v && v.mat.vertexColors) }; const a = v.geom.attributes.color.array, set = new Set(); for (let i = 0; i < a.length; i += 9) set.add(a[i].toFixed(3) + ',' + a[i + 1].toFixed(3) + ',' + a[i + 2].toFixed(3)); return { colours: set.size, vertexColors: v.mat.vertexColors, borders: !!v.borders, part: p.color }; }, sculptAt(partIndex, point, opts = {}) { const part = state.parts[partIndex]; if (state.selectedId !== part.id) selectPart(part.id); if (state.tool !== 'sculpt') setTool('sculpt'); Object.assign(state.sculpt, opts.mode ? { mode: opts.mode } : {}, opts.size ? { size: opts.size, sized: true } : {}, opts.strength ? { strength: opts.strength } : {}); const v = views.get(part.id), start = K.nearestTriangle(part.positions, part.indices, point, K.diag(part.bbox) * 0.05); stroke = { partId: part.id, P: part.positions.slice(), moved: 0 }; for (let i = 0; i < (opts.dabs || 1); i++) { const r = K.sculptDab(stroke.P, part.indices, { centre: point, radius: state.sculpt.size, strength: state.sculpt.strength, mode: state.sculpt.mode, reverse: !!opts.reverse, start, mask: state.sculpt.useMask && state.sculpt.mask && state.sculpt.mask.partId === part.id ? state.sculpt.mask.sel : null }); stroke.moved += r.moved.length; if (v && r.tris.length) K.refreshCreased(stroke.P, part.indices, r.tris, v.geom.attributes.position.array, v.geom.attributes.normal.array, 38); } const moved = stroke.moved; endSculpt(); const q = state.parts[partIndex]; return { moved, volume: q.volume, closed: K.edgeReport(q.indices).closed, tris: q.tris, tool: state.tool, mask: !!(state.sculpt.mask && state.sculpt.mask.partId === q.id) }; }, markerBounds() { const out = []; for (const g of keyGroup.children) for (const m of g.children) { if (!m.geometry || !m.geometry.attributes.position) continue; const a = m.geometry.attributes.position.array, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]; for (let i = 0; i < a.length; i += 3) for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], a[i + k]); max[k] = Math.max(max[k], a[i + k]); } out.push({ kind: m instanceof THREE.Mesh ? 'Mesh' : 'Line', min: [min[0] + g.position.x, min[1] + g.position.y, min[2]], max: [max[0] + g.position.x, max[1] + g.position.y, max[2]] }); } return out; }, plugRings() { return plugsShown().filter(q => q.ok).map(q => { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const [x, y] of q.base) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } return { x: q.x, y: q.y, min: [x0, y0], max: [x1, y1], depth: q.depth }; }); }, async boolean(op) { if (op) state.bool.op = op; if (state.tool !== 'boolean') setTool('boolean'); const sh = booleanShape(); const part = await doBoolean(); return part ? { name: part.name, tris: part.tris, volume: part.volume, closed: K.edgeReport(part.indices).closed, parts: state.parts.length, tool: state.tool, shape: sh ? sh.name : null } : { error: $('#toast').innerText, parts: state.parts.length, tool: state.tool, shape: sh ? sh.name : null }; }, addShape(kind) { const p = addShape(kind); return { id: p.id, name: p.name, size: p.bbox.size, tris: p.tris }; }, setShape(fields) { const p = setShape(fields); return p ? { size: p.bbox.size, center: p.bbox.center, tris: p.tris, volume: p.volume, closed: K.edgeReport(p.indices).closed } : null; }, shapeMode(m) { state.shapeMode = m; attachGizmo(); renderInspector(); return tc.mode; }, panelWidths, setPanelWidth(side, px) { setPanelWidth(side, px); savePanels(); renderInspector(); return panelWidths(); }, cameraDir() { const d = camera.position.clone().sub(orbit.target).normalize(); return [d.x, d.y, d.z]; }, setTool(t) { setTool(t); return state.tool; }, tool() { return state.tool; }, cutAcross(x0, y0, x1, y1) { const r = canvas.getBoundingClientRect(); setAcross(true); const out = cutAcross(r.left + x0, r.top + y0, r.left + x1, r.top + y1); return out ? { ...out, selected: !!selectedPart(), regions: state.regions.on } : null; }, movePick(dir, mm) { if (mm) { state.moveBy = mm; const i = $('#moveLineBy'); if (i) i.value = mm; } movePick(dir); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, flatHere() { flatFromPick(); return { regions: state.regions.on, focus: state.cut.focus ? state.cut.focus.length : 0 }; }, paintMode(mode) { state.paint.mode = mode; renderPaintTools(); updateHint(); return state.paint.mode; }, paintFill(on) { state.paint.fill = !!on; renderPaintTools(); updateHint(); return state.paint.fill; }, regionTriangles(partIndex, point) { const part = state.parts[partIndex], seg = regionsFor(part), g = seg.groupOf[K.nearestTriangle(part.positions, part.indices, point)]; let n = 0; for (const x of seg.groupOf) if (x === g) n++; return n; }, paintIsolate() { paintEdit('paint-isolate'); const p = selectedPart(), v = p && views.get(p.id); return { shown: v && v.isoMap ? v.isoMap.length : 0, isolated: !!state.paint.iso }; }, paintShowAll() { paintEdit('paint-show'); const p = selectedPart(), v = p && views.get(p.id); return { indexed: !!(v && v.geom.index), isolated: !!state.paint.iso }; }, inlayCut() { inlayFromPick(); return true; }, splitPlan() { planSplit(null); const b = modelBounds(); return state.split.planes ? { planes: state.split.planes.map(q => [q.axis, +q.pos.toFixed(2)]), ...K.bedFit(b, state.split.planes, state.bed, SPLIT_MARGIN) } : null; }, seamEdit() { startSeamEdit(); return state.edit ? state.edit.loops.map(l => l.pts.length) : null; }, seamDrag(li, i, point) { moveHandle(li, i, point); ptr.handle = { li, i }; endHandle(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', length: pk.loops.reduce((s, l) => s + l.length, 0), handle: state.edit.loops[li].pts[i] } : null; }, seamSmooth(passes) { smoothSeam(passes); const pk = state.regions.pick; return pk ? { ok: !!pk.result, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, cutHereAt(partIndex, point) { const part = state.parts[partIndex]; const it = K.cutHere(part.positions, part.indices, point, K.diag(part.bbox)); if (!it) return null; addHereSuggestion(part, it); return { width: it.width, freed: it.freed, areas: it.areas.length, normal: it.normal }; }, explodeOffsets() { return state.parts.map(p => { const v = views.get(p.id); return { pull: p.pull, at: v ? [v.mesh.position.x - v.offset.x, v.mesh.position.y - v.offset.y, v.mesh.position.z - v.offset.z] : null }; }); }, regionClick(partIndex, point) { regionClick(state.parts[partIndex], point); return { selected: state.selectedId === state.parts[partIndex].id, picked: !!state.regions.pick }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintLetGo() { previewPainted(); const pk = state.regions.pick; return pk ? { preview: !!pk.preview, loops: pk.loops.length, error: pk.error || '' } : null; }, paintDone() { pickPainted(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, closeDrawing() { closeDrawing(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -8292,7 +8472,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   // A plain click picks afresh; a shift-click adds to the pick (another line to cut along, or another region to
   // split off with the first). The clicks are kept so the pick can be replayed when the key settings change.
   function regionClick(part, point, add = false) {
-    if (part.id !== state.selectedId) { if (state.paint.on) setPainting(false); clearPick(); selectPart(part.id); renderPick(); updateHint(); return; }
+    if (part.id !== state.selectedId) { if (state.paint.on) setPainting(false); clearPick(); selectPart(part.id); if (!regionsReady(part)) startRegions(); renderPick(); updateHint(); return; } // its parts are found off the main thread, then outlined
     const last = state.regions.last;
     if (add && last && last.partId === part.id && state.regions.pick) last.clicks.push(point);
     else { endSeamEdit(); state.regions.last = { partId: part.id, clicks: [point] }; }
@@ -8999,7 +9179,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   // The Select tool only chooses parts, and the Suggest tool shows the plane only once a flat cut has been placed
   // (a suggestion, a spot or a line across the view): until then, and while the loose pieces are being chosen,
   // there is nothing for a plane to do.
-  function planeShown() { return !!selectedPart() && !state.regions.on && state.tool !== 'select' && state.tool !== 'bed' && state.tool !== 'shape' && state.tool !== 'boolean' && state.tool !== 'sculpt' && !(state.tool === 'suggest' && (!state.suggestPlane || state.shellPick)); }
+  function planeShown() { return !!selectedPart() && !state.regions.on && !state.regions.loading && state.tool !== 'select' && state.tool !== 'bed' && state.tool !== 'shape' && state.tool !== 'boolean' && state.tool !== 'sculpt' && !(state.tool === 'suggest' && (!state.suggestPlane || state.shellPick)); }
   /* ---------------- the cut tool ----------------
      One chooser for every way of cutting (as the guide's Cut Tool): Plane (a flat cut, placed with the bar under the
      view), Regions (cut along the surface's own borders), Paint and Draw (an area painted or a line drawn by hand),
@@ -9059,7 +9239,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       state.tool = tool;
       selectPartSplitPreview(); updatePreview(); attachGizmo(); placeAreaTags(); renderInspector(); updateHint(); markDirty();
     };
-    if ((tool === 'regions' || tool === 'paint' || tool === 'draw') && !state.regions.on) { busy(state.regions.by === 'form' ? 'Finding the parts' : 'Finding surface regions'); setTimeout(() => { go(); busy(null); }, 30); }
+    if ((tool === 'regions' || tool === 'paint' || tool === 'draw') && !state.regions.on) { state.tool = tool; startRegions(go); } // the plane steps aside at once, and the parts are found off the main thread
     else go();
   }
   toolPanel.addEventListener('click', (e) => {
@@ -9103,7 +9283,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       : `<p class="status warn">${ICONS.alert}<span>${rep.openEdges ? `${fmtInt(rep.openEdges)} open ${rep.openEdges === 1 ? 'edge' : 'edges'}` : ''}${rep.openEdges && rep.badEdges ? ' and ' : ''}${rep.badEdges ? `${fmtInt(rep.badEdges)} tangled ${rep.badEdges === 1 ? 'edge' : 'edges'}` : ''}. Cuts that cross ${rep.openEdges + rep.badEdges === 1 ? 'it' : 'them'} can’t be closed.</span></p>
          <button class="btn small" data-act="fill-holes">Repair surface</button>`;
     const fit = tooBig && state.tool !== 'bed' ? `<p class="status warn">${ICONS.alert}<span>${tooBig === 1 ? 'A part is' : `${tooBig} parts are`} too big for the bed.</span></p><button class="btn small" data-act="tool" data-value="bed">Cut to fit the bed</button>` : '';
-    return `<div class="ins-section head model-head">
+    return `<div class="sec tool-sec"><div id="toolSlot"></div></div>
+    <div class="ins-section head model-head">
       <h2>${esc(state.model.name)}</h2>
       <dl class="facts">
         <div><dt>Size</dt><dd>${fmt(b.size[0])} × ${fmt(b.size[1])} × ${fmt(b.size[2])} mm</dd></div>
@@ -9147,7 +9328,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     </div>
     </div>
     </details>
-    <div class="sec tool-sec"><div class="sec-head">Cut tool<span class="sec-sum">${TOOL_NAMES[state.tool]}</span></div><div id="toolSlot"></div></div>`;
+`;
   }
   // Split to fit the bed: flat cuts across X, Y and Z that make every piece fit the printer, worked out from the bed
   // size (or set by count), each plane shown in the view and movable by its position, then all cut at once with the
@@ -9311,10 +9492,10 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       <div class="inline"><span class="lbl">Plug on</span>${seg('pegside', c.pegSide, state.regions.on ? [['below', 'This piece'], ['above', 'Other piece']] : [['below', 'Solid half'], ['above', 'Clear half']])}</div>`;
     const editing = state.cut.active >= 0 && state.cut.keys[state.cut.active] && pointKeys();
     const jointsOpen = editing || (state.ui.joints !== null ? state.ui.joints : state.tool === 'plane'); // open with the plane; the other tools need their room, and the summary line says what the joints are
-    return `<div class="ins-section head">
+    return `<div class="sec tool-sec"><div id="toolSlot"></div></div>
+    <div class="ins-section head">
       <div class="head-row"><h2 title="${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm, ${fmtInt(p.tris)} triangles">${esc(p.name)}</h2><span><button class="btn ghost small" data-act="export-one" title="Export this part on its own">Export</button><button class="btn ghost small" data-act="done" title="Back to the model (Esc)">Done</button></span></div>
     </div>
-    <div class="sec tool-sec"><div id="toolSlot"></div></div>
     <details class="sec" data-sec="joints"${jointsOpen ? ' open' : ''}><summary>Joints<span class="sec-sum">${esc(jointSummary(c))}</span></summary>
     ${editing ? keyEditor(state.cut.active) : `<div class="ins-section keys" aria-label="Keys">
       ${seg('keytype', c.type, [['peg', 'Pegs'], ['dowel', 'Dowels'], ['magnet', 'Magnets'], ['plug', 'Plug'], ['none', 'None']]).replace(/data-value="(\w+)"/g, (m, v) => `${m} title="${({ peg: 'A peg on one piece fits a socket in the other', dowel: 'Holes in both pieces, with printable pins. Metal rods work too', magnet: 'Pockets in both pieces, sized for disc magnets', plug: 'The cut face itself stands out into a matching pocket', none: 'No keys: flat faces' })[v]}"`)}
@@ -9447,7 +9628,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       case 'shape-remove': removeShape(); break;
       case 'bool-op': state.bool.op = val; renderInspector(); updateHint(); break;
       case 'auto-split': autoSplit(); break;
-      case 'regions-by': if (state.regions.by !== val) { state.regions.by = val; renderRegionsBy(); if (state.regions.on) { clearPick(); state.regions.last = null; busy(val === 'form' ? 'Finding the parts' : 'Finding surface regions'); setTimeout(() => { applyRegions(); busy(null); }, 30); } } break;
+      case 'regions-by': if (state.regions.by !== val) { state.regions.by = val; renderRegionsBy(); if (state.regions.on) { clearPick(); state.regions.last = null; startRegions(); } } break;
       case 'sculpt-mode': state.sculpt.mode = val; renderInspector(); updateHint(); break;
       case 'boolean': doBoolean(); break;
       case 'export-one': exportParts(state.selectedId); break;
@@ -9613,6 +9794,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   if (axisWidget) axisWidget.addEventListener('click', (e) => { const b = e.target.closest('[data-view]'); if (b) viewFrom(b.dataset.view); });
   // Light or dark: the system's choice until the button is pressed, then the choice is kept
   const THEME_KEY = 'keymaster.theme';
+  function dark() { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); }
   function applyTheme(theme) {
     if (theme) document.documentElement.dataset.theme = theme; else delete document.documentElement.dataset.theme;
     const dark = theme ? theme === 'dark' : !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -9627,6 +9809,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     theme = dark ? 'light' : 'dark';
     applyTheme(theme);
     try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* ignore */ }
+    if (state.regions.on) applyRegions(); // the border curves take the theme's ink
   });
   /* ---------------- surface regions ----------------
      Colour each part by the regions its surface splits into where it turns sharply (like ZBrush polygroups),
@@ -9635,15 +9818,74 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   const regionCache = new Map();
   const regionsKey = (p) => (state.regions.by === 'form' ? `${p.id}:form:${state.regions.ratio}` : `${p.id}:${state.regions.angle}:${state.regions.fold}`);
   const sdfCache = new Map(); // the thickness under each part's surface, the slow half of finding its form, kept while the part stands
-  function regionsFor(p) {
+  /* Heavy core work off the main thread: a worker built from the page's own core script (the same code, no second
+     copy), so finding the parts of a big sculpt no longer freezes the view and the busy sign keeps turning. When
+     a worker can't be made (an old browser, the test page) the work runs on the main thread as before. */
+  let coreWorker = null, coreWorkerBroken = false, coreCallId = 0;
+  const coreCalls = new Map();
+  function getCoreWorker() {
+    if (coreWorker || coreWorkerBroken) return coreWorker;
+    try {
+      const el = document.getElementById('kmCoreScript'), src = el ? el.textContent : '';
+      if (!src || typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !URL.createObjectURL) { coreWorkerBroken = true; return null; }
+      const code = `${src}\nself.onmessage = (e) => { const { id, fn, args } = e.data; try { const r = KMCore[fn](...args); self.postMessage({ id, r }); } catch (err) { self.postMessage({ id, error: err && err.message || String(err) }); } };`;
+      coreWorker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+      coreWorker.onmessage = (e) => { const c = coreCalls.get(e.data.id); if (!c) return; coreCalls.delete(e.data.id); if (e.data.error) c.reject(new Error(e.data.error)); else c.resolve(e.data.r); };
+      coreWorker.onerror = () => { coreWorkerBroken = true; const w = coreWorker; coreWorker = null; try { w.terminate(); } catch (err) { /* gone already */ } for (const c of coreCalls.values()) c.reject(new Error('worker')); coreCalls.clear(); };
+    } catch (err) { coreWorkerBroken = true; coreWorker = null; }
+    return coreWorker;
+  }
+  function coreTask(fn, args) { // a promise of K[fn](...args): in the worker when there is one, else on the main thread after a frame
+    const w = getCoreWorker();
+    const here = () => new Promise((resolve, reject) => setTimeout(() => { try { resolve(K[fn](...args)); } catch (err) { reject(err); } }, 20));
+    if (!w) return here();
+    return new Promise((resolve, reject) => { const id = ++coreCallId; coreCalls.set(id, { resolve, reject }); w.postMessage({ id, fn, args }); }).catch(err => { if (err.message === 'worker') return here(); throw err; });
+  }
+  function regionOpts() { return state.regions.by === 'form' ? { ratio: state.regions.ratio } : { angle: state.regions.angle, fold: state.regions.fold }; }
+  function regionsReady(p) { return regionCache.has(regionsKey(p)); }
+  // The parts of a part, found off the main thread (the thickness under the surface is the slow half; it is kept
+  // per part, so moving the slider only re-sorts); every later call is answered from the cache
+  async function prepareRegions(p) {
+    const key = regionsKey(p);
+    if (regionCache.has(key)) return regionCache.get(key);
+    let seg;
+    if (state.regions.by === 'form') {
+      seg = await coreTask('segmentParts', [p.positions, p.indices, { ...regionOpts(), sdf: sdfCache.get(p.id) || null }]);
+      if (seg.sdf && !sdfCache.has(p.id)) sdfCache.set(p.id, seg.sdf);
+    } else seg = await coreTask('segmentSurface', [p.positions, p.indices, regionOpts()]);
+    regionCache.set(key, seg);
+    return seg;
+  }
+  function regionsFor(p) { // the cached regions; found on the main thread when nothing prepared them (the suggestions' search, the debug hooks)
     const key = regionsKey(p);
     if (!regionCache.has(key)) {
       if (state.regions.by === 'form') {
-        if (!sdfCache.has(p.id)) sdfCache.set(p.id, K.shapeDiameter(p.positions, p.indices, {}));
-        regionCache.set(key, K.segmentForm(p.positions, p.indices, { sdf: sdfCache.get(p.id), ratio: state.regions.ratio }));
-      } else regionCache.set(key, K.segmentSurface(p.positions, p.indices, { angle: state.regions.angle, fold: state.regions.fold }));
+        const seg = K.segmentParts(p.positions, p.indices, { ...regionOpts(), sdf: sdfCache.get(p.id) || null });
+        if (seg.sdf && !sdfCache.has(p.id)) sdfCache.set(p.id, seg.sdf);
+        regionCache.set(key, seg);
+      } else regionCache.set(key, K.segmentSurface(p.positions, p.indices, regionOpts()));
     }
     return regionCache.get(key);
+  }
+  // Turn the regions on (or refresh them after a setting changed): the plane, its arrow and its bar step aside
+  // at once, the busy sign shows while the chosen part's parts are found off the main thread, then the regions
+  // come on and `then` runs. A part chosen while the regions show is prepared the same way.
+  let regionsRun = 0;
+  async function startRegions(then) {
+    const vis = state.parts.filter(q => !state.hidden.has(q.id));
+    const p = selectedPart() || (vis.length === 1 ? vis[0] : null);
+    const run = ++regionsRun;
+    state.regions.loading = true;
+    updatePreview(); attachGizmo(); renderInspector(); updateHint(); markDirty();
+    busy(state.regions.by === 'form' ? 'Finding the parts' : 'Finding surface regions');
+    let failed = null;
+    try { if (p) await prepareRegions(p); } catch (err) { failed = err; }
+    if (run !== regionsRun) return; // a newer run took over
+    state.regions.loading = false;
+    busy(null);
+    if (failed) { toast(`The parts couldn’t be found: ${failed.message}`, 'error'); updatePreview(); attachGizmo(); renderInspector(); updateHint(); return; }
+    if (!state.regions.on) setRegions(true); else applyRegions();
+    if (then) then();
   }
   // Cut lines: each part's closed region borders and outlines, worked out with its regions.
   const lineCache = new Map();
@@ -10081,6 +10323,10 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       if (!v) continue;
       if (v.borders) { v.mesh.remove(v.borders); v.borders.geometry.dispose(); v.borders.material.dispose(); v.borders = null; }
       if (!on) { if (v.mat.vertexColors) { v.mat.vertexColors = false; v.mat.needsUpdate = true; } v.mat.color.set(p.color); continue; }
+      // only the chosen part (or a part whose parts are already known) is outlined: finding every part's parts
+      // at once stalled a model of many pieces. Another part is outlined once it is chosen.
+      const chosen = p.id === state.selectedId || (!state.selectedId && state.parts.length === 1);
+      if (!chosen && !regionsReady(p)) { if (v.mat.vertexColors) { v.mat.vertexColors = false; v.mat.needsUpdate = true; } v.mat.color.set(p.color); continue; }
       const seg = regionsFor(p);
       count += seg.count;
       // the regions are outlined, not coloured (the owner's request): the part keeps its own colour, and the colour
@@ -10090,15 +10336,16 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       v.regionColors = col.slice();
       v.geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
       v.mat.vertexColors = true; v.mat.color.set(0xffffff); v.mat.needsUpdate = true;
+      // the borders as smooth curves (the mesh's zigzag edges, rounded), soft and a little see-through, so they
+      // read as guides on the model rather than black wire: the owner found the solid outline ugly
       const lg = new THREE.BufferGeometry();
-      lg.setAttribute('position', new THREE.BufferAttribute(K.regionBorderLines(p.positions, p.indices, seg, K.diag(p.bbox) * 0.0012), 3));
-      v.borders = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x1d1d1b }));
+      lg.setAttribute('position', new THREE.BufferAttribute(K.regionBorderCurves(p.positions, p.indices, seg, K.diag(p.bbox) * 0.0015), 3));
+      v.borders = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: dark() ? 0xf4f1ea : 0x2b2a27, transparent: true, opacity: 0.55, depthWrite: false }));
       v.mesh.add(v.borders);
     }
     $('#regionsPanel').hidden = !on;
     if (!on) { clearPick(); state.regions.hover = null; }
     renderPick();
-    $('#regionsBtn').setAttribute('aria-pressed', on ? 'true' : 'false');
     const out = $('#regionsCount');
     if (out) out.textContent = on ? `${count} ${count === 1 ? 'region' : 'regions'}` : '';
     markDirty();
@@ -10116,10 +10363,9 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     placeAreaTags(); placeSuggestPins(); updateHint(); renderInspector();
     markDirty();
   }
-  $('#regionsBtn').addEventListener('click', () => {
-    if (!state.regions.on) { busy(state.regions.by === 'form' ? 'Finding the parts' : 'Finding surface regions'); setTimeout(() => { setRegions(true); busy(null); }, 30); }
-    else setRegions(false);
-  });
+  // The regions are turned on and off by the Regions tool alone now (the owner found a second button in the view
+  // tools confusing); the toggle is kept for the tests and the debug hooks.
+  function toggleRegions() { if (!state.regions.on) startRegions(); else setRegions(false); }
   $('#regionsAngle').addEventListener('input', (e) => { $('#regionsAngleOut').textContent = `${e.target.value}°`; });
   $('#sinkDepth').addEventListener('change', (e) => {
     state.cfg.sink = Math.max(0, +e.target.value || 0); e.target.value = state.cfg.sink;
@@ -10135,12 +10381,12 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   $('#regionsRatio').addEventListener('change', (e) => {
     state.regions.ratio = 1 + parseFloat(e.target.value) / 100;
     if (!state.regions.on) return;
-    busy('Finding the parts'); setTimeout(() => { applyRegions(); if (state.regions.last) replayPick(selectedPart()); busy(null); }, 30);
+    startRegions(() => { if (state.regions.last) replayPick(selectedPart()); });
   });
   $('#regionsAngle').addEventListener('change', (e) => {
     state.regions.fold = +e.target.value;
     clearPick();
-    busy(state.regions.by === 'form' ? 'Finding the parts' : 'Finding surface regions'); setTimeout(() => { applyRegions(); busy(null); }, 30);
+    if (state.regions.on) startRegions();
   });
 
   function setFlat(on) {
