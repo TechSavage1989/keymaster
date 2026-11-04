@@ -869,10 +869,10 @@ with sync_playwright() as p:
     check('…and the plane is where it was, with its toolbar back', pg.is_visible('#planeBar') and a1 == a0, (a0, a1))
     toggle_regions(pg); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000)
     check('the cut preview steps aside while regions show', not pg.is_visible('#areaTags [data-area-tag]') or pg.locator('#areaTags[hidden]').count() == 1)
-    pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 45; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
+    pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 10; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
     pg.wait_for_timeout(500)
     count80 = pg.inner_text('#regionsCount')
-    check('a higher fold threshold finds no more regions', int(count80.split()[0]) <= int(count.split()[0]) and '45°' in pg.inner_text('#regionsAngleOut'), (count, count80))
+    check('a larger section size finds no more regions', int(count80.split()[0]) <= int(count.split()[0]) and 'Section size' in pg.inner_text('#regionsPanel'), (count, count80))
     n_parts = pg.locator('#partList li[data-id]').count()
     if pg.locator('[data-act=keytype]').count() == 0:
         pg.locator('#partList li[data-id] [data-act=select]').first.click(); pg.wait_for_timeout(300)
@@ -897,7 +897,7 @@ with sync_playwright() as p:
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1", timeout=20000)
     toggle_regions(pg); pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000); pg.wait_for_timeout(300)
     check('with one part, turning regions on chooses it, so the key settings show', pg.locator('[data-act=keytype]').count() > 0 and 'Pegs' in pg.inner_text('#inspector'))
-    pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 15; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
+    pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 55; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
     pg.wait_for_timeout(400)
     check('with regions on, the hint says to click a region or a border line', 'region' in pg.inner_text('#hint') and 'border line' in pg.inner_text('#hint') and 'Click a region to split it off' in pg.inner_text('#cutLineInfo'))
     ax = [0.55, 0.3, 0.78]; L = math.sqrt(sum(v * v for v in ax)); ax = [v / L for v in ax]
@@ -1547,6 +1547,31 @@ with sync_playwright() as p:
     wv0 = pg.evaluate('KeymasterDebug.workerVolume(0)')
     pg.evaluate('KeymasterDebug.scaleAll(10)'); wv1 = pg.evaluate('KeymasterDebug.workerVolume(0)')
     check('after scaling, the background worker works on the scaled part, not the copy it kept', abs(wv1['worker'] - wv1['here']) <= 1e-6 * abs(wv1['here']) and abs(wv1['here'] / wv0['here'] - 1000) < 1, {'before': wv0, 'after': wv1})
+    # 1.74: the model's scale and size: the % is against how it opened and follows undo; sizes typed with the lock
+    # linked scale evenly, with it free stretch one axis; a turn by any angle keeps the bottom on the bed; lay flat
+    boxes_stl(str(OUT / 'slab.stl'), [(0, 0, 0, 40, 20, 10)])
+    pg.set_input_files('#fileInput', str(OUT / 'slab.stl'))
+    pg.wait_for_function("document.querySelector('#partList .part-name') && document.querySelector('#partList .part-name').innerText.includes('slab')", timeout=20000); pg.wait_for_timeout(300)
+    t0 = pg.evaluate("KeymasterDebug.transformInfo()")
+    t1 = pg.evaluate("KeymasterDebug.setScalePct(200)")
+    t2 = pg.evaluate("KeymasterDebug.setScalePct(50)")
+    check('the scale % is against how the model opened: 200% doubles it, then 50% is half the original, not half of 200%', abs(t0['scale'] - 1) < 1e-9 and abs(t1['size'][0] - 80) < 1e-3 and abs(t2['size'][0] - 20) < 1e-3 and abs(t2['scale'] - 0.5) < 1e-9 and t2['pct'] == 50, (t0, t1, t2))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(200)
+    check('undo brings the scale % back with the size', abs(pg.evaluate("KeymasterDebug.transformInfo()")['scale'] - 2) < 1e-9, pg.evaluate("KeymasterDebug.transformInfo()"))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(200)
+    t3 = pg.evaluate("KeymasterDebug.setSize('x', 60)")
+    check('with the sizes linked, typing X = 60 mm scales the whole model evenly (150%)', abs(t3['size'][0] - 60) < 1e-3 and abs(t3['size'][1] - 30) < 1e-3 and abs(t3['size'][2] - 15) < 1e-3 and abs(t3['scale'] - 1.5) < 1e-9, t3)
+    pg.evaluate("KeymasterDebug.sizeLock(false)")
+    t4 = pg.evaluate("KeymasterDebug.setSize('z', 30)")
+    check('with the sizes free, typing Z = 30 mm stretches only Z', abs(t4['size'][2] - 30) < 1e-3 and abs(t4['size'][0] - 60) < 1e-3 and abs(t4['size'][1] - 30) < 1e-3, t4)
+    pg.evaluate("KeymasterDebug.sizeLock(true)")
+    z0 = t4['min'][2]
+    t5 = pg.evaluate("KeymasterDebug.turnBy('y', 30)")
+    check('turning by 30° about Y keeps the model on the bed and changes its footprint', abs(t5['min'][2] - z0) < 1e-6 and abs(t5['size'][0] - 60) > 1, (t4, t5))
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(200)
+    t6 = pg.evaluate("KeymasterDebug.layFlat([1, 0, 0])")
+    check('lay flat puts the face clicked face down: the 60 mm side becomes the height', abs(t6['size'][2] - 60) < 1e-3 and abs(t6['min'][2] - z0) < 1e-6, t6)
+    check('Turn freely and Lay flat sit in the model chip and the Model panel', pg.locator('#modelTools [data-act=turn-free]').count() == 1 and pg.locator('#modelTools [data-act=lay-flat]').count() == 1)
     # 1.73: a 3MF (compressed, as slicers write it) and a STEP file open (the STEP reader is a stand-in here: the real
     # one loads from jsDelivr, which the tests don't reach)
     cubexml = '<vertices>' + ''.join(f'<vertex x="{x}" y="{y}" z="{z}"/>' for x, y, z in [(0,0,0),(20,0,0),(20,20,0),(0,20,0),(0,0,20),(20,0,20),(20,20,20),(0,20,20)]) + '</vertices><triangles>' + ''.join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in [(0,2,1),(0,3,2),(4,5,6),(4,6,7),(0,1,5),(0,5,4),(1,2,6),(1,6,5),(2,3,7),(2,7,6),(3,0,4),(3,4,7)]) + '</triangles>'

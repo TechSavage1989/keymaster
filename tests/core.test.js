@@ -682,6 +682,21 @@ console.log('cut suggestions');
       const count = (seg) => { const g = seg.groupOf[top]; let on = 0, off = 0; for (let t = 0; t < n2; t++) if (seg.groupOf[t] === g) { if (onBlock(t)) on++; else off++; } return { on, off }; };
       const sec = count(K.segmentSurface(Q, J, { angle: 60, fold: 15 })), part = count(K.segmentParts(Q, J, { ratio: 1.2, strength: 0.36, minFrac: 0.008 }));
       check('a small block fused onto a big one: its top is a region of its own, and the block a part of its own', sec.on > 0 && sec.off === 0 && part.on >= 0.9 * nb && part.off < 0.1 * part.on, { sec, part, nb }); }
+    // 1.74: where a hard surface meets an organic one there is a border: a crisp box pushed into a bumpy ball (sculpt-like
+    // noise on every vertex) is hard, the ball organic, and no Sections region holds much of both
+    { const ball = K.prepareMesh(uvSphere(12, 96, 64)), BP = new Float64Array(ball.positions);
+      let sd = 3; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+      for (let i = 0; i < BP.length; i += 3) { const r = Math.hypot(BP[i], BP[i + 1], BP[i + 2]), k = 1 + 0.01 * (rnd() - 0.5); BP[i] *= k; BP[i + 1] *= k; BP[i + 2] *= k; }
+      const bx = K.shapeMesh({ kind: 'cube', w: 8, d: 8, h: 8 }), XP = new Float64Array(bx.positions); for (let i = 0; i < XP.length; i += 3) XP[i + 2] += 14;
+      const un = K.booleanWith(BP, ball.indices, { positions: XP, indices: bx.indices }, 'union');
+      const sub = K.subdivideMesh(un.positions, un.indices, { maxEdge: 1 }), Q = sub.positions, J = sub.indices, n2 = J.length / 3;
+      const seg = K.segmentSurface(Q, J, { angle: 60, fold: 15 }), cz = (t) => (Q[3 * J[3 * t] + 2] + Q[3 * J[3 * t + 1] + 2] + Q[3 * J[3 * t + 2] + 2]) / 3, cr = (t) => Math.hypot((Q[3 * J[3 * t]] + Q[3 * J[3 * t + 1]] + Q[3 * J[3 * t + 2]]) / 3, (Q[3 * J[3 * t] + 1] + Q[3 * J[3 * t + 1] + 1] + Q[3 * J[3 * t + 2] + 1]) / 3, cz(t));
+      const cxy = (t, k) => (Q[3 * J[3 * t] + k] + Q[3 * J[3 * t + 1] + k] + Q[3 * J[3 * t + 2] + k]) / 3;
+      const onBox = (t) => Math.max(Math.abs(cxy(t, 0)), Math.abs(cxy(t, 1))) <= 4.05 && cz(t) >= 9.9 && Math.abs(cr(t) - 12) > 0.15;
+      let hb = 0, nbx = 0, hballs = 0, nball = 0; for (let t = 0; t < n2; t++) { if (onBox(t)) { nbx++; hb += seg.hard[t]; } else if (cz(t) < 8) { nball++; hballs += seg.hard[t]; } }
+      const mix = new Map(); for (let t = 0; t < n2; t++) { const g = seg.groupOf[t]; if (!mix.has(g)) mix.set(g, [0, 0]); mix.get(g)[onBox(t) ? 0 : 1]++; }
+      const mixed = [...mix.values()].filter(([a, b]) => Math.min(a, b) > 0.1 * Math.max(a, b)).length;
+      check('a crisp box pushed into a bumpy ball reads hard, the ball organic, and no region holds much of both', hb > 0.8 * nbx && hballs < 0.05 * nball && mixed === 0, { box: hb / nbx, ball: hballs / nball, mixed }); }
     // a plug fits a small area: a 3.4 mm rod's end with a 0.8 mm wall (a miniature's arm)
     const rod = K.shapeMesh({ kind: 'tube', w: 3.4, h: 20, segments: 48 }), pcfg = { type: 'plug', shape: 'round', diameter: 3, length: 3, margin: 0.8, clearance: 0.1, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 3, pegSide: 'below', perArea: 1, sizeMode: 'auto', sizeMin: 1.5 };
     const an = K.analyzePlane(rod.positions, rod.indices, K.frameFromNormal([0, 0, 1], [0, 0, 0.013]), pcfg, 20), pl = K.planPlugs(an, pcfg);

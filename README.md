@@ -15,6 +15,8 @@
 
 ## Features
 
+- **Size and turn it like any 3D app.** The scale % shows the model's real scale against how it opened; type a width, depth or height in mm with the sizes linked (even scaling) or free (stretch one way); turn it by any angle, freely with the rings, or click a face to lay it flat on the bed.
+- **Hard parts stand apart.** Where a made object (a book, a buckle, a crucifix, a base) meets cloth or skin, Sections and Parts put a border, and the Section size slider goes from a few large sections to many small ones.
 - **Open STL, OBJ, 3MF or STEP.** A 3MF from your slicer opens with every object placed as it was; a STEP file from CAD is turned into a printable mesh in your browser. Big files are read and repaired in the background, so the page never freezes while they open.
 - **Parts that stop where they should.** A hand resting on a book, a book against a robe, a plate on an arm: where two parts meet at a clear crease they stay apart at Balanced and Fine, however small one of them is, so a click or a Fill takes just the part you meant.
 - **Cuts that slice clean.** A region or a painted area is cut along a smooth curve through the model's triangles, not along their edges, so the rim of the cut face and its sunk wall come out even, with no teeth or tiny points, and the pieces slide together. After every cut, Keymaster checks that no piece is left too thin behind its cut face to print.

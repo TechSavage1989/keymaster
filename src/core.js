@@ -2090,6 +2090,64 @@ const KMCore = (() => {
     }
     return changed;
   }
+  // Hard surface or organic, per triangle (the owner: "determine when a hard surface meets a more organic surface and
+  // split accordingly"): cloth, skin and hair bend a little at nearly every edge, each triangle a flat patch of its
+  // own, while a modelled object (a book, a buckle, a crucifix, a cylinder's facets) is flat patches of several
+  // triangles meeting at edges. Each triangle is scored by the share of its edges that bend gently (0.5° to 30°) next
+  // to a lone triangle; the score is averaged over three rings of neighbours, and under 40% gentle is hard; then any
+  // hard or organic patch under 0.2% of the surface takes the other label. On Father Rhinehardt it finds the books,
+  // their clasps, the crucifix and the cuff bands, and leaves the robe and the hands organic. Returns a Uint8Array,
+  // 1 for hard.
+  function hardSurface(P, I, N, A, pairs, total) {
+    const nt = I.length / 3, np = pairs.length / 4;
+    const lo = Math.cos(0.5 * Math.PI / 180), hi = Math.cos(30 * Math.PI / 180);
+    // flat patches: neighbours within half a degree; each patch scored by how much of its outline is a sharp edge
+    // (a book's face is outlined by sharp edges; a faceted cylinder's facet, or a low-poly robe's, by gentle ones)
+    const fp = new Int32Array(nt); for (let t = 0; t < nt; t++) fp[t] = t;
+    const ff = (x) => { while (fp[x] !== x) { fp[x] = fp[fp[x]]; x = fp[x]; } return x; };
+    const dots = new Float64Array(np), elen = new Float64Array(np);
+    for (let i = 0; i < np; i++) {
+      const a = pairs[4 * i], b = pairs[4 * i + 1], ea = 3 * pairs[4 * i + 2], eb = 3 * pairs[4 * i + 3];
+      dots[i] = N[3 * a] * N[3 * b] + N[3 * a + 1] * N[3 * b + 1] + N[3 * a + 2] * N[3 * b + 2];
+      elen[i] = Math.hypot(P[ea] - P[eb], P[ea + 1] - P[eb + 1], P[ea + 2] - P[eb + 2]);
+      if (dots[i] >= lo) { const x = ff(a), y = ff(b); if (x !== y) fp[x] = y; }
+    }
+    const fn = new Int32Array(nt); for (let t = 0; t < nt; t++) fn[ff(t)]++;
+    // an edge that bends gently is organic only beside a lone triangle (cloth, skin); between flat patches of two or
+    // more triangles it is the faceting of a made shape (a cylinder's facets, a book's bevels)
+    const soft = new Float64Array(nt), cnt = new Float64Array(nt);
+    for (let i = 0; i < np; i++) {
+      const a = pairs[4 * i], b = pairs[4 * i + 1], g = dots[i] < lo && dots[i] > hi && (fn[ff(a)] === 1 || fn[ff(b)] === 1) ? 1 : 0;
+      soft[a] += g; soft[b] += g; cnt[a]++; cnt[b]++;
+    }
+    const deg = new Int32Array(nt + 1);
+    for (let i = 0; i < np; i++) { deg[pairs[4 * i] + 1]++; deg[pairs[4 * i + 1] + 1]++; }
+    for (let t = 0; t < nt; t++) deg[t + 1] += deg[t];
+    const fill = deg.slice(0, nt), nb = new Int32Array(deg[nt]);
+    for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; nb[fill[a]++] = b; nb[fill[b]++] = a; }
+    let h = new Float64Array(nt); for (let t = 0; t < nt; t++) h[t] = cnt[t] ? 1 - soft[t] / cnt[t] : 0;
+    for (let it = 0; it < 3; it++) { const g = new Float64Array(nt); for (let t = 0; t < nt; t++) { let sm = h[t], n = 1; for (let j = deg[t]; j < deg[t + 1]; j++) { sm += h[nb[j]]; n++; } g[t] = sm / n; } h = g; }
+    const out = new Uint8Array(nt); for (let t = 0; t < nt; t++) out[t] = h[t] > 0.6 ? 1 : 0;
+    { // a hard patch must have sharp edges in it (its length of edges turning over 30°, at least the side of a square
+      // of its area): flat-paired facets of a low-poly robe, or a knot's even quads, have none and stay organic
+      const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+      const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+      for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (out[a] && out[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
+      const area = new Map(), sh = new Map();
+      for (let t = 0; t < nt; t++) if (out[t]) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
+      for (let i = 0; i < np; i++) if (dots[i] <= hi) for (const t of [pairs[4 * i], pairs[4 * i + 1]]) if (out[t]) { const r = find(t); sh.set(r, (sh.get(r) || 0) + elen[i] / 2); }
+      for (let t = 0; t < nt; t++) if (out[t]) { const r = find(t); if ((sh.get(r) || 0) < Math.sqrt(area.get(r))) out[t] = 0; }
+    }
+    for (let round = 0; round < 2; round++) { // small patches of either kind join what surrounds them
+      const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+      const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+      for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (out[a] === out[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
+      const area = new Map(); for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
+      let flipped = 0; for (let t = 0; t < nt; t++) if (area.get(find(t)) < 0.002 * total) { out[t] = 1 - out[t]; flipped++; }
+      if (!flipped) break;
+    }
+    return out;
+  }
   function segmentSurface(P, I, opts = {}) {
     const angle = opts.angle === undefined ? 35 : opts.angle, minFrac = opts.minFrac === undefined ? 0.003 : opts.minFrac, fold = opts.fold;
     const keepCreased = opts.keepCreased !== undefined ? !!opts.keepCreased : fold !== undefined; // (1.72) with a fold, regions creased all round are kept
@@ -2118,6 +2176,10 @@ const KMCore = (() => {
       const valley = C && (C[3 * q] - C[3 * s]) * N[3 * s] + (C[3 * q + 1] - C[3 * s + 1]) * N[3 * s + 1] + (C[3 * q + 2] - C[3 * s + 2]) * N[3 * s + 2] > 0;
       if (dot >= (valley ? cosF : cosA)) smooth[i / 4] = 1;
     }
+    // (1.74) where a hard surface meets an organic one there is a border, whatever the angle (the owner: "make sure the
+    // application can determine when a hard surface meets a more organic surface and splits accordingly")
+    const hard = (opts.hardSurface !== undefined ? opts.hardSurface : fold !== undefined) ? hardSurface(P, I, N, A, pairs, total) : null;
+    if (hard) for (let i = 0; i < np; i++) if (hard[pairs[4 * i]] !== hard[pairs[4 * i + 1]]) smooth[i] = 0;
     for (let i = 0; i < np; i++) if (smooth[i]) { const x = find(pairs[4 * i]), y = find(pairs[4 * i + 1]); if (x !== y) par[x] = y; }
     // melt specks into the neighbour they share the most border with, smallest first, until none are left
     const minA = total * minFrac;
@@ -2165,7 +2227,7 @@ const KMCore = (() => {
     if (unpinchGroups(P, I, groupOf)) { count = 0; for (let t = 0; t < nt; t++) count = Math.max(count, groupOf[t] + 1); areas = new Array(count).fill(0); for (let t = 0; t < nt; t++) areas[groupOf[t]] += A[t]; }
     const borders = [];
     for (let i = 0; i < pairs.length; i += 4) if (groupOf[pairs[i]] !== groupOf[pairs[i + 1]]) borders.push(pairs[i], pairs[i + 1], pairs[i + 2], pairs[i + 3]);
-    return { groupOf, count, areas, borders: new Int32Array(borders) };
+    return { groupOf, count, areas, borders: new Int32Array(borders), hard };
   }
   /* ---------- form: the parts of a figure by thickness ----------
      The owner's "intelligence to detect form and parts": limbs, a head, a torso, a weapon are told apart by how
@@ -2399,13 +2461,14 @@ const KMCore = (() => {
     }
     // the edges between triangles, with their length and whether they are a concave crease at least `fold` deep
     const pairs = trianglePairs(I);
-    const ne = pairs.length / 4, elen = new Float64Array(ne), eturn = new Float64Array(ne), econcave = new Uint8Array(ne), econvex = new Uint8Array(ne), cosFold = Math.cos(fold);
+    const ne = pairs.length / 4, ehard = new Uint8Array(ne), elen = new Float64Array(ne), eturn = new Float64Array(ne), econcave = new Uint8Array(ne), econvex = new Uint8Array(ne), cosFold = Math.cos(fold);
     for (let e = 0; e < ne; e++) {
       const s = pairs[4 * e], q = pairs[4 * e + 1], a = 3 * pairs[4 * e + 2], b = 3 * pairs[4 * e + 3];
       elen[e] = Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]);
       const dot = N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2];
       const valley = (C[3 * q] - C[3 * s]) * N[3 * s] + (C[3 * q + 1] - C[3 * s + 1]) * N[3 * s + 1] + (C[3 * q + 2] - C[3 * s + 2]) * N[3 * s + 2] > 1e-9;
       eturn[e] = Math.acos(Math.max(-1, Math.min(1, dot)));
+      if (creases.hard && creases.hard[s] !== creases.hard[q]) ehard[e] = 1; // hard surface meets organic
       econcave[e] = valley && dot < cosFold ? 1 : 0;
       econvex[e] = !valley && dot < cosFold ? 1 : 0;
     }
@@ -2431,8 +2494,8 @@ const KMCore = (() => {
         const e = cand[i], x = find(pairs[4 * e]), y = find(pairs[4 * e + 1]); if (x === y) continue;
         for (const r of [x, y]) if (!area.has(r)) { const sm = sumsOf(r); area.set(r, sm.a); xsum.set(r, sm.x); }
         const r = Math.min(x, y), s = Math.max(x, y), key = r * nt + s;
-        let b = border.get(key); if (!b) { b = { r, s, len: 0, concave: 0, convex: 0, turn: 0 }; border.set(key, b); }
-        b.len += elen[e]; b.turn += elen[e] * eturn[e]; if (econcave[e]) b.concave += elen[e]; if (econvex[e]) b.convex += elen[e];
+        let b = border.get(key); if (!b) { b = { r, s, len: 0, concave: 0, convex: 0, turn: 0, hard: 0 }; border.set(key, b); }
+        b.len += elen[e]; b.turn += elen[e] * eturn[e]; if (ehard[e]) b.hard += elen[e]; if (econcave[e]) b.concave += elen[e]; if (econvex[e]) b.convex += elen[e];
       }
       return { area, xsum, border };
     };
@@ -2450,7 +2513,7 @@ const KMCore = (() => {
       // and a hat's brim came out as four rings
       const support = Math.min(1, 0.35 + 1.5 * concave + 1.5 * neckRaw);
       const step = Math.min(1, Math.abs(st.xsum.get(b.r) / ar - st.xsum.get(b.s) / as) / gap) * (1 - convex) * support;
-      return Math.max(concave, step, neck);
+      return Math.max(concave, step, neck, b.len > 0 ? b.hard / b.len : 0); // (1.74) a border all along where a hard surface meets an organic one is a part boundary
     };
     const melt = (limit, pickWeakest) => { // regions under `limit` of the area go into a neighbour: the one sharing the most border, or the weakest border
       for (let pass = 0; pass < 30; pass++) {
