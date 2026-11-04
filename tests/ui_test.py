@@ -1081,6 +1081,13 @@ with sync_playwright() as p:
     pg.click('#drawLineBtn'); pg.wait_for_timeout(200)
     check('the draw button turns drawing on and the hint explains the stroke and the points', pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'true' and 'Drag a line across' in pg.inner_text('#hint') and 'click points' in pg.inner_text('#hint').lower(), pg.inner_text('#hint'))
     rb = math.sqrt(144 - 64); vv = [ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]]
+    # the stroke shows as a line while it is dragged (1.66: the SVG line never showed, its hidden attribute stayed)
+    cbox = pg.locator('#stage canvas').bounding_box(); sx, sy = cbox['x'] + cbox['width'] * 0.3, cbox['y'] + cbox['height'] * 0.5
+    pg.mouse.move(sx, sy); pg.mouse.down()
+    for i in range(1, 8): pg.mouse.move(sx + i * 25, sy + i * 3); pg.wait_for_timeout(20)
+    shown_mid = pg.evaluate('KeymasterDebug.strokeLineShown()')
+    pg.mouse.up(); pg.wait_for_timeout(400)
+    check('a stroke shows as a dashed line while it is dragged, and the line goes when it is let go', shown_mid and not pg.evaluate('KeymasterDebug.strokeLineShown()'))
     # a stroke across the bar (1.64): the cut wraps round it there by itself and is picked with keys and checks
     on_bar = [ax[k] * 30 + u[k] * 2.5 for k in range(3)]
     rs = pg.evaluate(f"KeymasterDebug.strokeCut({on_bar}, {ax})")
@@ -1175,6 +1182,15 @@ with sync_playwright() as p:
     info = pg.inner_text('#cutLineInfo')
     print('    sleeve hem:', res, info.replace('\n', ' ')[:160])
     check('the hem line comes with pegs sized to fit', bool(res) and res['ok'] and 'sized to fit' in info and ' peg' in info, info)
+    # pressing the cut while the check runs (1.66): the button stays live, and the cut follows once it passes
+    n_parts = pg.locator('#partList li[data-id]').count()
+    q = pg.evaluate("(async () => { const pr = KeymasterDebug.pickCutLineAt(0, [8, 0, 40]); const r = KeymasterDebug.pressCut(); await pr; await new Promise(res => setTimeout(res, 300)); return r; })()")
+    pg.wait_for_function(f"document.querySelectorAll('#partList li[data-id]').length > {n_parts}", timeout=30000)
+    check('the cut can be pressed while the check runs, and it cuts as soon as the check passes', q['pending'] and q['queued'] and pg.locator('#partList li[data-id]').count() > n_parts, (q, pg.inner_text('#toast')))
+    pg.keyboard.press('Control+z'); pg.wait_for_function(f"document.querySelectorAll('#partList li[data-id]').length === {n_parts}", timeout=30000)
+    if not pg.evaluate('KeymasterDebug.regionsOn()'): toggle_regions(pg)
+    if pg.locator('[data-act=keytype]').count() == 0: pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
+    res = pg.evaluate("KeymasterDebug.pickCutLineAt(0, [8, 0, 40])"); pg.wait_for_timeout(200)
     pg.click('[data-act=cut-line]')
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
     check('cutting along the hem with keys gives the sleeve and the arm', pg.locator('#partList li[data-id]').count() == 2)
