@@ -826,6 +826,16 @@ console.log('form: the parts of a figure by thickness');
     const main = (m) => [...m.entries()].sort((a, b) => b[1] - a[1])[0];
     const [gt, nTop] = main(top), [gl, nLow] = main(low), sum = (m) => [...m.values()].reduce((a, b) => a + b, 0);
     check('a hat on a head comes out as its own part, the head below it another', hs.count >= 2 && gt !== gl && nTop / sum(top) > 0.8 && nLow / sum(low) > 0.8, { count: hs.count }); }
+  // a whole pick as plain data (what the app's worker runs): the arm region split off with pegs, sealed pieces whose
+  // volumes add up, nothing in it a worker can't send, and the same pieces as an unforced cut gives
+  { const cfg = { type: 'peg', shape: 'round', diameter: 3, length: 4, clearance: 0.2, margin: 0.8, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 1.5, printer: 'fdm', pegSide: 'below', perArea: 1, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, sizeMax: 3 };
+    let arm = -1; { const m = new Map(); for (let t = 0; t < nt; t++) if (partOf(t) === 'arm R') m.set(ps.groupOf[t], (m.get(ps.groupOf[t]) || 0) + 1); arm = [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]; }
+    const req = { loops: K.groupLoops(P, I, ps, [arm]), regions: [arm], seg: { groupOf: ps.groupOf, count: ps.count, borders: ps.borders, areas: ps.areas }, cfg, minThickness: 0.8, sink: 1, perArea: 1, numberJoints: false, joint: 1 };
+    const out = K.planPick(P, I, req), sent = typeof structuredClone === 'function' ? structuredClone(K.plainData(out)) : K.plainData(out);
+    const parts = out.result ? out.result.parts : [], vol = parts.reduce((a, q) => a + q.volume, 0);
+    check('a pick planned as plain data splits the arm off sealed, the volumes adding up, and can be sent from a worker', !out.error && parts.length >= 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002 && sent.result.parts.length === parts.length && sent.draw.length === out.loops.length, { error: out.error, n: parts.length, vol, whole: K.volume(P, I) });
+    const plain = K.splitRegions(P, I, req.seg, [arm], { cfg, minThickness: 0.8, sink: 1, perLoop: out.perLoop });
+    check('trying the cut forced first gives the very pieces an unforced cut gives', !out.forced && plain.parts.length === parts.length && plain.parts.every((q, i) => Math.abs(q.volume - parts[i].volume) < 1e-6), { forced: out.forced }); }
   // the outlines for display: smooth curves along the borders, as many segments as the edges or more, lifted off the surface
   const cv = K.regionBorderCurves(P, I, ps, 0.1), raw = K.regionBorderLines(P, I, ps, 0.1);
   let finite = true; for (let i = 0; i < cv.length; i++) if (!Number.isFinite(cv[i])) { finite = false; break; }

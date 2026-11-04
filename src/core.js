@@ -3699,7 +3699,7 @@ const KMCore = (() => {
       const mine = parts.find((q, i) => q.first && sets[i].has(k)), other = parts.find((q, i) => !q.first && sets[i].has(k));
       return [mine || parts.find(q => q.first), other || parts.find(q => !q.first)];
     };
-    const warnings = [], refuse = (message, code) => { if (opts.force && canForce) { if (!warnings.some(w => w.code === code)) warnings.push({ code, message }); return; } throw guardError(message, code); };
+    const warnings = [], refuse = (message, code, wedged) => { if (opts.force && canForce) { if (!warnings.some(w => w.code === code)) warnings.push(wedged ? { code, message, wedged: true } : { code, message }); return; } throw guardError(message, code); };
     for (const c of caps) {
       const [p1, p2] = pair(c), F = c.F;
       if (opts.minThickness > 0) { // neither piece may be too thin to print where they meet
@@ -3716,7 +3716,7 @@ const KMCore = (() => {
         const wedged = L > 1 && caps.filter(d => { const [a, b] = pair(d); return a === p1 && b === p2; }).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
         refuse(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
-          : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked');
+          : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked', wedged);
       }
     }
     // which way each piece pulls away from the others: along the lines' frame normals, away from the piece across
@@ -3862,6 +3862,98 @@ const KMCore = (() => {
     r.parts = [...r.parts.filter(q => q.first), ...r.parts.filter(q => !q.first)]; // the regions' own piece (or pieces, when they don't touch) first
     for (const q of r.parts) delete q.first;
     return { ...r, loops: loops.length };
+  }
+  /* ---------- a whole pick, as plain data ----------
+     Everything the app does when a region or a line is picked: the lines turned to agree, the analysis of each
+     line, its keys or plug, the joint numbers, and the cut with its fallbacks (without the joints when they won't
+     fit, then forced when the refusal is one that may be overridden). It returns only plain data (no analyses,
+     which carry functions), so it can run in a Web Worker: the owner's 352k-triangle figure froze for half a
+     minute on a refused pick, which ran the cut three times on the main thread. The markers are drawn from
+     `draw`: per line, each key with its angle and levels, each plug with its two heights.
+     req: { loops, regions, seg, painted, lines, cfg, minThickness, sink, sizeSet, perArea, numberJoints, joint } */
+  // A copy of a result fit to send from a Web Worker: functions dropped (keys carry a depthOn helper once cut),
+  // typed arrays kept as they are, shared objects copied once
+  function plainData(x, seen = new Map()) {
+    if (x === null || typeof x !== 'object') return typeof x === 'function' ? undefined : x;
+    if (ArrayBuffer.isView(x) || x instanceof ArrayBuffer) return x;
+    if (seen.has(x)) return seen.get(x);
+    if (Array.isArray(x)) { const out = new Array(x.length); seen.set(x, out); for (let i = 0; i < x.length; i++) out[i] = plainData(x[i], seen); return out; }
+    if (x instanceof Map || x instanceof Set) return x; // cloneable as they are (none here holds functions)
+    const out = {}; seen.set(x, out);
+    for (const k of Object.keys(x)) { const v = x[k]; if (typeof v !== 'function') out[k] = plainData(v, seen); }
+    return out;
+  }
+  function curvedSideOf(pref, into2) { return (pref === 'below') === (into2 > 0) ? 'below' : 'above'; }
+  function planPick(P, I, req) {
+    const cfg = req.cfg, D = diag(bounds(P));
+    let loops = req.loops;
+    if (!req.regions && loops.length && loops.every(l => l.closed)) { try { loops = orientLoops(P, I, loops, { what: 'lines' }).loops; } catch (err) { /* the cut will say why */ } }
+    const out = { loops, perLoop: [], frames: [], draw: [], keys: 0, plugs: 0, noKeys: null, result: null, error: null, errorCode: null, forced: null, dropped: null };
+    const closed = loops.length > 0 && loops.every(l => l.closed);
+    if (closed && cfg.type !== 'none') {
+      for (const loop of loops) {
+        const per = { keys: [], plugs: [] }, draw = { keys: [], plugs: [] };
+        let an = null;
+        try {
+          const an0 = analyzeLoop(P, I, loop, cfg, D), side = curvedSideOf(cfg.pegSide, an0.curved.into2), lcfg = { ...cfg, pegSide: side };
+          an = side === cfg.pegSide ? an0 : analyzeLoop(P, I, loop, lcfg, D);
+          per.pegSide = side; per.cfg = lcfg;
+          out.frames.push(an.frame);
+          if (cfg.type === 'plug') {
+            const pl = planPlugs(an, lcfg);
+            per.plugs = pl.filter(q => q.ok);
+            if (!per.plugs.length && !out.noKeys) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
+            const H = an.curved.heightAt;
+            for (const q of per.plugs) { let lo = Infinity, hi = -Infinity; for (const [x, y] of q.mouth) { const z = H(x, y); lo = Math.min(lo, z); hi = Math.max(hi, z); } draw.plugs.push({ base: q.base, top: q.top, z0: q.side > 0 ? lo : hi, tip: (q.side > 0 ? hi : lo) + q.side * q.depth }); }
+          } else {
+            const keys = req.sizeSet ? autoPlaceKeys(an, lcfg, req.perArea, new Set()) : autoFitKeys(an, lcfg, req.perArea, new Set());
+            const ok = evaluateKeys(an, keys, lcfg, new Set());
+            per.keys = keys.filter((k, i) => ok[i].ok);
+            if (!per.keys.length && !out.noKeys) out.noKeys = { code: 'room' };
+            for (const k of per.keys) { const kc = keyCfg(lcfg, k); draw.keys.push({ k, angle: keyAngle(an.base, 0, kc), lv: keyLevels(an, lcfg, k) }); }
+          }
+        } catch (err) { out.frames.push(null); an = null; if (!out.noKeys) out.noKeys = { code: 'failed' }; }
+        if (req.numberJoints && !per.plugs.length && an) { const jm = jointMarks(an.base, 0, per.keys, per.cfg || cfg, req.joint + out.perLoop.length, { mirror: false }); per.marks = jm ? jm.marks : []; }
+        out.perLoop.push(per); out.draw.push(draw); out.keys += per.keys.length; out.plugs += per.plugs.length;
+      }
+    } else { out.perLoop = loops.map(() => ({ keys: [], plugs: [] })); out.draw = loops.map(() => ({ keys: [], plugs: [] })); }
+    const run = (withJoints, force) => {
+      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, perLoop: withJoints ? out.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
+      if (req.regions) return splitRegions(P, I, req.seg, req.regions, o);
+      if (loops.length > 1) return cutAlongLoops(P, I, loops, { ...o, what: 'lines' });
+      const p0 = o.perLoop[0] || {};
+      return cutAlongLoop(P, I, loops[0], { ...o, cfg: p0.pegSide ? { ...cfg, pegSide: p0.pegSide } : cfg, keys: p0.keys, plugs: p0.plugs });
+    };
+    const dropJoints = (code) => { out.dropped = { code, what: out.plugs ? 'plug' : 'keys' }; out.keys = 0; out.plugs = 0; out.perLoop = loops.map(() => ({ keys: [], plugs: [] })); out.draw = loops.map(() => ({ keys: [], plugs: [] })); };
+    // The cut is tried forced first: a forced cut builds the same pieces and turns the thin and locked refusals
+    // into warnings, so its warnings say what an unforced cut would have refused, and the fallbacks below take
+    // one run each instead of three (on the owner's figure a refused pick built its pieces nine times)
+    let first = null;
+    try { first = run(true, true); } catch (err) { first = null; }
+    const guards = (r) => (r.warnings || []).filter(w => w.code === 'thin' || w.code === 'locked');
+    if (first) {
+      const w = guards(first);
+      if (!w.length) { out.result = first; return out; }
+      if ((out.keys || out.plugs) && !w.some(x => x.code === 'thin' || x.wedged)) { // locked with joints: without them the pieces may slide out at a slant (never when the region is held at both ends)
+        let second = null; try { second = run(false, true); } catch (err) { second = null; }
+        if (second) { const w2 = guards(second); dropJoints('locked'); out.result = second; if (w2.length) out.forced = w2[0].message; return out; }
+      }
+      out.result = first; out.forced = w[0].message; return out;
+    }
+    try { out.result = run(true); }
+    catch (err) {
+      let failed = err, joints = true;
+      if ((out.keys || out.plugs) && err.code !== 'thin') { // still offer the cut, without the joints
+        joints = false;
+        try { out.result = run(false); dropJoints(err.code); failed = null; } catch (e2) { failed = e2; }
+      }
+      // a printability refusal (too thin, or pieces that hook) can be overridden: the cut is offered anyway, with the warning
+      if (failed && (failed.code === 'thin' || failed.code === 'locked')) {
+        try { out.result = run(joints, true); if (!joints) dropJoints(err.code); out.forced = failed.message; } catch (e3) { failed = e3; }
+      }
+      if (failed && !out.result) { out.error = failed.message; out.errorCode = failed.code || null; }
+    }
+    return out;
   }
   // The region under a point on the surface: the triangle nearest it, by its centre (none when the point is far
   // from the surface).
@@ -4056,13 +4148,22 @@ const KMCore = (() => {
   // than 0.05 mm and at least three columns wide: smaller ones are slivers where a cut face meets the surface at a
   // glancing angle, far finer than anything a printer makes. Pieces that already overlap over a wide patch are one
   // solid modelled inside another (a pin inside a leg): they print as one, so there's nothing to pull apart.
+  // a piece's ray grid along a direction, kept with the piece: the lock check asks for the same piece and the
+  // same direction once per pair it is in, and building the grid was half the cost of a pick on a big figure
+  const rayGridCache = new WeakMap();
+  function pieceRayGrid(A, F) {
+    let m = rayGridCache.get(A.indices); if (!m) { m = new Map(); rayGridCache.set(A.indices, m); }
+    const key = F.n.map(x => x.toFixed(6)).join(',');
+    let g = m.get(key); if (!g) { g = rayGrid(A.positions, A.indices, F); m.set(key, g); }
+    return g;
+  }
   function slidesApart(A, B, d, tol, D, step) {
     const F = frameFromNormal(norm3(d), [0, 0, 0]);
-    const ga = rayGrid(A.positions, A.indices, F), gb = rayGrid(B.positions, B.indices, F);
+    const ga = pieceRayGrid(A, F), gb = pieceRayGrid(B, F);
     const box = (g) => [g.gx0, g.gy0, g.gx0 + g.nx * g.cell, g.gy0 + g.ny * g.cell];
     const ba = box(ga), bb = box(gb), x0 = Math.max(ba[0], bb[0]), y0 = Math.max(ba[1], bb[1]), x1 = Math.min(ba[2], bb[2]), y1 = Math.min(ba[3], bb[3]);
     if (x1 <= x0 || y1 <= y0) return true;
-    const s = Math.max(step, Math.sqrt(((x1 - x0) * (y1 - y0)) / 60000)), nx = Math.ceil((x1 - x0) / s) + 1, ny = Math.ceil((y1 - y0) / s) + 1;
+    const s = Math.max(step, Math.sqrt(((x1 - x0) * (y1 - y0)) / 30000)), nx = Math.ceil((x1 - x0) / s) + 1, ny = Math.ceil((y1 - y0) / s) + 1;
     const fwd = new Uint8Array(nx * ny), back = new Uint8Array(nx * ny), rest = new Uint8Array(nx * ny), grip = Math.max(tol, 0.05);
     for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
       const X = x0 + (i + 0.0137) * s, Y = y0 + (j + 0.0291) * s;
@@ -5700,7 +5801,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves,
+    segmentParts, regionBorderCurves, planPick, plainData,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
