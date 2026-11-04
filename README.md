@@ -15,6 +15,9 @@
 
 ## Features
 
+- **Cuts that slice clean.** A region or a painted area is cut along a smooth curve through the model's triangles, not along their edges, so the rim of the cut face and its sunk wall come out even, with no teeth or tiny points, and the pieces slide together. After every cut, Keymaster checks that no piece is left too thin behind its cut face to print.
+- **See the joint.** Under any pick, **Show: Both | This piece | Other piece** hides one side so you can look at the key or plug and the whole cut face; keys show while you paint, too.
+- **Picks that keep up.** Switch Find or Detail and your pick stays, so you can pick big parts at Balanced and add details at Fine. Shift-click a little bump the parts missed (a spike of a shoulder plate in the chest) to add just that bump, and holes the pick closes round fill themselves.
 - **Sculpt.** Smooth, inflate (or, with Shift, push in) and flatten the surface with a brush, in any size and strength. Each stroke is one undo step, and a painted area keeps the brush inside it.
 - **Boolean.** Join a shape to the model, cut it out, or keep only where they overlap: a base under a figure, a socket for a magnet, a slice off a side, a figure trimmed to a box. The result is sealed and ready to cut, in one undo step.
 - **Shapes.** Add a cube, ball, tube, cone or ring with sharp, chamfered or rounded edges, size it, turn it and place it with handles or numbers. A shape is a part like any other: cut it, export it, or join it to the model with Boolean.

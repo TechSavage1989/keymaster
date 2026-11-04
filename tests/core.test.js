@@ -653,6 +653,21 @@ console.log('cut suggestions');
     const seg = K.bordersFromGroups(P, I, r), sr = K.smoothRegionPick(P, I, seg, [1]);
     const cut = sr && K.splitRegions(P, I, sr.seg, sr.groups, { force: true }), vol = cut ? cut.parts.reduce((a, q) => a + q.volume, 0) : 0, whole = K.volume(P, I);
     check('a ragged region outline re-routed smooth gives a closed line that cuts sealed, the volumes adding up', !!sr && sr.loops.every(l => l.closed) && cut.parts.length === 2 && cut.parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - whole) / whole < 0.002, { loops: sr && sr.loops.length, vol, whole });
+    // 1.71: the same ragged cap sliced along a smooth curve through the triangles: the sliced surface is sealed with
+    // the same volume, the line runs through new vertices, is much more level than the ragged outline, and cuts sealed with a sunk face
+    const sl = K.sliceRegionPick(P, I, seg, [1]), nv0 = P.length / 3;
+    const zSpread = (Q, ls) => { const z = []; for (const l of ls) for (const v of l.verts) z.push(Q[3 * v + 2]); const m = z.reduce((a, b) => a + b, 0) / z.length; return Math.sqrt(z.reduce((a, b) => a + (b - m) ** 2, 0) / z.length); };
+    const raw = zSpread(P, K.groupLoops(P, I, seg, [1])), sliced = sl ? zSpread(sl.P, sl.loops) : Infinity;
+    check('a ragged region sliced through its triangles: sealed, the same volume, its line through new points and far more level', !!sl && K.edgeReport(sl.I).closed && Math.abs(K.volume(sl.P, sl.I) - whole) / whole < 1e-6 && sl.loops.length === 1 && sl.loops[0].closed && sl.loops[0].verts.every(v => v >= nv0) && sliced < 0.4 * raw, { raw, sliced, loops: sl && sl.loops.length });
+    const cs = sl && K.splitRegions(sl.P, sl.I, sl.seg, [1], { force: true, sink: 1 }), vs = cs ? cs.parts.reduce((a, q) => a + q.volume, 0) : 0;
+    check('the sliced pick cuts sealed with its face sunk, the volumes adding up', !!cs && cs.parts.length === 2 && cs.parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vs - whole) / whole < 0.002, { n: cs && cs.parts.length, vs, whole });
+    // 1.71: the check after every cut: a wafer shaved 0.3 mm off a box (forced past the flat cut's own check) is too
+    // thin behind its cut face for a 0.8 mm wall; a cut through the middle is not
+    { const bx = K.shapeMesh({ kind: 'cube', w: 20, d: 20, h: 20 }), BP = new Float32Array(bx.positions), BI = bx.indices;
+      const wafer = K.cutMesh(BP, BI, K.frameFromNormal([0, 0, 1], [0, 0, 9.7]), { scale: 35, force: true, minThickness: 0.8 });
+      const middle = K.cutMesh(BP, BI, K.frameFromNormal([0, 0, 1], [0, 0, 0.3]), { scale: 35, minThickness: 0.8 });
+      const cw = K.cutPrintCheck(BP, wafer.parts, 0.8), cm = K.cutPrintCheck(BP, middle.parts, 0.8);
+      check('the after-cut check finds the 0.3 mm wafer too thin to print, and the halves of a middle cut fine', cw.filter(b => b.thin).length === 1 && cm.every(b => !b.thin), { wafer: cw.map(b => +b.share.toFixed(2)), middle: cm.map(b => +b.share.toFixed(2)) }); }
     // a plug fits a small area: a 3.4 mm rod's end with a 0.8 mm wall (a miniature's arm)
     const rod = K.shapeMesh({ kind: 'tube', w: 3.4, h: 20, segments: 48 }), pcfg = { type: 'plug', shape: 'round', diameter: 3, length: 3, margin: 0.8, clearance: 0.1, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 3, pegSide: 'below', perArea: 1, sizeMode: 'auto', sizeMin: 1.5 };
     const an = K.analyzePlane(rod.positions, rod.indices, K.frameFromNormal([0, 0, 1], [0, 0, 0.013]), pcfg, 20), pl = K.planPlugs(an, pcfg);
