@@ -28,6 +28,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - The look (1.59): filmic tone mapping, a soft shadow under the model, framing that takes in the exploded pieces.
 - Fill gaps, pieces pushed into another separated whole, the exploded view in every tool, no outlines, a clear hover and key colour (1.67).
 - Keys and plugs drawn while the cut is checked, faster strokes, touching loose pieces as one part, Shift-click fills in the regions between, Find regions by Thickness or Creases (1.68).
+- Loose pieces inside a pick come off with it, Smooth jagged lines, scaled or turned parts cut at their new size (1.69).
 - Faster parts and picks, cut while checking, the stroke's line shows (1.66).
 - Split into parts that works on real figures (1.65): tested on the owner's ten reference sculpts; planned candidates, no dips or crumbs, neighbour retries, two to four times faster.
 - A stroke that wraps a cut round a part, a colour per separate picked piece, Shift-click with box select (1.64).

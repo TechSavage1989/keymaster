@@ -622,6 +622,23 @@ console.log('cut suggestions');
     seg.areas = areas;
     const p03 = K.regionPath(RP, RI, seg, [0], 3), p01 = K.regionPath(RP, RI, seg, [0], 1), p33 = K.regionPath(RP, RI, seg, [3], 3);
     check('a Shift-click three regions along fills in the two between; a neighbour or the same region adds nothing', p03.join() === '1,2' && p01.length === 0 && p33.length === 0, { p03, p01 }); }
+  { // loose pieces inside a pick go with it (1.69: the owner's Bills arm, a shoulder region plus a forearm, cuff and
+    // hand that are pieces of their own, came off as the shoulder alone); and a jagged line is smoothed and still seals
+    const body = K.prepareMesh(uvSphere(10, 48, 32)), ball = uvSphere(3, 16, 12, [0, 0, 11.5]);
+    const mm = K.mergeMeshes([body, ball]), P = mm.positions, I = mm.indices, nt = I.length / 3, nb = body.indices.length / 3;
+    const cz = (t) => (P[3 * I[3 * t] + 2] + P[3 * I[3 * t + 1] + 2] + P[3 * I[3 * t + 2] + 2]) / 3;
+    const groupOf = new Int32Array(nt); for (let t = 0; t < nt; t++) groupOf[t] = t >= nb ? 2 : cz(t) > 6 + ((t * 7919) % 5) * 0.35 ? 1 : 0; // a cap with a ragged edge, and the ball
+    const seg = K.bordersFromGroups(P, I, groupOf);
+    const r = K.splitRegions(P, I, seg, [1, 2], { force: true });
+    const whole = K.volume(P, I), vols = r.parts.map(q => q.volume), sum = vols.reduce((a, b) => a + b, 0), ballV = K.volume(ball.positions, ball.indices);
+    check('a pick of a region and a loose piece inside it comes off as one: the cap with the ball, sealed, the volumes adding up', r.parts.length === 2 && r.loose === 1 && r.parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && vols[0] > ballV * 1.2 && Math.abs(sum - whole) / whole < 0.002, { vols, ballV, whole });
+    const loops = K.groupLoops(P, I, seg, [1, 2]), turn = (Q) => { let a = 0; for (const l of loops) { const n = l.verts.length; for (let i = 0; i < n; i++) { const p0 = l.verts[(i + n - 1) % n], p1 = l.verts[i], p2 = l.verts[(i + 1) % n], u = [0, 1, 2].map(k => Q[3 * p1 + k] - Q[3 * p0 + k]), w = [0, 1, 2].map(k => Q[3 * p2 + k] - Q[3 * p1 + k]); a += Math.acos(Math.max(-1, Math.min(1, (u[0] * w[0] + u[1] * w[1] + u[2] * w[2]) / (Math.hypot(...u) * Math.hypot(...w) || 1)))); } } return a; };
+    const sm = K.smoothLoopVertices(P, I, loops), before = turn(P), after = turn(sm.positions);
+    let off = 0; for (let v = 0; v < P.length / 3; v++) off = Math.max(off, Math.abs(Math.hypot(sm.positions[3 * v], sm.positions[3 * v + 1], sm.positions[3 * v + 2]) - Math.hypot(P[3 * v], P[3 * v + 1], P[3 * v + 2])) * (v < body.positions.length / 3 ? 1 : 0));
+    check('a ragged line is smoothed along the surface: it turns much less and stays on the ball', sm.moved > 0 && after < 0.75 * before && off < 0.15, { before, after, off, moved: sm.moved });
+    const cfg = { type: 'none' }, req = { loops, regions: [1, 2], seg: { groupOf: seg.groupOf, count: seg.count, borders: seg.borders }, cfg, minThickness: 0.8, sink: 0, perArea: 1, numberJoints: false, joint: 1, smooth: true };
+    const out = K.planPick(P, I, req), parts = out.result ? out.result.parts : [], ps = parts.reduce((a, q) => a + q.volume, 0);
+    check('a pick cut along the smoothed line is sealed, the volumes adding up', !out.error && parts.length === 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(ps - whole) / whole < 0.005, { error: out.error, n: parts.length, ps, whole }); }
   { // each piece lists the triangles of the original it holds (the inner ball's with its host), every triangle once, in order
     const m = K.prepareMesh(K.mergeMeshes([uvSphere(10, 24, 16), uvSphere(10, 24, 16, [40, 0, 0]), uvSphere(3, 12, 8, [40, 0, 0])]));
     const sh = K.separateShells(m.positions, m.indices), nt = m.indices.length / 3, seen = new Uint8Array(nt);
