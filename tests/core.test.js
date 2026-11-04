@@ -836,6 +836,21 @@ console.log('form: the parts of a figure by thickness');
     check('a pick planned as plain data splits the arm off sealed, the volumes adding up, and can be sent from a worker', !out.error && parts.length >= 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002 && sent.result.parts.length === parts.length && sent.draw.length === out.loops.length, { error: out.error, n: parts.length, vol, whole: K.volume(P, I) });
     const plain = K.splitRegions(P, I, req.seg, [arm], { cfg, minThickness: 0.8, sink: 1, perLoop: out.perLoop });
     check('trying the cut forced first gives the very pieces an unforced cut gives', !out.forced && plain.parts.length === parts.length && plain.parts.every((q, i) => Math.abs(q.volume - parts[i].volume) < 1e-6), { forced: out.forced }); }
+  // a stroke across a limb (1.64): the ring round the part under it, made a line on the surface, cuts sealed
+  { const D = K.diag(K.bounds(P)), near = (q) => { const t = K.nearestTriangle(P, I, q, D); const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; return [(P[a] + P[b] + P[c]) / 3, (P[a + 1] + P[b + 1] + P[c + 1]) / 3, (P[a + 2] + P[b + 2] + P[c + 2]) / 3]; };
+    for (const [name, q, n, side] of [['the right arm', [21, 0, 10.5], [1, 0, 0.15], (c) => c[0] > 18], ['the neck', [0, 2.5, 15.5], [0.1, 0, 1], (c) => c[2] > 15]]) {
+      const L = K.strokeLoop(P, I, { o: near(q), n, scale: D });
+      let r = null, err = ''; try { r = L && K.cutAlongLoop(P, I, L, {}); } catch (e) { err = e.message; }
+      const parts = r ? r.parts : [], vol = parts.reduce((x, y) => x + y.volume, 0), small = parts.slice().sort((x, y) => x.volume - y.volume)[0];
+      const cen = small ? K.bounds(small.positions).center : null;
+      check(`a stroke across ${name} wraps a line round it (tilted no more than 30°) that cuts it off sealed, the volumes adding up`, !!L && L.closed && L.tilt <= 30.5 && parts.length === 2 && parts.every(x => K.edgeReport(x.indices).closed && x.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002 && side(cen), { err, tilt: L && L.tilt, n: parts.length, cen }); }
+    const far = K.strokeLoop(P, I, { o: [500, 500, 500], n: [0, 0, 1], scale: D });
+    check('a stroke that misses the part gives no line', far === null); }
+  // the separate pieces of a pick: two arms apart are two, an arm with the torso one
+  { const regionOf = (name) => { const m = new Map(); for (let t = 0; t < nt; t++) if (partOf(t) === name) m.set(ps.groupOf[t], (m.get(ps.groupOf[t]) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]; };
+    const armR = regionOf('arm R'), armL = regionOf('arm L'), torso = regionOf('torso');
+    const two = K.pickComponents(P, I, ps.groupOf, new Set([armR, armL]), null), one = K.pickComponents(P, I, ps.groupOf, new Set([armR, torso]), null);
+    check('picked regions that don\'t touch are separate pieces (each its own colour), touching ones one', two.count === 2 && one.count === 1, { two: two.count, one: one.count }); }
   // the outlines for display: smooth curves along the borders, as many segments as the edges or more, lifted off the surface
   const cv = K.regionBorderCurves(P, I, ps, 0.1), raw = K.regionBorderLines(P, I, ps, 0.1);
   let finite = true; for (let i = 0; i < cv.length; i++) if (!Number.isFinite(cv[i])) { finite = false; break; }
