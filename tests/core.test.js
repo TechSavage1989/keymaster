@@ -815,6 +815,11 @@ console.log('form: the parts of a figure by thickness');
   check('parts have the shape the regions code expects, and the thickness comes back for reuse', ps.groupOf.length === nt && ps.areas.length === ps.count && ps.sdf && ps.sdf.length === P.length / 3);
   const kp = K.segmentParts(knot.positions, knot.indices, {});
   check('a knot, smooth and even all along, is one part', kp.count === 1, kp.count);
+  { // the fast edge pairing (1.66) pairs triangles exactly as a Map of every edge does, and is kept per mesh
+    const KI = knot.indices, nv = knot.positions.length / 3, first = new Map(), ref = [];
+    for (let t = 0; t < KI.length / 3; t++) for (let k = 0; k < 3; k++) { const a = KI[3 * t + k], b = KI[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a, f = first.get(key); if (f === undefined) first.set(key, t); else { first.delete(key); ref.push(f, t, a, b); } }
+    const fast = K.trianglePairs(KI);
+    check('the fast edge pairing matches a Map of every edge, pair for pair, and is kept for the mesh', fast.length === ref.length && ref.every((v, i) => fast[i] === v) && K.trianglePairs(KI) === fast, { fast: fast.length, ref: ref.length }); }
   // a hat on a head: a brim's crease and a thin crown make it its own part, the head stays whole
   { const head = K.shapeMesh({ kind: 'ball', w: 20, h: 20, segments: 32 });
     let hat = K.booleanShape(head.positions, head.indices, { kind: 'tube', w: 26, h: 1.5, pos: [0, 0, 6], rot: [0, 0, 0], segments: 32 }, 'union');

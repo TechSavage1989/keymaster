@@ -2047,13 +2047,7 @@ const KMCore = (() => {
       if (C) for (let k = 0; k < 3; k++) C[3 * t + k] = (P[a + k] + P[b + k] + P[c + k]) / 3;
     }
     // triangle neighbours across each edge, with the edge's length
-    const first = new Map(), pairs = [];
-    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
-      const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a;
-      const f = first.get(key);
-      if (f === undefined) first.set(key, t);
-      else { first.delete(key); pairs.push(f, t, a, b); }
-    }
+    const pairs = trianglePairs(I);
     const par = new Int32Array(nt);
     for (let t = 0; t < nt; t++) par[t] = t;
     const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
@@ -2241,9 +2235,15 @@ const KMCore = (() => {
     }
     if (!nx) return bordersFromGroups(P, I, new Int32Array(nt));
     // thickness levels: k-means on the log thickness, area-weighted, from six seeds, merged where levels are close
-    const xs = []; for (let t = 0; t < nt; t++) if (X[t] === X[t]) xs.push([X[t], A[t]]);
-    xs.sort((p, q) => p[0] - q[0]);
-    let centres = []; for (let k = 0; k < 6; k++) centres.push(xs[Math.min(xs.length - 1, Math.floor(((k + 0.5) / 6) * xs.length))][0]);
+    // on a histogram of 2,048 bins of the log thickness, weighted by area: the same levels, without sorting and
+    // sweeping every triangle twenty times (most of a second on a 350k-triangle figure)
+    let lo = Infinity, hi = -Infinity; for (let t = 0; t < nt; t++) if (X[t] === X[t]) { if (X[t] < lo) lo = X[t]; if (X[t] > hi) hi = X[t]; }
+    const NB = 2048, span = Math.max(1e-9, hi - lo), hw = new Float64Array(NB), hc = new Float64Array(NB), hs = new Float64Array(NB);
+    for (let t = 0; t < nt; t++) if (X[t] === X[t]) { const i = Math.min(NB - 1, Math.floor(((X[t] - lo) / span) * NB)); hw[i] += A[t]; hc[i]++; hs[i] += X[t] * A[t]; }
+    // each bin at its triangles' own area-weighted mean, so the levels land where they did before
+    const xs = []; for (let i = 0; i < NB; i++) if (hc[i] > 0) xs.push([hw[i] > 0 ? hs[i] / hw[i] : lo + ((i + 0.5) / NB) * span, hw[i], hc[i]]);
+    let centres = [];
+    { let tot = 0; for (const q of xs) tot += q[2]; for (let k = 0; k < 6; k++) { const want = Math.floor(((k + 0.5) / 6) * tot); let acc = 0, x = xs[xs.length - 1][0]; for (const q of xs) { acc += q[2]; if (acc > want) { x = q[0]; break; } } centres.push(x); } } // seeds by triangle count, as before
     const kmeans = () => { for (let it = 0; it < 20; it++) { const sum = centres.map(() => 0), w = centres.map(() => 0); for (const [x, a] of xs) { let bi = 0, bd = Infinity; for (let k = 0; k < centres.length; k++) { const d = Math.abs(x - centres[k]); if (d < bd) { bd = d; bi = k; } } sum[bi] += x * a; w[bi] += a; } let moved = 0; for (let k = 0; k < centres.length; k++) if (w[k] > 0) { const c = sum[k] / w[k]; moved += Math.abs(c - centres[k]); centres[k] = c; } centres.sort((p, q) => p - q); if (moved < 1e-6) break; } };
     kmeans();
     const gap = Math.log(ratio);
@@ -2255,8 +2255,7 @@ const KMCore = (() => {
     }
     const K = centres.length, sigma = gap / 2;
     // the label of each triangle: its own fit plus its neighbours' labels, across concave creases less so
-    const first = new Map(), pairs = [];
-    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a; const f = first.get(key); if (f === undefined) first.set(key, t); else { first.delete(key); pairs.push(f, t, a, b); } }
+    const pairs = trianglePairs(I);
     const nbStart = new Int32Array(nt + 1); for (let i = 0; i < pairs.length; i += 4) { nbStart[pairs[i] + 1]++; nbStart[pairs[i + 1] + 1]++; }
     for (let t = 0; t < nt; t++) nbStart[t + 1] += nbStart[t];
     const nbFill = nbStart.slice(0, nt), nb = new Int32Array(nbStart[nt]), nw = new Float64Array(nbStart[nt]);
@@ -2327,8 +2326,7 @@ const KMCore = (() => {
       X[t] = m ? s / m : 0;
     }
     // the edges between triangles, with their length and whether they are a concave crease at least `fold` deep
-    const first = new Map(), pairs = [];
-    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a; const f = first.get(key); if (f === undefined) first.set(key, t); else { first.delete(key); pairs.push(f, t, a, b); } }
+    const pairs = trianglePairs(I);
     const ne = pairs.length / 4, elen = new Float64Array(ne), econcave = new Uint8Array(ne), econvex = new Uint8Array(ne), cosFold = Math.cos(fold);
     for (let e = 0; e < ne; e++) {
       const s = pairs[4 * e], q = pairs[4 * e + 1], a = 3 * pairs[4 * e + 2], b = 3 * pairs[4 * e + 3];
@@ -2343,12 +2341,22 @@ const KMCore = (() => {
     const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
     const same = (s, q) => form.groupOf[s] === form.groupOf[q] && creases.groupOf[s] === creases.groupOf[q];
     for (let e = 0; e < ne; e++) if (same(pairs[4 * e], pairs[4 * e + 1])) { const x = find(pairs[4 * e]), y = find(pairs[4 * e + 1]); if (x !== y) par[x] = y; }
-    // region sums and the borders between regions, rebuilt after each round of merging
+    // region sums and the borders between regions, rebuilt after each round of merging. Merging only ever removes
+    // borders, so only the edges that are borders now are looked at again, and the sums are gathered from the
+    // triangles once per root (each round a merge is the only change; rescanning every triangle and edge each
+    // round was most of the time on a big figure).
+    const cand = []; for (let e = 0; e < ne; e++) if (find(pairs[4 * e]) !== find(pairs[4 * e + 1])) cand.push(e);
+    const tArea = new Float64Array(nt), tX = new Float64Array(nt);
+    for (let t = 0; t < nt; t++) { const r = find(t); tArea[r] += A[t]; tX[r] += X[t] * A[t]; }
+    const sumsOf = (r) => { // the sums of a root, gathered from the roots merged into it so far
+      return { a: tArea[r], x: tX[r] };
+    };
+    const join = (from, to) => { from = find(from); to = find(to); if (from === to) return; par[from] = to; tArea[to] += tArea[from]; tX[to] += tX[from]; tArea[from] = 0; tX[from] = 0; };
     const stats = () => {
       const area = new Map(), xsum = new Map(), border = new Map(); // border: "r,s" -> { r, s, len, concave, convex }
-      for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); xsum.set(r, (xsum.get(r) || 0) + X[t] * A[t]); }
-      for (let e = 0; e < ne; e++) {
-        const x = find(pairs[4 * e]), y = find(pairs[4 * e + 1]); if (x === y) continue;
+      for (let i = 0; i < cand.length; i++) {
+        const e = cand[i], x = find(pairs[4 * e]), y = find(pairs[4 * e + 1]); if (x === y) continue;
+        for (const r of [x, y]) if (!area.has(r)) { const sm = sumsOf(r); area.set(r, sm.a); xsum.set(r, sm.x); }
         const r = Math.min(x, y), s = Math.max(x, y), key = r * nt + s;
         let b = border.get(key); if (!b) { b = { r, s, len: 0, concave: 0, convex: 0 }; border.set(key, b); }
         b.len += elen[e]; if (econcave[e]) b.concave += elen[e]; if (econvex[e]) b.convex += elen[e];
@@ -2383,7 +2391,7 @@ const KMCore = (() => {
           const bs = by.get(g); if (!bs) continue;
           let best = null, bv = -Infinity;
           for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; const v = pickWeakest ? -strength(b, st) : b.len; if (v > bv) { bv = v; best = o; } }
-          if (best !== null) { par[g] = find(best); merged++; }
+          if (best !== null) { join(g, best); merged++; }
         }
         if (!merged) return;
       }
@@ -2395,7 +2403,7 @@ const KMCore = (() => {
       let weakest = null, wv = strong;
       for (const b of st.border.values()) { const v = strength(b, st); if (v < wv) { wv = v; weakest = b; } }
       if (!weakest) break;
-      par[find(weakest.s)] = find(weakest.r);
+      join(weakest.s, weakest.r);
     }
     melt(total * minFrac, true); // what is left small joins the neighbour it is least separated from
     const groupOf = new Int32Array(nt), ids = new Map();
@@ -2432,15 +2440,32 @@ const KMCore = (() => {
     }
     return { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
   }
+  // Neighbouring triangles across each edge, as [t1, t2, a, b] per edge (a, b the edge's ends), in the order the
+  // second triangle of each edge is met; a third triangle on an edge starts a new pair, as before. Built once per
+  // index array with the open-addressing pair map and kept: the part finders built it four times over with a JS Map
+  // of a million keys, which was a second and more of finding the parts on a 350k-triangle figure.
+  const pairCache = new WeakMap();
+  function trianglePairs(I) {
+    let out = pairCache.get(I);
+    if (out) return out;
+    const nt = I.length / 3, em = new PairMap(I.length), buf = new Int32Array(I.length * 2);
+    let n = 0;
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
+      const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], lo = a < b ? a : b, hi = a < b ? b : a, f = em.get(lo, hi);
+      if (f <= 0) em.set(lo, hi, t + 1);
+      else { em.set(lo, hi, 0); buf[n++] = f - 1; buf[n++] = t; buf[n++] = a; buf[n++] = b; }
+    }
+    out = buf.slice(0, n); pairCache.set(I, out);
+    return out;
+  }
   // The same result shape for any grouping of triangles (used by tests and by hand-made groupings).
   function bordersFromGroups(P, I, groupOf) {
-    const nt = I.length / 3, nv = P.length / 3, first = new Map(), out = [];
-    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) {
-      const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a, f = first.get(key);
-      if (f === undefined) first.set(key, t); else { first.delete(key); if (groupOf[f] !== groupOf[t]) out.push(f, t, a, b); }
-    }
+    const nt = I.length / 3, pairs = trianglePairs(I);
+    let m = 0; for (let i = 0; i < pairs.length; i += 4) if (groupOf[pairs[i]] !== groupOf[pairs[i + 1]]) m++;
+    const borders = new Int32Array(4 * m); let j = 0;
+    for (let i = 0; i < pairs.length; i += 4) if (groupOf[pairs[i]] !== groupOf[pairs[i + 1]]) { borders[j++] = pairs[i]; borders[j++] = pairs[i + 1]; borders[j++] = pairs[i + 2]; borders[j++] = pairs[i + 3]; }
     let count = 0; for (let t = 0; t < nt; t++) count = Math.max(count, groupOf[t] + 1);
-    return { groupOf, count, borders: new Int32Array(out) };
+    return { groupOf, count, borders };
   }
 
   /* ---------- curved cuts along a border ----------
@@ -3836,7 +3861,7 @@ const KMCore = (() => {
       const mine = parts.find((q, i) => q.first && sets[i].has(k)), other = parts.find((q, i) => !q.first && sets[i].has(k));
       return [mine || parts.find(q => q.first), other || parts.find(q => !q.first)];
     };
-    const warnings = [], refuse = (message, code, wedged) => { if (opts.force && canForce) { if (!warnings.some(w => w.code === code)) warnings.push(wedged ? { code, message, wedged: true } : { code, message }); return; } throw guardError(message, code); };
+    const warnings = [], refuse = (message, code, wedged, keyless) => { if (opts.force && canForce) { if (!warnings.some(w => w.code === code)) { const w = { code, message }; if (wedged) w.wedged = true; if (keyless) w.keyless = true; warnings.push(w); } return; } throw guardError(message, code); };
     for (const c of caps) {
       const [p1, p2] = pair(c), F = c.F;
       if (opts.minThickness > 0) { // neither piece may be too thin to print where they meet
@@ -3851,9 +3876,12 @@ const KMCore = (() => {
       const mid = [p1, p2].map(q => volumeCentroid(q.positions, q.indices).centroid), apart = [0, 1, 2].map(k => mid[1][k] - mid[0][k]);
       if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(c.cfg, c.keys, c.plugs), also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length) {
         const wedged = L > 1 && caps.filter(d => { const [a, b] = pair(d); return a === p1 && b === p2; }).length > 1; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
+        // with keys the pieces must slide straight; would they come apart at a slant without them? Asked of these
+        // same pieces, so a pick needn't build them all again without keys just to find out (half a neck pick's time)
+        const keyless = c.joined && opts.force && !wedged && !lockedPairs([p1, p2], F.n, tol, { anyDirection: true, distance: 3, also: Math.hypot(...apart) > 1e-9 ? [apart] : [] }).length;
         refuse(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
-          : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked', wedged);
+          : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked', wedged, keyless);
       }
     }
     // which way each piece pulls away from the others: along the lines' frame normals, away from the piece across
@@ -4071,7 +4099,7 @@ const KMCore = (() => {
     if (first) {
       const w = guards(first);
       if (!w.length) { out.result = first; return out; }
-      if ((out.keys || out.plugs) && !w.some(x => x.code === 'thin' || x.wedged)) { // locked with joints: without them the pieces may slide out at a slant (never when the region is held at both ends)
+      if ((out.keys || out.plugs) && !w.some(x => x.code === 'thin' || x.wedged) && w.some(x => x.code === 'locked' && x.keyless)) { // locked with joints, and the same pieces would come apart at a slant without them: built again without the joints
         let second = null; try { second = run(false, true); } catch (err) { second = null; }
         if (second) { const w2 = guards(second); dropJoints('locked'); out.result = second; if (w2.length) out.forced = w2[0].message; return out; }
       }
@@ -5938,7 +5966,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, plainData, strokeLoop, pickComponents, splitCandidates,
+    segmentParts, regionBorderCurves, planPick, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
