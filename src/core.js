@@ -2055,6 +2055,41 @@ const KMCore = (() => {
   // With `fold` set, a concave turn (a valley: cloth meeting skin, a collar, a belt's edge, a shoe top) splits at
   // that gentler angle, while a convex one (a ridge) still needs `angle`: on organic sculpts the parts meet in
   // valleys, and ridges are mostly detail.
+  // Regions that touch themselves at a single vertex (two corners of one region meeting diagonally, or a region
+  // pinched to a point between two others) have outlines that can't be cut along: the owner's Faceless Doll had
+  // five of its biggest parts skipped for it. At every such vertex the triangles round it all go to the region that
+  // holds most of them, a few rounds over, so every outline is a clean loop. In place; returns how many changed.
+  function unpinchGroups(P, I, groupOf) {
+    const nt = I.length / 3, pairs = trianglePairs(I), vt = vertexTriangles(P, I);
+    let changed = 0;
+    for (let round = 0; round < 6; round++) {
+      const cnt = new Map(); // vertex·k + region -> border edges of that region at that vertex
+      const key = (v, g) => v * 4294967296 + g;
+      for (let i = 0; i < pairs.length; i += 4) {
+        const g1 = groupOf[pairs[i]], g2 = groupOf[pairs[i + 1]];
+        if (g1 === g2) continue;
+        for (const v of [pairs[i + 2], pairs[i + 3]]) for (const g of [g1, g2]) { const k = key(v, g); cnt.set(k, (cnt.get(k) || 0) + 1); }
+      }
+      const pinched = new Set();
+      for (const [k, c] of cnt) if (c > 2) pinched.add(Math.floor(k / 4294967296));
+      if (!pinched.size) break;
+      for (const v of pinched) {
+        const tally = new Map();
+        for (let k = vt.start[v]; k < vt.start[v + 1]; k++) { const g = groupOf[vt.tri[k]]; tally.set(g, (tally.get(g) || 0) + 1); }
+        let best = -1, bn = -1; for (const [g, n] of tally) if (n > bn) { bn = n; best = g; }
+        for (let k = vt.start[v]; k < vt.start[v + 1]; k++) { const t = vt.tri[k]; if (groupOf[t] !== best) { groupOf[t] = best; changed++; } }
+      }
+    }
+    if (changed) { // regions emptied are numbered out, so every region holds triangles
+      let mx = -1; for (let t = 0; t < nt; t++) if (groupOf[t] > mx) mx = groupOf[t];
+      const used = new Int32Array(mx + 1).fill(-1); let n = 0;
+      for (let t = 0; t < nt; t++) { if (used[groupOf[t]] < 0) used[groupOf[t]] = n++; }
+      const keepOrder = [...used.keys()].filter(g => used[g] >= 0).sort((a, b) => a - b), ren = new Int32Array(used.length).fill(-1);
+      keepOrder.forEach((g, i) => { ren[g] = i; });
+      for (let t = 0; t < nt; t++) groupOf[t] = ren[groupOf[t]];
+    }
+    return changed;
+  }
   function segmentSurface(P, I, opts = {}) {
     const angle = opts.angle === undefined ? 35 : opts.angle, minFrac = opts.minFrac === undefined ? 0.003 : opts.minFrac, fold = opts.fold;
     const nt = I.length / 3, nv = P.length / 3;
@@ -2114,9 +2149,11 @@ const KMCore = (() => {
     const id = new Map(order.map(([r], i) => [r, i]));
     const groupOf = new Int32Array(nt);
     for (let t = 0; t < nt; t++) groupOf[t] = id.get(find(t));
+    let areas = order.map(([, a]) => a), count = order.length;
+    if (unpinchGroups(P, I, groupOf)) { count = 0; for (let t = 0; t < nt; t++) count = Math.max(count, groupOf[t] + 1); areas = new Array(count).fill(0); for (let t = 0; t < nt; t++) areas[groupOf[t]] += A[t]; }
     const borders = [];
     for (let i = 0; i < pairs.length; i += 4) if (groupOf[pairs[i]] !== groupOf[pairs[i + 1]]) borders.push(pairs[i], pairs[i + 1], pairs[i + 2], pairs[i + 3]);
-    return { groupOf, count: order.length, areas: order.map(([, a]) => a), borders: new Int32Array(borders) };
+    return { groupOf, count, areas, borders: new Int32Array(borders) };
   }
   /* ---------- form: the parts of a figure by thickness ----------
      The owner's "intelligence to detect form and parts": limbs, a head, a torso, a weapon are told apart by how
@@ -2317,6 +2354,7 @@ const KMCore = (() => {
     }
     const groupOf = new Int32Array(nt), ids = new Map();
     for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
+    unpinchGroups(P, I, groupOf);
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
     seg.levels = centres.map(c => Math.exp(c)); seg.sdf = sdf;
@@ -2430,6 +2468,7 @@ const KMCore = (() => {
     melt(total * minFrac, true); // what is left small joins the neighbour it is least separated from
     const groupOf = new Int32Array(nt), ids = new Map();
     for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
+    unpinchGroups(P, I, groupOf);
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
     seg.levels = form.levels; seg.sdf = sdf;
@@ -2667,6 +2706,17 @@ const KMCore = (() => {
       m.neighbours = [...(nbr.get(g) || new Map()).entries()].filter(([h]) => h !== keep).sort((x, y) => y[1] - x[1]).map(([h]) => h);
       m.alts = m.neighbours.slice(0, 2).map(h => measure([g, h])).filter(x => x && x.score).map(x => x.groups); // the region with a neighbour, to try when it alone is hooked or wedged
       out.push(m);
+    }
+    // each connected run of regions off the body, as one (a whole arm, upper arm to hand; an elephant's legs with
+    // the base they stand on, where each leg alone is held at both ends by the body and the base)
+    const seen = new Uint8Array(seg.count); seen[keep] = 1;
+    for (let g = 0; g < seg.count; g++) {
+      if (seen[g]) continue;
+      const run = [], st = [g]; seen[g] = 1;
+      while (st.length) { const x = st.pop(); run.push(x); for (const h of (nbr.get(x) || new Map()).keys()) if (!seen[h]) { seen[h] = 1; st.push(h); } }
+      if (run.length < 2 || run.length > 12) continue;
+      const m = measure(run.sort((a, b) => a - b));
+      if (m && m.score && m.share <= 0.4) { m.neighbours = []; m.alts = []; m.run = true; out.push(m); } // a limb, not most of the model round a small body
     }
     out.sort((x, y) => y.score - x.score);
     return { candidates: out, skipped, measure };
@@ -4324,15 +4374,58 @@ const KMCore = (() => {
   // The joints alone, the quick first half of a pick (the app draws them while the cut is checked: on a big
   // figure the owner saw no keys for the many seconds the check took): the lines oriented, each line's frame,
   // keys or plug, joint marks and what to draw. `planPick(P, I, { ...req, planned })` goes on from it.
+  // A region pick with its outline re-routed smooth (the owner's Aysil: region outlines wander in steps and notches
+  // a millimetre or so across, and the cut face and its sunk wall followed every one, so the pieces caught instead
+  // of sliding together). Each outline is turned into handles about 1/40 of its length apart (never closer than
+  // four of the mesh's edges), the handles eased (`smoothHandles`, three passes) and joined again along the surface
+  // (`drawnLoop`); the pick becomes the side of the new lines holding most of what was picked, plus any loose piece
+  // wholly in the pick. Returns { seg, groups: [1], loops } or null (a line that wouldn't close, or nothing gained).
+  function smoothRegionPick(P, I, seg, groups) {
+    const loops = groupLoops(P, I, seg, groups);
+    if (!loops.length || loops.some(l => !l.closed)) return null;
+    const nt = I.length / 3, set = new Set(groups), L = [];
+    for (let t = 0; t < nt; t += Math.max(1, Math.floor(nt / 4000))) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1]; L.push(Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2])); }
+    L.sort((x, y) => x - y); const med = L[L.length >> 1] || 1;
+    const out = [];
+    for (const l of loops) {
+      const spacing = Math.max(4 * med, l.length / 40), n = Math.round(l.length / spacing);
+      if (n < 8) { out.push(l); continue; } // too short to ease: kept as it is
+      const d = drawnLoop(P, I, smoothHandles(P, loopHandles(P, l, n), 3));
+      if (!d || !d.closed || d.verts.length < 3) return null;
+      out.push(d);
+    }
+    let side; try { side = orientLoops(P, I, out, { what: 'lines' }).side; } catch (err) { return null; }
+    const comps = shellComponents(P, I), whole = new Uint8Array(comps.count).fill(1);
+    for (let t = 0; t < nt; t++) if (!set.has(seg.groupOf[t])) whole[comps.label[t]] = 0;
+    let in1 = 0, in2 = 0; for (let t = 0; t < nt; t++) if (set.has(seg.groupOf[t])) { if (side[t] === 1) in1++; else if (side[t] === 2) in2++; }
+    const keep = in1 >= in2 ? 1 : 2, groupOf = new Int32Array(nt);
+    for (let t = 0; t < nt; t++) groupOf[t] = side[t] === keep || whole[comps.label[t]] ? 1 : 0;
+    // scraps the new lines pinch off (a sliver between the old outline and the new) go to the side round them
+    const pairs = trianglePairs(I), par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < pairs.length; i += 4) { const a = pairs[i], b = pairs[i + 1]; if (groupOf[a] === groupOf[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
+    const size = new Map(); let n1 = 0; for (let t = 0; t < nt; t++) { const r = find(t); size.set(r, (size.get(r) || 0) + 1); n1 += groupOf[t]; }
+    const tiny = Math.max(8, 0.02 * Math.min(n1, nt - n1));
+    for (let t = 0; t < nt; t++) if (size.get(find(t)) < tiny && !whole[comps.label[t]]) groupOf[t] = 1 - groupOf[t];
+    n1 = 0; for (let t = 0; t < nt; t++) n1 += groupOf[t];
+    if (!n1 || n1 === nt) return null;
+    const s2 = bordersFromGroups(P, I, groupOf), l2 = groupLoops(P, I, s2, [1]);
+    if (!l2.length || l2.some(l => !l.closed)) return null;
+    return { seg: s2, groups: [1], loops: l2 };
+  }
   // The mesh a pick works on: with `req.smooth`, the picked lines eased along the surface (`smoothLoopVertices`)
   // on a copy, with its own index array so no cache kept for the original's positions is read for it
   function pickMesh(P, I, req) {
-    if (!req.smooth || !req.loops || !req.loops.length) return { P, I };
+    if (!req.smooth || !req.loops || !req.loops.length) return { P, I, req };
+    if (req.regions && req.seg && !req.noReroute) { // a region's outline re-routed smooth first, then its points eased
+      let sr = null; try { sr = smoothRegionPick(P, I, req.seg, req.regions); } catch (err) { sr = null; }
+      if (sr) req = { ...req, seg: sr.seg, regions: sr.groups, loops: sr.loops, rerouted: true };
+    }
     const r = smoothLoopVertices(P, I, req.loops, typeof req.smooth === 'object' ? req.smooth : {});
-    return r.moved ? { P: r.positions, I: I.slice() } : { P, I };
+    return r.moved ? { P: r.positions, I: I.slice(), req } : { P, I, req };
   }
-  function planJoints(P0, I0, req) {
-    const { P, I } = pickMesh(P0, I0, req);
+  function planJoints(P0, I0, req0) {
+    const { P, I, req } = pickMesh(P0, I0, req0);
     const cfg = req.cfg, D = diag(bounds(P));
     let loops = req.loops;
     if (!req.regions && loops.length && loops.every(l => l.closed)) { try { loops = orientLoops(P, I, loops, { what: 'lines' }).loops; } catch (err) { /* the cut will say why */ } }
@@ -4367,8 +4460,8 @@ const KMCore = (() => {
     } else { out.perLoop = loops.map(() => ({ keys: [], plugs: [] })); out.draw = loops.map(() => ({ keys: [], plugs: [] })); }
     return out;
   }
-  function planPick(P0, I0, req) {
-    const { P, I } = pickMesh(P0, I0, req); // the same eased lines as planJoints worked on (it is quick and comes out alike)
+  function planPick(P0, I0, req0) {
+    const { P, I, req } = pickMesh(P0, I0, req0); // the same eased lines as planJoints worked on (it is quick and comes out alike)
     const cfg = req.cfg, out = req.planned ? { ...req.planned, result: null, error: null, errorCode: null, forced: null, dropped: null } : planJoints(P, I, req), loops = out.loops;
     const run = (withJoints, force) => {
       const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, perLoop: withJoints ? out.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
@@ -4383,6 +4476,13 @@ const KMCore = (() => {
     // one run each instead of three (on the owner's figure a refused pick built its pieces nine times)
     let first = null;
     try { first = run(true, true); } catch (err) { first = null; }
+    // joints must never make pieces of their own: a pocket that breaks through a thin wall nicks off a crumb
+    // (a plug on one of the owner's Aysil limbs left a 0.01 cm³ scrap); then the joints go and the cut stands alone
+    const crumbs = (r) => { const v = r.parts.map(q => Math.abs(q.volume)), tot = v.reduce((a, b) => a + b, 0); return v.some(x => x < 0.01 * tot && x < 0.2 * Math.min(...v.filter(y => y >= 0.01 * tot))); };
+    if (first && (out.keys || out.plugs) && crumbs(first)) {
+      let plain = null; try { plain = run(false, true); } catch (err) { plain = null; }
+      if (plain && !crumbs(plain)) { first = plain; dropJoints('crumb'); }
+    }
     const guards = (r) => (r.warnings || []).filter(w => w.code === 'thin' || w.code === 'locked');
     if (first) {
       const w = guards(first);
@@ -4845,6 +4945,8 @@ const KMCore = (() => {
     // one try at a plug pulled in by `inset`: its outline and how deep its pocket can go
     const attempt = (ri, inset) => {
       let sh = plugShape(sec, ri, inset, round);
+      // a small area (a miniature's arm, 4 mm across) has no room for corners rounded a millimetre: rounded less
+      if (sh.reason === 'Area too small for a plug' && round > 0.45) sh = plugShape(sec, ri, inset, Math.max(0.4, 0.5 * m));
       if (!sh.reason && !ringOk(sh.ring)) sh = plugShape(sec, ri, inset, round * 2); // a crossing outline: round it more
       if (!sh.reason && !ringOk(sh.ring)) return { reason: 'Area too irregular for a plug' };
       if (sh.reason) return sh;
@@ -6254,7 +6356,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices,
+    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;

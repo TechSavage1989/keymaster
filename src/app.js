@@ -3823,6 +3823,7 @@
   }
   function droppedText(d) {
     const what = d.what === 'plug' ? 'A plug' : 'Keys', it = d.what === 'plug' ? 'one' : 'them';
+    if (d.code === 'crumb') return `${what} would have broken through a thin wall and nicked off a scrap, so it will be cut without ${it}.`;
     return d.code === 'locked' ? `${what} would make the pieces slide straight apart, and here they’d catch on each other, so it will be cut without ${it}.` : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`;
   }
   function drawPickLines(p, pick) {
@@ -4209,7 +4210,7 @@
     if (splits || loose) { state.selectedId = null; state.explode = Math.max(wasExplode, 0.35); applyExplode(); const ex = $('#explode'); if (ex) ex.value = state.explode; }
     syncScene(); renderParts(); renderInspector(); updateChrome();
     busy(null);
-    toast(splits || loose ? `${loose ? `${loose} loose pieces separated${splits ? ', then the biggest split' : ''}. ` : ''}${splits ? `Split into ${splits + 1} parts, each with its keys. ` : ''}Ctrl+Z undoes it.${refused ? ` ${refused} ${refused === 1 ? 'part' : 'parts'} couldn’t be split: too thin, hooked or not sealed.` : ''}` : refused ? 'No part could be split off: each is too thin, hooked or not sealed. Try the Regions tool to pick them by hand.' : 'Nothing to split: the model reads as one part. Try Regions by Creases, or a flat cut.', splits ? '' : 'warn');
+    toast(splits || loose ? `${loose ? `${loose} loose pieces separated${splits ? ', then the biggest split' : ''}. ` : ''}${splits ? `Split into ${splits + 1} parts, each with its keys. ` : ''}Ctrl+Z undoes it.${refused ? ` ${refused} ${refused === 1 ? 'part' : 'parts'} couldn’t be split: too thin, hooked or not sealed.` : ''}` : refused ? 'No part could be split off: each is too thin, hooked or not sealed. Try the Regions tool to pick them by hand.' : 'Nothing to split: the model reads as one part. Try Regions with Sections, or a flat cut.', splits ? '' : 'warn');
     return { splits, refused, loose, parts: state.parts.length };
   }
   function cutAlongPick() {
