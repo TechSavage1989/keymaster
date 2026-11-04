@@ -4015,36 +4015,49 @@
     }
     const was = state.regions.by; state.regions.by = 'form';
     if (!state.regions.on) setRegions(true);
+    // Each round: the parts of what is left are found (in the worker), core ranks what could come off
+    // (splitCandidates: dips and crumbs dropped, the cleanest cut first, each with a neighbour to try alongside
+    // when it alone would hook or is held at both ends), and the first that passes every check is cut. Six tries a
+    // round at most: on the owner's reference figures most of the time had gone on regions that could never come off.
     let splits = 0, refused = 0, rounds = 0;
+    const whole = Math.abs(p.volume || K.volume(p.positions, p.indices)); // pieces under 3% of this aren't parts
     for (; rounds < 12; rounds++) {
-      const seg = regionsFor(p);
-      if (seg.count < 2) break;
-      const order = [...seg.areas.keys()].sort((a, b) => seg.areas[b] - seg.areas[a]).slice(1); // the biggest stays as the body
-      let cut = false;
-      for (const g of order) {
-        let tri = -1; for (let q = 0; q < seg.groupOf.length; q++) if (seg.groupOf[q] === g) { tri = q; break; }
-        if (tri < 0) continue;
-        const a = 3 * p.indices[3 * tri], b = 3 * p.indices[3 * tri + 1], c = 3 * p.indices[3 * tri + 2];
-        const point = [(p.positions[a] + p.positions[b] + p.positions[c]) / 3, (p.positions[a + 1] + p.positions[b + 1] + p.positions[c + 1]) / 3, (p.positions[a + 2] + p.positions[b + 2] + p.positions[c + 2]) / 3];
-        busy(`Splitting off part ${splits + 1}`); await nextFrame();
-        state.regions.last = { partId: p.id, clicks: [point] };
-        await pickCutLine(p, point);
-        const pick = state.regions.pick;
-        if (pick && pick.result && !pick.error && pick.regions) {
-          const before = new Set(state.parts.map(q => q.id));
-          cutAlongPick(); splits++; cut = true;
-          const fresh = state.parts.filter(q => !before.has(q.id) && q.kind !== 'pin');
-          p = fresh.sort((x, y) => y.volume - x.volume)[0] || null; // the remainder
-          if (!p) break;
-          state.selectedId = p.id; syncScene();
-          break;
+      busy(splits ? `Finding the parts of what is left (${splits} split off)` : 'Finding the parts'); await nextFrame();
+      let seg;
+      try { seg = await prepareRegions(p); } catch (err) { break; }
+      if (state.regions.on) applyRegions();
+      if (!seg || seg.count < 2) break;
+      let plan;
+      try { plan = await coreTask('splitCandidates', [p.positions, p.indices, { groupOf: seg.groupOf, count: seg.count, borders: seg.borders, areas: seg.areas }, { whole }]); } catch (err) { break; }
+      let cut = false, tries = 0;
+      for (const c of plan.candidates) {
+        if (tries >= 6) break;
+        const attempts = [c.groups, ...(c.alts || [])];
+        for (let ai = 0; ai < attempts.length && tries < 6; ai++) {
+          tries++;
+          busy(`Splitting off part ${splits + 1}`); await nextFrame();
+          endSeamEdit(); clearPick();
+          state.regions.last = { partId: p.id, clicks: [], regions: attempts[ai] };
+          await pickRegionList(p, seg, attempts[ai]);
+          const pick = state.regions.pick;
+          if (pick && pick.result && !pick.error && !pick.forced && pick.regions) {
+            const before = new Set(state.parts.map(q => q.id));
+            cutAlongPick(); splits++; cut = true;
+            const fresh = state.parts.filter(q => !before.has(q.id) && q.kind !== 'pin');
+            p = fresh.sort((x, y) => y.volume - x.volume)[0] || null; // the remainder
+            break;
+          }
+          refused++;
+          const why = pick ? pick.forced || pick.error || '' : '';
+          if (!/hook|held at more than one end/.test(why)) break; // only a hooked or wedged refusal is worth trying with a neighbour
         }
-        refused++;
+        if (cut) break;
       }
-      if (!cut) break;
+      if (!cut || !p) break;
+      state.selectedId = p.id; syncScene();
     }
     clearPick(); state.regions.last = null;
-    if (history.past.length > start + 1) { history.past.splice(start + 1); history.past[start].label = 'splitting into parts'; } // one undo step for the lot
+    if (history.past.length > start) { history.past.splice(start + 1); history.past[start].label = 'splitting into parts'; } // one undo step for the lot, named for what it was
     state.regions.by = was;
     if (state.regions.on) setRegions(false);
     if (splits || loose) { state.selectedId = null; state.explode = Math.max(wasExplode, 0.35); applyExplode(); const ex = $('#explode'); if (ex) ex.value = state.explode; }

@@ -738,7 +738,7 @@ with sync_playwright() as p:
     # split into parts: one press finds the parts by form (the bar and its balls) and splits each off with keys, one undo step
     check('the Suggest tool leads with Split into parts', pg.locator('[data-act=auto-split]').count() == 1 and 'Split into parts' in pg.inner_text('#suggestPanel'))
     asr = pg.evaluate("KeymasterDebug.autoSplit()")
-    check('one press splits the bar and its balls into parts, every piece sealed, the exploded view showing them, as one undo step', asr and asr['splits'] >= 1 and asr['parts'] >= 3 and asr['closed'] and 'Split into' in asr['toast'] and not pg.evaluate("document.querySelector('#undoBtn').disabled") and '%' in pg.inner_text('#explodeOut') and int(pg.inner_text('#explodeOut').replace('%', '')) >= 30, (asr, pg.inner_text('#explodeOut')))
+    check('one press splits the dumbbell into parts (the bar, under 3% of it, stays with a ball), every piece sealed, the exploded view showing them, as one undo step', asr and asr['splits'] >= 1 and asr['parts'] >= 2 and asr['closed'] and 'Split into' in asr['toast'] and not pg.evaluate("document.querySelector('#undoBtn').disabled") and '%' in pg.inner_text('#explodeOut') and int(pg.inner_text('#explodeOut').replace('%', '')) >= 30, (asr, pg.inner_text('#explodeOut')))
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(400)
     check('undo puts the model back in one step', pg.locator('#partList li[data-id]').count() == 1 and 'Undid splitting into parts' in pg.inner_text('#toast'), pg.inner_text('#toast'))
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')

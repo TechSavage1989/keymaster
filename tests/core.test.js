@@ -851,6 +851,20 @@ console.log('form: the parts of a figure by thickness');
     const armR = regionOf('arm R'), armL = regionOf('arm L'), torso = regionOf('torso');
     const two = K.pickComponents(P, I, ps.groupOf, new Set([armR, armL]), null), one = K.pickComponents(P, I, ps.groupOf, new Set([armR, torso]), null);
     check('picked regions that don\'t touch are separate pieces (each its own colour), touching ones one', two.count === 2 && one.count === 1, { two: two.count, one: one.count }); }
+  // what Split into parts tries, best first (1.65): the limbs and the head come before anything else, the torso
+  // (the body) is never a candidate, every candidate frees a real piece, and a crumb floor from the whole model holds
+  { const plan = K.splitCandidates(P, I, ps, {}), main = (g) => { const m = new Map(); for (let t = 0; t < nt; t++) if (ps.groupOf[t] === g) { const n = partOf(t); m.set(n, (m.get(n) || 0) + 1); } return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]; };
+    const names = plan.candidates.map(c => main(c.groups[0]));
+    check('the planned candidates are the limbs, the head and the neck, never the torso, each freeing a real piece', plan.candidates.length >= 5 && !names.includes('torso') && ['arm R', 'arm L', 'leg R', 'leg L'].every(n => names.includes(n)) && plan.candidates.every(c => c.piece > 0 && c.share >= 0.015), names);
+    const strict = K.splitCandidates(P, I, ps, { whole: K.volume(P, I) * 20 });
+    check('a crumb floor from the whole model drops pieces too small to be parts', strict.candidates.length < plan.candidates.length, { all: plan.candidates.length, strict: strict.candidates.length }); }
+  // a dip is not a part: a block with a round hollow pressed into its top
+  { const block = K.shapeMesh({ kind: 'cube', w: 30, d: 30, h: 20, segments: 24 });
+    const dent = K.booleanShape(block.positions, block.indices, { kind: 'ball', w: 16, h: 16, pos: [0, 0, 12], rot: [0, 0, 0], segments: 28 }, 'difference');
+    const dm = K.subdivideMesh(dent.positions, dent.indices, { maxEdge: 2 }), dseg = K.segmentSurface(dm.positions, dm.indices, { angle: 60, fold: 15 });
+    const dplan = K.splitCandidates(dm.positions, dm.indices, dseg, {});
+    const inHollow = (g) => { let n = 0, inside = 0; for (let t = 0; t < dm.indices.length / 3; t++) if (dseg.groupOf[t] === g) { n++; const z = (dm.positions[3 * dm.indices[3 * t] + 2] + dm.positions[3 * dm.indices[3 * t + 1] + 2] + dm.positions[3 * dm.indices[3 * t + 2] + 2]) / 3; if (z < 9.5) inside++; } return n && inside / n > 0.5; };
+    check('a hollow pressed into a block is a dip, never offered as a part to split off', dplan.skipped.dip >= 1 && !dplan.candidates.some(c => c.groups.some(inHollow)), { skipped: dplan.skipped, n: dplan.candidates.length, regions: dseg.count }); }
   // the outlines for display: smooth curves along the borders, as many segments as the edges or more, lifted off the surface
   const cv = K.regionBorderCurves(P, I, ps, 0.1), raw = K.regionBorderLines(P, I, ps, 0.1);
   let finite = true; for (let i = 0; i < cv.length; i++) if (!Number.isFinite(cv[i])) { finite = false; break; }
