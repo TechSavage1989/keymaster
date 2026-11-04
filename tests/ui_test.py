@@ -1500,6 +1500,11 @@ with sync_playwright() as p:
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
     pg.click('[data-act=keytype][data-value=peg]'); pg.wait_for_timeout(200)
     pg.keyboard.press('Escape')
+    # scaling makes a new mesh for the background worker too (1.69: the owner's figure scaled ×10 was still cut,
+    # and its plug drawn, at the old size)
+    wv0 = pg.evaluate('KeymasterDebug.workerVolume(0)')
+    pg.evaluate('KeymasterDebug.scaleAll(10)'); wv1 = pg.evaluate('KeymasterDebug.workerVolume(0)')
+    check('after scaling, the background worker works on the scaled part, not the copy it kept', abs(wv1['worker'] - wv1['here']) <= 1e-6 * abs(wv1['here']) and abs(wv1['here'] / wv0['here'] - 1000) < 1, {'before': wv0, 'after': wv1})
     b.close()
 
 print('\nconsole errors:', errors if errors else 'none')

@@ -3658,6 +3658,72 @@ const KMCore = (() => {
     triAdjCache.set(I, adj);
     return adj;
   }
+  // The point of triangle abc nearest p (Ericson's regions), as [x, y, z]
+  function closestOnTriangle(p, a, b, c) {
+    const sub = (x, y) => [x[0] - y[0], x[1] - y[1], x[2] - y[2]], dot = (x, y) => x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    const at = (o, d, t) => [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];
+    const ab = sub(b, a), ac = sub(c, a), ap = sub(p, a), d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0) return a.slice();
+    const bp = sub(p, b), d3 = dot(ab, bp), d4 = dot(ac, bp);
+    if (d3 >= 0 && d4 <= d3) return b.slice();
+    const vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) return at(a, ab, d1 / (d1 - d3));
+    const cp = sub(p, c), d5 = dot(ab, cp), d6 = dot(ac, cp);
+    if (d6 >= 0 && d5 <= d6) return c.slice();
+    const vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) return at(a, ac, d2 / (d2 - d6));
+    const va = d3 * d6 - d5 * d4;
+    if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) return at(b, sub(c, b), (d4 - d3) / ((d4 - d3) + (d5 - d6)));
+    const den = 1 / (va + vb + vc), v = vb * den, w = vc * den;
+    return [a[0] + ab[0] * v + ac[0] * w, a[1] + ab[1] * v + ac[1] * w, a[2] + ab[2] * v + ac[2] * w];
+  }
+  // Cut lines eased along the surface (the owner: "if a cut would come out jagged due to the original topology,
+  // smooth it out"). A line that follows the mesh's edges zigzags from triangle to triangle; each of its vertices
+  // is drawn towards the middle of its two neighbours on the line, `passes` times, and put back on the surface as
+  // it was (the nearest point of the triangles round it), never further than `reach` (0.9) of its shortest edge
+  // from where it was, and never so far that a triangle round it turns over. Only the line's vertices move and the
+  // connections stay as they are, so a sealed part stays sealed and both pieces share the smoothed line. Returns
+  // `{ positions, moved }`: a copy of P (P itself when nothing moved).
+  function smoothLoopVertices(P, I, loops, opts = {}) {
+    const passes = opts.passes || 10, reach = opts.reach || 0.9, vt = vertexTriangles(P, I);
+    const Q = P instanceof Float64Array ? new Float64Array(P) : new Float32Array(P), pt = (A, v) => [A[3 * v], A[3 * v + 1], A[3 * v + 2]];
+    const on = new Map(); // vertex -> its two neighbours on a line (a vertex on two lines, or twice on one, stays put)
+    const skip = new Set();
+    for (const l of loops) {
+      if (!l.closed || l.verts.length < 4) continue;
+      const n = l.verts.length;
+      for (let i = 0; i < n; i++) { const v = l.verts[i]; if (on.has(v)) skip.add(v); else on.set(v, [l.verts[(i + n - 1) % n], l.verts[(i + 1) % n]]); }
+    }
+    for (const v of skip) on.delete(v);
+    if (!on.size) return { positions: P, moved: 0 };
+    const limit = new Map(), nrm = (A, t) => { const a = pt(A, I[3 * t]), b = pt(A, I[3 * t + 1]), c = pt(A, I[3 * t + 2]); return cross3([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]); };
+    for (const v of on.keys()) {
+      let e = Infinity;
+      for (let k = vt.start[v]; k < vt.start[v + 1]; k++) { const t = vt.tri[k]; for (let j = 0; j < 3; j++) { const w = I[3 * t + j]; if (w !== v) e = Math.min(e, Math.hypot(P[3 * w] - P[3 * v], P[3 * w + 1] - P[3 * v + 1], P[3 * w + 2] - P[3 * v + 2])); } }
+      limit.set(v, reach * e);
+    }
+    let moved = 0;
+    const flips = (v) => { for (let k = vt.start[v]; k < vt.start[v + 1]; k++) { const t = vt.tri[k], a = nrm(P, t), b = nrm(Q, t), la = Math.hypot(...a), lb = Math.hypot(...b); if (!(lb > 1e-12 * la) || (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) < 0.3 * la * lb) return true; } return false; };
+    for (let pass = 0; pass < passes; pass++) {
+      const next = new Map();
+      for (const [v, [a, b]] of on) {
+        const p = pt(Q, v), m = [(Q[3 * a] + Q[3 * b]) / 2, (Q[3 * a + 1] + Q[3 * b + 1]) / 2, (Q[3 * a + 2] + Q[3 * b + 2]) / 2];
+        const want = [p[0] + (m[0] - p[0]) * 0.5, p[1] + (m[1] - p[1]) * 0.5, p[2] + (m[2] - p[2]) * 0.5];
+        let best = null, bd = Infinity; // back on the surface as it was
+        for (let k = vt.start[v]; k < vt.start[v + 1]; k++) { const t = vt.tri[k], q = closestOnTriangle(want, pt(P, I[3 * t]), pt(P, I[3 * t + 1]), pt(P, I[3 * t + 2])), d = (q[0] - want[0]) ** 2 + (q[1] - want[1]) ** 2 + (q[2] - want[2]) ** 2; if (d < bd) { bd = d; best = q; } }
+        const o = pt(P, v), dx = best[0] - o[0], dy = best[1] - o[1], dz = best[2] - o[2], dl = Math.hypot(dx, dy, dz), lim = limit.get(v);
+        if (dl > lim) { const f = lim / dl; best = [o[0] + dx * f, o[1] + dy * f, o[2] + dz * f]; }
+        next.set(v, best);
+      }
+      for (const [v, q] of next) {
+        const was = pt(Q, v);
+        Q[3 * v] = q[0]; Q[3 * v + 1] = q[1]; Q[3 * v + 2] = q[2];
+        if (flips(v)) { Q[3 * v] = was[0]; Q[3 * v + 1] = was[1]; Q[3 * v + 2] = was[2]; }
+      }
+    }
+    for (const v of on.keys()) if (Q[3 * v] !== P[3 * v] || Q[3 * v + 1] !== P[3 * v + 1] || Q[3 * v + 2] !== P[3 * v + 2]) moved++;
+    return { positions: moved ? Q : P, moved };
+  }
   // The triangle whose centre is nearest a point (none when the point is far from the surface).
   function nearestTriangle(P, I, point, limit = Infinity) {
     const { C } = triangleAdjacency(P, I);
@@ -4200,6 +4266,35 @@ const KMCore = (() => {
     const loops = groupLoops(P, I, seg, groups), one = groups.length === 1;
     if (!loops.length) throw new Error(one ? 'This region covers the whole surface, so there is nothing to split it from.' : 'These regions cover the whole surface, so there is nothing to split them from.');
     if (loops.some(l => !l.closed)) throw new Error(`${one ? 'This region’s' : 'These regions’'} outline pinches to a point somewhere, so it can’t be cut along cleanly. Try a different fold angle.`);
+    // separate pieces of the model wholly inside the pick (the owner's Bills: a forearm, its cuff and the hand are
+    // pieces of their own pushed into each other) have no line to cut along, so the cut took only the shoulder and
+    // left the rest of the arm on the body. They are set aside, the rest is cut, and they go with the regions' piece.
+    if (!opts.noLoose) {
+      const comps = shellComponents(P, I), set = new Set(groups), nt = I.length / 3;
+      const whole = new Uint8Array(comps.count).fill(1), any = new Uint8Array(comps.count);
+      for (let t = 0; t < nt; t++) { const c = comps.label[t]; any[c] = 1; if (!set.has(seg.groupOf[t])) whole[c] = 0; }
+      const loose = []; for (let c = 0; c < comps.count; c++) if (any[c] && whole[c]) loose.push(c);
+      if (loose.length && loose.length < comps.count) {
+        const isLoose = new Uint8Array(comps.count); for (const c of loose) isLoose[c] = 1;
+        const keep = new Uint8Array(nt), aside = new Uint8Array(nt), groupOf = [];
+        for (let t = 0; t < nt; t++) { if (isLoose[comps.label[t]]) aside[t] = 1; else { keep[t] = 1; groupOf.push(seg.groupOf[t]); } }
+        const rest = extractTriangles(P, I, keep), off = extractTriangles(P, I, aside);
+        const rseg = bordersFromGroups(rest.positions, rest.indices, Int32Array.from(groupOf));
+        if (groups.some(g => rseg.groupOf.includes(g))) {
+          let perLoop = opts.perLoop;
+          if (perLoop) { // each line's joints follow it, whatever order the lines come in now
+            const key = (Q, v) => `${Q[3 * v]},${Q[3 * v + 1]},${Q[3 * v + 2]}`;
+            const own = loops.map(l => new Set(l.verts.map(v => key(P, v))));
+            const rl = groupLoops(rest.positions, rest.indices, rseg, groups.filter(g => rseg.groupOf.includes(g)));
+            perLoop = rl.map(l => { const k = key(rest.positions, l.verts[0]), i = own.findIndex(o => o.has(k)); return i >= 0 ? perLoop[i] : { keys: [], plugs: [] }; });
+          }
+          const r = splitRegions(rest.positions, rest.indices, rseg, groups.filter(g => rseg.groupOf.includes(g)), { ...opts, perLoop, noLoose: true });
+          const m = mergeMeshes([r.parts[0], off]);
+          r.parts[0] = { ...r.parts[0], positions: m.positions, indices: m.indices, volume: r.parts[0].volume + off.volume };
+          return { ...r, loose: loose.length };
+        }
+      }
+    }
     const r = cutAlongLoops(P, I, loops, { ...opts, what: 'region' });
     r.parts = [...r.parts.filter(q => q.first), ...r.parts.filter(q => !q.first)]; // the regions' own piece (or pieces, when they don't touch) first
     for (const q of r.parts) delete q.first;
@@ -4229,7 +4324,15 @@ const KMCore = (() => {
   // The joints alone, the quick first half of a pick (the app draws them while the cut is checked: on a big
   // figure the owner saw no keys for the many seconds the check took): the lines oriented, each line's frame,
   // keys or plug, joint marks and what to draw. `planPick(P, I, { ...req, planned })` goes on from it.
-  function planJoints(P, I, req) {
+  // The mesh a pick works on: with `req.smooth`, the picked lines eased along the surface (`smoothLoopVertices`)
+  // on a copy, with its own index array so no cache kept for the original's positions is read for it
+  function pickMesh(P, I, req) {
+    if (!req.smooth || !req.loops || !req.loops.length) return { P, I };
+    const r = smoothLoopVertices(P, I, req.loops, typeof req.smooth === 'object' ? req.smooth : {});
+    return r.moved ? { P: r.positions, I: I.slice() } : { P, I };
+  }
+  function planJoints(P0, I0, req) {
+    const { P, I } = pickMesh(P0, I0, req);
     const cfg = req.cfg, D = diag(bounds(P));
     let loops = req.loops;
     if (!req.regions && loops.length && loops.every(l => l.closed)) { try { loops = orientLoops(P, I, loops, { what: 'lines' }).loops; } catch (err) { /* the cut will say why */ } }
@@ -4264,7 +4367,8 @@ const KMCore = (() => {
     } else { out.perLoop = loops.map(() => ({ keys: [], plugs: [] })); out.draw = loops.map(() => ({ keys: [], plugs: [] })); }
     return out;
   }
-  function planPick(P, I, req) {
+  function planPick(P0, I0, req) {
+    const { P, I } = pickMesh(P0, I0, req); // the same eased lines as planJoints worked on (it is quick and comes out alike)
     const cfg = req.cfg, out = req.planned ? { ...req.planned, result: null, error: null, errorCode: null, forced: null, dropped: null } : planJoints(P, I, req), loops = out.loops;
     const run = (withJoints, force) => {
       const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, perLoop: withJoints ? out.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
@@ -6150,7 +6254,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices,
+    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
