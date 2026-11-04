@@ -2159,10 +2159,32 @@ const KMCore = (() => {
   // The thickness under every vertex: the median distance to the far wall over rays in a cone round the inward
   // normal, smoothed a little over the surface. NaN where no ray meets a wall (an open or inverted surface).
   function shapeDiameter(P, I, opts = {}) {
-    const nv = P.length / 3, b = bounds(P), D = diag(b), grid = meshGrid(P, I, opts.cells || 48), vt = vertexTriangles(P, I), adj = vertexAdjacency(P, I);
+    const nv = P.length / 3, nt = I.length / 3, b = bounds(P), D = diag(b);
+    const grid = meshGrid(P, I, opts.cells || Math.max(48, Math.min(96, Math.round(Math.cbrt(nt) * 1.2)))), vt = vertexTriangles(P, I), adj = vertexAdjacency(P, I);
     const cone = ((opts.cone === undefined ? 45 : opts.cone) * Math.PI) / 180, rays = opts.rays || 12;
     const out = new Float32Array(nv), fn = [0, 0, 0];
+    // Rays are cast from a spread of vertices (one per cell of a grid sized to the sample count), never more than
+    // `samples` of them, and the rest take the value of their nearest sampled neighbour before the smoothing: the
+    // thickness is read per part, so a sample every millimetre or two is plenty, and a 500k-triangle sculpt took
+    // twenty seconds when every vertex cast its rays.
+    const samples = opts.samples === undefined ? 16000 : opts.samples;
+    let sampled = null;
+    if (samples > 0 && nv > samples) {
+      let area = 0;
+      for (let t = 0; t < nt; t++) {
+        const a = 3 * I[3 * t], c = 3 * I[3 * t + 1], d = 3 * I[3 * t + 2];
+        const n = cross3([P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]], [P[d] - P[a], P[d + 1] - P[a + 1], P[d + 2] - P[a + 2]]);
+        area += Math.hypot(n[0], n[1], n[2]) / 2;
+      }
+      const cell = Math.max(D * 1e-4, Math.sqrt(area / samples)), seen = new Set();
+      sampled = new Uint8Array(nv);
+      for (let v = 0; v < nv; v++) {
+        const key = `${Math.floor((P[3 * v] - b.min[0]) / cell)},${Math.floor((P[3 * v + 1] - b.min[1]) / cell)},${Math.floor((P[3 * v + 2] - b.min[2]) / cell)}`;
+        if (!seen.has(key)) { seen.add(key); sampled[v] = 1; }
+      }
+    }
     for (let v = 0; v < nv; v++) {
+      if (sampled && !sampled[v]) { out[v] = NaN; continue; }
       let nx = 0, ny = 0, nz = 0;
       for (let e = vt.start[v]; e < vt.start[v + 1]; e++) { faceNormal(P, I, vt.tri[e], fn); nx += fn[0]; ny += fn[1]; nz += fn[2]; }
       const l = Math.hypot(nx, ny, nz); if (!(l > 0)) { out[v] = NaN; continue; }
@@ -2181,6 +2203,11 @@ const KMCore = (() => {
       const keep = t0 > 0 ? hits.filter(h => h > t0 / 2.5 && h < t0 * 2.5) : hits;
       keep.sort((x, y) => x - y);
       out[v] = keep[keep.length >> 1];
+    }
+    if (sampled) { // the vertices that cast no rays take the thickness of the nearest sampled one, over the surface
+      const queue = new Int32Array(nv); let head = 0, tail = 0;
+      for (let v = 0; v < nv; v++) if (sampled[v] && out[v] > 0) queue[tail++] = v;
+      while (head < tail) { const v = queue[head++]; for (let e = adj.start[v]; e < adj.start[v + 1]; e++) { const u = adj.to[e]; if (!(out[u] > 0)) { out[u] = out[v]; queue[tail++] = u; } } }
     }
     // a little smoothing in log space, so one stray ray doesn't make a bump; holes filled from neighbours
     let cur = new Float32Array(nv); for (let v = 0; v < nv; v++) cur[v] = out[v] > 0 ? Math.log(out[v]) : NaN;
@@ -2272,6 +2299,110 @@ const KMCore = (() => {
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
     seg.levels = centres.map(c => Math.exp(c)); seg.sdf = sdf;
+    return seg;
+  }
+  /* ---------- parts: form and folds together ----------
+     The owner's "arms, legs, tools in hand, feet, bases, hats, clothing borders, backpacks": a part is bounded
+     by a real feature. The thickness runs (segmentForm) and the crease regions (segmentSurface with the fold)
+     are laid over each other, and then neighbouring regions are merged, weakest border first, until every
+     border left is strong: concave along most of its length (a collar, an armpit, a hat's brim, a shirt's hem),
+     a step in thickness (an arm against a torso, a sword against a hand), or a neck (a border short against the
+     smaller region's size: a head on a neck, a base under a foot). A convex ridge or a thickness wobble in the
+     middle of a smooth body is not a part boundary, so those borders go. */
+  function segmentParts(P, I, opts = {}) {
+    const nt = I.length / 3, nv = P.length / 3, ratio = opts.ratio || 1.35, minFrac = opts.minFrac === undefined ? 0.02 : opts.minFrac;
+    const fold = ((opts.fold === undefined ? 15 : opts.fold) * Math.PI) / 180, strong = opts.strength === undefined ? 0.5 : opts.strength;
+    const form = segmentForm(P, I, { ...opts, minFrac: 0.004 });
+    const sdf = form.sdf;
+    const creases = segmentSurface(P, I, { angle: opts.angle || 60, fold: opts.fold === undefined ? 15 : opts.fold, minFrac: 0.003 });
+    // triangle areas, normals, centroids and log thickness
+    const A = new Float64Array(nt), X = new Float64Array(nt), N = new Float64Array(nt * 3), C = new Float64Array(nt * 3);
+    let total = 0;
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]), L = Math.hypot(n[0], n[1], n[2]);
+      A[t] = L / 2; total += L / 2; if (L > 0) { N[3 * t] = n[0] / L; N[3 * t + 1] = n[1] / L; N[3 * t + 2] = n[2] / L; }
+      for (let k = 0; k < 3; k++) C[3 * t + k] = (P[a + k] + P[b + k] + P[c + k]) / 3;
+      let s = 0, m = 0; for (const v of [I[3 * t], I[3 * t + 1], I[3 * t + 2]]) if (sdf && sdf[v] > 0) { s += Math.log(sdf[v]); m++; }
+      X[t] = m ? s / m : 0;
+    }
+    // the edges between triangles, with their length and whether they are a concave crease at least `fold` deep
+    const first = new Map(), pairs = [];
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a; const f = first.get(key); if (f === undefined) first.set(key, t); else { first.delete(key); pairs.push(f, t, a, b); } }
+    const ne = pairs.length / 4, elen = new Float64Array(ne), econcave = new Uint8Array(ne), econvex = new Uint8Array(ne), cosFold = Math.cos(fold);
+    for (let e = 0; e < ne; e++) {
+      const s = pairs[4 * e], q = pairs[4 * e + 1], a = 3 * pairs[4 * e + 2], b = 3 * pairs[4 * e + 3];
+      elen[e] = Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]);
+      const dot = N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2];
+      const valley = (C[3 * q] - C[3 * s]) * N[3 * s] + (C[3 * q + 1] - C[3 * s + 1]) * N[3 * s + 1] + (C[3 * q + 2] - C[3 * s + 2]) * N[3 * s + 2] > 1e-9;
+      econcave[e] = valley && dot < cosFold ? 1 : 0;
+      econvex[e] = !valley && dot < cosFold ? 1 : 0;
+    }
+    // both labellings laid over each other: a region is a connected run with one form level and one crease region
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    const same = (s, q) => form.groupOf[s] === form.groupOf[q] && creases.groupOf[s] === creases.groupOf[q];
+    for (let e = 0; e < ne; e++) if (same(pairs[4 * e], pairs[4 * e + 1])) { const x = find(pairs[4 * e]), y = find(pairs[4 * e + 1]); if (x !== y) par[x] = y; }
+    // region sums and the borders between regions, rebuilt after each round of merging
+    const stats = () => {
+      const area = new Map(), xsum = new Map(), border = new Map(); // border: "r,s" -> { r, s, len, concave, convex }
+      for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); xsum.set(r, (xsum.get(r) || 0) + X[t] * A[t]); }
+      for (let e = 0; e < ne; e++) {
+        const x = find(pairs[4 * e]), y = find(pairs[4 * e + 1]); if (x === y) continue;
+        const r = Math.min(x, y), s = Math.max(x, y), key = r * nt + s;
+        let b = border.get(key); if (!b) { b = { r, s, len: 0, concave: 0, convex: 0 }; border.set(key, b); }
+        b.len += elen[e]; if (econcave[e]) b.concave += elen[e]; if (econvex[e]) b.convex += elen[e];
+      }
+      return { area, xsum, border };
+    };
+    const gap = Math.log(ratio);
+    // how much a border looks like a part boundary, 0 to 1
+    const strength = (b, st) => {
+      const ar = st.area.get(b.r), as = st.area.get(b.s), small = Math.min(ar, as);
+      const concave = b.len > 0 ? b.concave / b.len : 0, convex = b.len > 0 ? b.convex / b.len : 0;
+      // a step in thickness (1 at the ratio the levels are told apart at); along a convex ridge (a plate's rim, a
+      // box's edge) the thickness reading jumps by itself, so a ridge is never taken for a part boundary
+      const neckRaw = 1 - Math.min(1, b.len / (2 * Math.sqrt(Math.PI * small))); // 1 when the border is tiny against the smaller region's girth
+      const neck = neckRaw * (1 - convex);
+      // a thickness step counts in full only with something on the surface to back it (a valley along part of the
+      // border, or a narrowing): across a flat plate the reading drifts from thick by a wall to thin at the rim,
+      // and a hat's brim came out as four rings
+      const support = Math.min(1, 0.35 + 1.5 * concave + 1.5 * neckRaw);
+      const step = Math.min(1, Math.abs(st.xsum.get(b.r) / ar - st.xsum.get(b.s) / as) / gap) * (1 - convex) * support;
+      return Math.max(concave, step, neck);
+    };
+    const melt = (limit, pickWeakest) => { // regions under `limit` of the area go into a neighbour: the one sharing the most border, or the weakest border
+      for (let pass = 0; pass < 30; pass++) {
+        const st = stats(), by = new Map();
+        for (const b of st.border.values()) { if (!by.has(b.r)) by.set(b.r, []); if (!by.has(b.s)) by.set(b.s, []); by.get(b.r).push(b); by.get(b.s).push(b); }
+        const small = [...st.area.entries()].filter(([, a]) => a < limit).sort((a, b) => a[1] - b[1]);
+        if (!small.length) return;
+        let merged = 0;
+        for (const [g] of small) {
+          if (find(g) !== g) continue;
+          const bs = by.get(g); if (!bs) continue;
+          let best = null, bv = -Infinity;
+          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; const v = pickWeakest ? -strength(b, st) : b.len; if (v > bv) { bv = v; best = o; } }
+          if (best !== null) { par[g] = find(best); merged++; }
+        }
+        if (!merged) return;
+      }
+    };
+    melt(total * 0.003, false); // slivers the overlay leaves along creases
+    // merge across weak borders, the weakest first, until every border is a part boundary
+    for (let round = 0; round < 400; round++) {
+      const st = stats();
+      let weakest = null, wv = strong;
+      for (const b of st.border.values()) { const v = strength(b, st); if (v < wv) { wv = v; weakest = b; } }
+      if (!weakest) break;
+      par[find(weakest.s)] = find(weakest.r);
+    }
+    melt(total * minFrac, true); // what is left small joins the neighbour it is least separated from
+    const groupOf = new Int32Array(nt), ids = new Map();
+    for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
+    const seg = bordersFromGroups(P, I, groupOf);
+    seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
+    seg.levels = form.levels; seg.sdf = sdf;
     return seg;
   }
   // Every edge longer than maxEdge split at its middle, the triangles beside it with it (one split edge gives two
@@ -3744,6 +3875,55 @@ const KMCore = (() => {
     return best < 0 ? -1 : seg.groupOf[best];
   }
 
+  // The borders as smooth curves for display: the border edges are chained into polylines (ending where three or
+  // more regions meet), each chain is rounded by two passes of corner cutting (Chaikin), and the points are lifted
+  // off the surface along the normals of the triangles beside them. Mesh-edge zigzags made the plain lines ugly.
+  function regionBorderCurves(P, I, seg, lift, passes = 2) {
+    const b = seg.borders, ne = b.length / 4, nv = P.length / 3;
+    const nrm = new Float64Array(nv * 3), fn = [0, 0, 0], deg = new Int32Array(nv), adjE = new Map();
+    for (let e = 0; e < ne; e++) {
+      const va = b[4 * e + 2], vb = b[4 * e + 3];
+      for (const t of [b[4 * e], b[4 * e + 1]]) { faceNormal(P, I, t, fn); for (const v of [va, vb]) { nrm[3 * v] += fn[0]; nrm[3 * v + 1] += fn[1]; nrm[3 * v + 2] += fn[2]; } }
+      deg[va]++; deg[vb]++;
+      if (!adjE.has(va)) adjE.set(va, []); if (!adjE.has(vb)) adjE.set(vb, []);
+      adjE.get(va).push(e); adjE.get(vb).push(e);
+    }
+    const pt = (v) => { const l = Math.hypot(nrm[3 * v], nrm[3 * v + 1], nrm[3 * v + 2]) || 1; return [P[3 * v] + (nrm[3 * v] / l) * lift, P[3 * v + 1] + (nrm[3 * v + 1] / l) * lift, P[3 * v + 2] + (nrm[3 * v + 2] / l) * lift]; };
+    const used = new Uint8Array(ne), chains = [];
+    const other = (e, v) => (b[4 * e + 2] === v ? b[4 * e + 3] : b[4 * e + 2]);
+    const walk = (e0, v0) => { // from vertex v0 along edge e0 through degree-2 vertices
+      const verts = [v0]; let e = e0, v = v0;
+      while (true) {
+        used[e] = 1; v = other(e, v); verts.push(v);
+        if (deg[v] !== 2 || v === v0) break;
+        const es = adjE.get(v); e = es[0] === e ? es[1] : es[0];
+        if (used[e]) break;
+      }
+      return verts;
+    };
+    for (let v = 0; v < nv; v++) if (deg[v] && deg[v] !== 2) for (const e of adjE.get(v)) if (!used[e]) chains.push({ verts: walk(e, v), closed: false });
+    for (let e = 0; e < ne; e++) if (!used[e]) { const verts = walk(e, b[4 * e + 2]); chains.push({ verts, closed: verts[0] === verts[verts.length - 1] }); } // loops with no junction
+    const out = [];
+    for (const ch of chains) {
+      let pts = ch.verts.map(pt);
+      if (ch.closed && pts.length > 1) pts.pop();
+      for (let pass = 0; pass < passes && pts.length > 2; pass++) {
+        const next = [];
+        const n = pts.length, last = ch.closed ? n : n - 1;
+        if (!ch.closed) next.push(pts[0]);
+        for (let i = 0; i < last; i++) {
+          const p = pts[i], q = pts[(i + 1) % n];
+          next.push([0.75 * p[0] + 0.25 * q[0], 0.75 * p[1] + 0.25 * q[1], 0.75 * p[2] + 0.25 * q[2]]);
+          next.push([0.25 * p[0] + 0.75 * q[0], 0.25 * p[1] + 0.75 * q[1], 0.25 * p[2] + 0.75 * q[2]]);
+        }
+        if (!ch.closed) next.push(pts[n - 1]);
+        pts = next;
+      }
+      const n = pts.length, last = ch.closed ? n : n - 1;
+      for (let i = 0; i < last; i++) { const p = pts[i], q = pts[(i + 1) % n]; out.push(p[0], p[1], p[2], q[0], q[1], q[2]); }
+    }
+    return new Float32Array(out);
+  }
   // Border edges as line segments, nudged a hair off the surface so they draw on top of it.
   function regionBorderLines(P, I, seg, lift) {
     const b = seg.borders, out = new Float32Array((b.length / 4) * 6), N = (t) => {
@@ -5520,6 +5700,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
+    segmentParts, regionBorderCurves,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;

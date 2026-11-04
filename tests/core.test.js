@@ -806,6 +806,34 @@ console.log('form: the parts of a figure by thickness');
   const knot = K.prepareMesh(K.torusKnot()), ks = K.segmentForm(knot.positions, knot.indices, {});
   check('a knot, the same thickness all along, is one region', ks.count === 1, ks.count);
   check('the result has the shape the regions code expects', seg.groupOf.length === nt && seg.areas.length === seg.count && seg.borders.length % 4 === 0 && seg.levels.length >= 2, { levels: seg.levels });
+  // parts: form and creases together, with only the strong borders kept (1.62)
+  const ps = K.segmentParts(P, I, { sdf: seg.sdf });
+  const byP = []; for (let t = 0; t < nt; t++) { const g = ps.groupOf[t]; if (!byP[g]) byP[g] = new Map(); const n = partOf(t); byP[g].set(n, (byP[g].get(n) || 0) + area(t)); }
+  const shareP = (name) => { let best = 0, total = 0, pure = 0; for (const m of byP) { const a = m.get(name) || 0; total += a; let all = 0; for (const x of m.values()) all += x; if (a > best) { best = a; pure = a / all; } } return { held: best / total, pure }; };
+  const partsP = ['head', 'arm R', 'arm L', 'leg R', 'leg L', 'torso'].map(n => [n, shareP(n)]);
+  check('parts by form and creases: the head, each arm, each leg and the torso each a region of their own, and no more than a few extra', ps.count >= 6 && ps.count <= 9 && partsP.every(([, s]) => s.held > 0.8 && s.pure > 0.8), { count: ps.count, parts: partsP.map(([n, s]) => `${n} ${s.held.toFixed(2)}/${s.pure.toFixed(2)}`) });
+  check('parts have the shape the regions code expects, and the thickness comes back for reuse', ps.groupOf.length === nt && ps.areas.length === ps.count && ps.sdf && ps.sdf.length === P.length / 3);
+  const kp = K.segmentParts(knot.positions, knot.indices, {});
+  check('a knot, smooth and even all along, is one part', kp.count === 1, kp.count);
+  // a hat on a head: a brim's crease and a thin crown make it its own part, the head stays whole
+  { const head = K.shapeMesh({ kind: 'ball', w: 20, h: 20, segments: 32 });
+    let hat = K.booleanShape(head.positions, head.indices, { kind: 'tube', w: 26, h: 1.5, pos: [0, 0, 6], rot: [0, 0, 0], segments: 32 }, 'union');
+    hat = K.booleanShape(hat.positions, hat.indices, { kind: 'tube', w: 14, h: 6, pos: [0, 0, 9.5], rot: [0, 0, 0], segments: 32 }, 'union');
+    const hm = K.subdivideMesh(hat.positions, hat.indices, { maxEdge: 1.5 });
+    const hs = K.segmentParts(hm.positions, hm.indices, {});
+    const ht = hm.indices.length / 3, hz = (t) => (hm.positions[3 * hm.indices[3 * t] + 2] + hm.positions[3 * hm.indices[3 * t + 1] + 2] + hm.positions[3 * hm.indices[3 * t + 2] + 2]) / 3;
+    const top = new Map(), low = new Map(); for (let t = 0; t < ht; t++) { const m = hz(t) > 6.9 ? top : hz(t) < 4 ? low : null; if (m) m.set(hs.groupOf[t], (m.get(hs.groupOf[t]) || 0) + 1); }
+    const main = (m) => [...m.entries()].sort((a, b) => b[1] - a[1])[0];
+    const [gt, nTop] = main(top), [gl, nLow] = main(low), sum = (m) => [...m.values()].reduce((a, b) => a + b, 0);
+    check('a hat on a head comes out as its own part, the head below it another', hs.count >= 2 && gt !== gl && nTop / sum(top) > 0.8 && nLow / sum(low) > 0.8, { count: hs.count }); }
+  // the outlines for display: smooth curves along the borders, as many segments as the edges or more, lifted off the surface
+  const cv = K.regionBorderCurves(P, I, ps, 0.1), raw = K.regionBorderLines(P, I, ps, 0.1);
+  let finite = true; for (let i = 0; i < cv.length; i++) if (!Number.isFinite(cv[i])) { finite = false; break; }
+  check('region borders come out as smooth curves: more, shorter segments than the mesh edges, all finite', cv.length % 6 === 0 && cv.length > raw.length * 1.5 && finite, { curve: cv.length / 6, edges: raw.length / 6 });
+  // the thickness is sampled on big meshes and reads close to casting from every vertex
+  const sAll = K.shapeDiameter(P, I, { samples: 0 }), sFew = K.shapeDiameter(P, I, { samples: 2000 });
+  let dev = 0, nd = 0; for (let v = 0; v < sAll.length; v++) if (sAll[v] > 0 && sFew[v] > 0) { dev += Math.abs(Math.log(sFew[v] / sAll[v])); nd++; }
+  check('sampling the thickness at a spread of points reads within about 15% of casting from every point', nd > sAll.length * 0.95 && dev / nd < 0.15, (dev / nd).toFixed(3));
 }
 
 console.log('split to fit the bed');
