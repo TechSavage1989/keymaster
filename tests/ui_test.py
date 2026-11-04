@@ -872,7 +872,7 @@ with sync_playwright() as p:
     pg.evaluate("() => { const r = document.querySelector('#regionsAngle'); r.value = 10; r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }")
     pg.wait_for_timeout(500)
     count80 = pg.inner_text('#regionsCount')
-    check('a larger section size finds no more regions', int(count80.split()[0]) <= int(count.split()[0]) and 'Section size' in pg.inner_text('#regionsPanel'), (count, count80))
+    check('a larger section size finds no more regions, and the slider says Large', int(count80.split()[0]) <= int(count.split()[0]) and 'Section size' in pg.inner_text('#regionsPanel') and pg.inner_text('#regionsAngleOut') == 'Large', (count, count80, pg.inner_text('#regionsAngleOut')))
     n_parts = pg.locator('#partList li[data-id]').count()
     if pg.locator('[data-act=keytype]').count() == 0:
         pg.locator('#partList li[data-id] [data-act=select]').first.click(); pg.wait_for_timeout(300)
@@ -1159,6 +1159,12 @@ with sync_playwright() as p:
     infoD = pg.inner_text('#cutLineInfo')
     print('    drawn line:', resD, infoD.replace('\n', ' ')[:150])
     check('closing the drawn line picks it: two pieces, drawing off', resD['ok'] and resD['pieces'] == 2 and not resD['drawing'] and 'Cut along this line' in pg.inner_text('#cutAction') and pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'false', (resD, infoD))
+    pi = pg.evaluate("KeymasterDebug.pickInfo()")
+    check('the drawn line is sliced through the faces (Slice drawn lines is on by default)', pi and pi['sliced'] and pg.is_checked('#sliceDrawn'), pi)
+    pg.uncheck('#sliceDrawn'); pg.wait_for_function("KeymasterDebug.pickInfo() && !KeymasterDebug.pickInfo().pending", timeout=15000); pg.wait_for_timeout(300)
+    pi2 = pg.evaluate("KeymasterDebug.pickInfo()")
+    check('with Slice drawn lines off, the line follows the mesh edges again', pi2 and not pi2['sliced'] and pi2['ok'], pi2)
+    pg.check('#sliceDrawn'); pg.wait_for_function("KeymasterDebug.pickInfo() && !KeymasterDebug.pickInfo().pending", timeout=15000); pg.wait_for_timeout(300)
     # a second drawn line adds to the pick, so several drawn lines cut together
     pg.click('#drawLineBtn'); pg.wait_for_timeout(100)
     check('drawing again keeps the picked line and says the next will be cut with it', 'cut together with the line' in pg.inner_text('#cutLineInfo'), pg.inner_text('#cutLineInfo'))

@@ -692,11 +692,22 @@ console.log('cut suggestions');
       const sub = K.subdivideMesh(un.positions, un.indices, { maxEdge: 1 }), Q = sub.positions, J = sub.indices, n2 = J.length / 3;
       const seg = K.segmentSurface(Q, J, { angle: 60, fold: 15 }), cz = (t) => (Q[3 * J[3 * t] + 2] + Q[3 * J[3 * t + 1] + 2] + Q[3 * J[3 * t + 2] + 2]) / 3, cr = (t) => Math.hypot((Q[3 * J[3 * t]] + Q[3 * J[3 * t + 1]] + Q[3 * J[3 * t + 2]]) / 3, (Q[3 * J[3 * t] + 1] + Q[3 * J[3 * t + 1] + 1] + Q[3 * J[3 * t + 2] + 1]) / 3, cz(t));
       const cxy = (t, k) => (Q[3 * J[3 * t] + k] + Q[3 * J[3 * t + 1] + k] + Q[3 * J[3 * t + 2] + k]) / 3;
-      const onBox = (t) => Math.max(Math.abs(cxy(t, 0)), Math.abs(cxy(t, 1))) <= 4.05 && cz(t) >= 9.9 && Math.abs(cr(t) - 12) > 0.15;
+      const onBox = (t) => Math.max(Math.abs(cxy(t, 0)), Math.abs(cxy(t, 1))) <= 4.02 && (Math.abs(Math.abs(cxy(t, 0)) - 4) < 0.02 || Math.abs(Math.abs(cxy(t, 1)) - 4) < 0.02 || cz(t) > 17.98); // on one of the box's own faces
       let hb = 0, nbx = 0, hballs = 0, nball = 0; for (let t = 0; t < n2; t++) { if (onBox(t)) { nbx++; hb += seg.hard[t]; } else if (cz(t) < 8) { nball++; hballs += seg.hard[t]; } }
       const mix = new Map(); for (let t = 0; t < n2; t++) { const g = seg.groupOf[t]; if (!mix.has(g)) mix.set(g, [0, 0]); mix.get(g)[onBox(t) ? 0 : 1]++; }
       const mixed = [...mix.values()].filter(([a, b]) => Math.min(a, b) > 0.1 * Math.max(a, b)).length;
       check('a crisp box pushed into a bumpy ball reads hard, the ball organic, and no region holds much of both', hb > 0.8 * nbx && hballs < 0.05 * nball && mixed === 0, { box: hb / nbx, ball: hballs / nball, mixed }); }
+    // 1.75: a line drawn by hand round a coarse ball, sliced through the faces: the surface stays sealed with its
+    // volume, the line runs through new points, lies much closer to the tilted circle drawn than the edge path does,
+    // and the pick cuts sealed
+    { const ball = K.prepareMesh(uvSphere(10, 24, 16)), BP = ball.positions, BI = ball.indices, nv0 = BP.length / 3, tilt = 0.5;
+      const nn = [-tilt / Math.hypot(tilt, 1), 0, 1 / Math.hypot(tilt, 1)], dd = 4, rr = Math.sqrt(100 - dd * dd), uu = [nn[2], 0, -nn[0]], vv = [0, 1, 0];
+      const pts = []; for (let k = 0; k < 10; k++) { const a = 2 * Math.PI * k / 10; pts.push([0, 1, 2].map(i => dd * nn[i] + rr * (Math.cos(a) * uu[i] + Math.sin(a) * vv[i]))); } // a circle on the ball, the plane n·p = 4
+      const drawn = K.drawnLoop(BP, BI, pts), sl = K.sliceDrawnLoops(BP, BI, [drawn]);
+      const n0 = [-tilt, 0, 1], nl = Math.hypot(...n0), off = (Q, verts) => { const z = verts.map(v => (Q[3 * v] * n0[0] + Q[3 * v + 1] * n0[1] + Q[3 * v + 2] * n0[2]) / nl); const m = z.reduce((a, b) => a + b, 0) / z.length; return Math.sqrt(z.reduce((a, b) => a + (b - m) ** 2, 0) / z.length); };
+      const vol0 = K.volume(BP, BI);
+      const cs = sl && K.splitRegions(sl.P, sl.I, sl.seg, [1], { force: true }), vs = cs ? cs.parts.reduce((a, q) => a + q.volume, 0) : 0;
+      check('a drawn line sliced through the faces: sealed, same volume, through new points, far flatter than its edge path, and it cuts sealed', !!sl && K.edgeReport(sl.I).closed && Math.abs(K.volume(sl.P, sl.I) - vol0) / vol0 < 1e-6 && sl.loops.length === 1 && sl.loops[0].verts.every(v => v >= nv0) && off(sl.P, sl.loops[0].verts) < 0.6 * off(BP, drawn.verts) && !!cs && cs.parts.length === 2 && cs.parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vs - vol0) / vol0 < 0.002, { edge: off(BP, drawn.verts), sliced: sl && off(sl.P, sl.loops[0].verts) }); }
     // a plug fits a small area: a 3.4 mm rod's end with a 0.8 mm wall (a miniature's arm)
     const rod = K.shapeMesh({ kind: 'tube', w: 3.4, h: 20, segments: 48 }), pcfg = { type: 'plug', shape: 'round', diameter: 3, length: 3, margin: 0.8, clearance: 0.1, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 3, pegSide: 'below', perArea: 1, sizeMode: 'auto', sizeMin: 1.5 };
     const an = K.analyzePlane(rod.positions, rod.indices, K.frameFromNormal([0, 0, 1], [0, 0, 0.013]), pcfg, 20), pl = K.planPlugs(an, pcfg);
