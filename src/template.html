@@ -168,6 +168,19 @@ h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 .model-tools .inline-num input { width: 56px; }
 .view-tools { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--chip); backdrop-filter: blur(8px); }
 .view-tools .icon-btn[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+.axis-widget { position: absolute; top: 60px; right: 14px; width: 72px; height: 72px; pointer-events: none; }
+.axis-widget svg { position: absolute; inset: 0; width: 72px; height: 72px; }
+.axis-widget svg line { stroke-width: 2; stroke-linecap: round; opacity: .8; }
+.axis-widget .ax-x { --ax: #e5484d; } .axis-widget .ax-y { --ax: #3fa65b; } .axis-widget .ax-z { --ax: #3b7ddd; }
+.axis-widget svg line { stroke: var(--ax); }
+.axis-dot { position: absolute; left: 0; top: 0; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--ax); background: var(--ax); color: #fff; font: inherit; font-size: 10px; font-weight: 700; line-height: 1; padding: 0; cursor: pointer; pointer-events: auto; transform: translate(36px, 36px) translate(-50%, -50%); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+.axis-dot.neg { width: 14px; height: 14px; background: var(--panel); }
+.axis-dot.is-behind { opacity: .45; }
+.axis-dot:hover { filter: brightness(1.15); opacity: 1; }
+.part .row-acts { display: none; flex: none; gap: 0; }
+.part:hover .row-acts, .part.is-selected .row-acts, .part:focus-within .row-acts { display: inline-flex; }
+.part .row-acts .icon-btn { color: var(--muted); width: 26px; height: 26px; }
+.part .row-acts .icon-btn svg { width: 15px; height: 15px; }
 .view-from { font: inherit; font-size: 12.5px; padding: 0 4px; height: 32px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink); max-width: 104px; }
 .view-from:hover { background: var(--panel-2); }
 #themeBtn { margin-right: 6px; }
@@ -581,6 +594,15 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <button class="icon-btn" id="flatBtn" aria-label="Show faces" aria-pressed="false" title="Show faces: flat shading, so every face of the mesh shows"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7z" fill="currentColor" opacity=".25"/><path d="M10 2.5l7 4-7 4-7-4zM10 10.5v7M3 6.5v7l7 4M17 6.5v7l-7 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
         <button class="icon-btn" id="wireBtn" aria-label="Show wireframe" aria-pressed="false" title="Show wireframe"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7zM10 2.5v15M3 6.5l14 7M17 6.5l-14 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
       </div>
+      <div class="axis-widget" id="axisWidget" hidden aria-label="Look from a side" title="Click a dot to look from that side">
+        <svg viewBox="0 0 72 72" aria-hidden="true"><line data-axis="right" class="ax-x" x1="36" y1="36" x2="36" y2="36"/><line data-axis="back" class="ax-y" x1="36" y1="36" x2="36" y2="36"/><line data-axis="top" class="ax-z" x1="36" y1="36" x2="36" y2="36"/></svg>
+        <button type="button" class="axis-dot ax-x" data-view="right" aria-label="Look from the right (+X)">X</button>
+        <button type="button" class="axis-dot ax-y" data-view="back" aria-label="Look from the back (+Y)">Y</button>
+        <button type="button" class="axis-dot ax-z" data-view="top" aria-label="Look from the top (+Z)">Z</button>
+        <button type="button" class="axis-dot ax-x neg" data-view="left" aria-label="Look from the left (−X)"></button>
+        <button type="button" class="axis-dot ax-y neg" data-view="front" aria-label="Look from the front (−Y)"></button>
+        <button type="button" class="axis-dot ax-z neg" data-view="bottom" aria-label="Look from the bottom (−Z)"></button>
+      </div>
       <div class="area-tags" id="areaTags" aria-label="Areas on the cut face"></div>
       <div class="drag-chip" id="dragChip" hidden></div>
       <svg id="acrossLine" class="across-line" hidden aria-hidden="true"><line x1="0" y1="0" x2="0" y2="0"/></svg>
@@ -667,6 +689,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
       <dt>Click the cut face</dt><dd>Add a key; click a key to set it up on its own</dd>
       <dt>Click a region or line</dt><dd>With Regions on, pick it to split off or cut along</dd>
       <dt>Click a part</dt><dd>With Select on, choose it with no cut plane in the way; with loose pieces shown, tick or untick one</dd>
+      <dt>Axis dots</dt><dd>Top right of the view: click X, Y, Z or the hollow dot opposite to look from that side</dd>
       <dt>Double-click a part's name</dt><dd>Rename it</dd>
       <dt>Panel edges</dt><dd>Drag to resize a panel; double-click to reset</dd></dl>
     </div>

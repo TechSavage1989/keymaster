@@ -26,6 +26,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
 - Pictures on the assembly sheet (1.48): each part beside its row, and the pieces spread apart along their cuts at the top.
 - The look (1.59): filmic tone mapping, a soft shadow under the model, framing that takes in the exploded pieces.
+- The cut on the model, an axis widget, quieter rings, row actions (1.61): after ModelSplitter's interface.
 - Regions and Suggest made clearer (1.60): the region under the pointer lights up and is named, the arrow goes with the plane, a Select tool chooses parts with no plane, loose pieces are separated instead of refused, and the pieces that don't touch are shown in colours with ticks before they are split.
 - Split into parts (1.58): one press splits a figure into its parts by form, each with keys, one undo step.
 - Parts by form (1.57): regions from the thickness under the surface, so a head, each limb and the torso come out as regions of their own; Folds kept as the other way.
