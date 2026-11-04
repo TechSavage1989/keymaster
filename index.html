@@ -559,7 +559,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.69, build 91fb04. After an update, refresh the page and check this changes.">v1.69 · 91fb04</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.69, build cada8d. After an update, refresh the page and check this changes.">v1.69 · cada8d</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -3438,7 +3438,7 @@ const KMCore = (() => {
       while (st.length) { const x = st.pop(); run.push(x); for (const h of (nbr.get(x) || new Map()).keys()) if (!seen[h]) { seen[h] = 1; st.push(h); } }
       if (run.length < 2 || run.length > 12) continue;
       const m = measure(run.sort((a, b) => a - b));
-      if (m && m.score && m.share <= 0.4) { m.neighbours = []; m.alts = []; m.run = true; out.push(m); } // a limb, not most of the model round a small body
+      if (m && m.score && m.share <= 0.4) { m.neighbours = []; m.alts = []; m.run = true; m.score *= 0.6; out.push(m); } // after the single parts: tried when they are held at both ends // a limb, not most of the model round a small body
     }
     out.sort((x, y) => y.score - x.score);
     return { candidates: out, skipped, measure };
@@ -5438,27 +5438,40 @@ const KMCore = (() => {
     const box = (g) => [g.gx0, g.gy0, g.gx0 + g.nx * g.cell, g.gy0 + g.ny * g.cell];
     const ba = box(ga), bb = box(gb), x0 = Math.max(ba[0], bb[0]), y0 = Math.max(ba[1], bb[1]), x1 = Math.min(ba[2], bb[2]), y1 = Math.min(ba[3], bb[3]);
     if (x1 <= x0 || y1 <= y0) return true;
-    const s = Math.max(step, Math.sqrt(((x1 - x0) * (y1 - y0)) / 30000)), nx = Math.ceil((x1 - x0) / s) + 1, ny = Math.ceil((y1 - y0) / s) + 1;
-    const fwd = new Uint8Array(nx * ny), back = new Uint8Array(nx * ny), rest = new Uint8Array(nx * ny), grip = Math.max(tol, 0.05);
-    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
-      const X = x0 + (i + 0.0137) * s, Y = y0 + (j + 0.0291) * s;
-      const ra = solidRuns(ga, X, Y), rb = solidRuns(gb, X, Y);
-      if (!ra.length || !rb.length) continue;
-      for (let p = 0; p < ra.length; p += 2) for (let q = 0; q < rb.length; q += 2) {
-        const a0 = ra[p], a1 = ra[p + 1], b0 = rb[q], b1 = rb[q + 1];
-        if (Math.min(a1 + D, b1) - Math.max(a0, b0) > grip) fwd[i * ny + j] = 1; // A moving ahead would run into this stretch of B
-        if (Math.min(a1, b1) - Math.max(a0 - D, b0) > grip) back[i * ny + j] = 1; // and moving back
-        if (Math.min(a1, b1) - Math.max(a0, b0) > grip) rest[i * ny + j] = 1; // they overlap where they are
+    const s0 = Math.max(step, Math.sqrt(((x1 - x0) * (y1 - y0)) / 30000)), grip = Math.max(tol, 0.05);
+    const scan = (s) => {
+      const nx = Math.ceil((x1 - x0) / s) + 1, ny = Math.ceil((y1 - y0) / s) + 1;
+      const fwd = new Uint8Array(nx * ny), back = new Uint8Array(nx * ny), rest = new Uint8Array(nx * ny);
+      for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+        const X = x0 + (i + 0.0137) * s, Y = y0 + (j + 0.0291) * s;
+        const ra = solidRuns(ga, X, Y), rb = solidRuns(gb, X, Y);
+        if (!ra.length || !rb.length) continue;
+        for (let p = 0; p < ra.length; p += 2) for (let q = 0; q < rb.length; q += 2) {
+          const a0 = ra[p], a1 = ra[p + 1], b0 = rb[q], b1 = rb[q + 1];
+          if (Math.min(a1 + D, b1) - Math.max(a0, b0) > grip) fwd[i * ny + j] = 1; // A moving ahead would run into this stretch of B
+          if (Math.min(a1, b1) - Math.max(a0 - D, b0) > grip) back[i * ny + j] = 1; // and moving back
+          if (Math.min(a1, b1) - Math.max(a0, b0) > grip) rest[i * ny + j] = 1; // they overlap where they are
+        }
       }
-    }
-    const wide = (m) => {
-      for (let i = 1; i + 1 < nx; i++) for (let j = 1; j + 1 < ny; j++) {
-        const k = i * ny + j;
-        if (m[k] && m[k - 1] && m[k + 1] && m[k - ny] && m[k + ny]) return true;
-      }
-      return false;
+      // a clash at least `r` columns out each way from a column (r = 1: three columns across, the sliver rule)
+      const wide = (m, r = 1) => {
+        for (let i = r; i + r < nx; i++) for (let j = r; j + r < ny; j++) {
+          let all = true;
+          for (let k = -r; k <= r && all; k++) if (!m[(i + k) * ny + j] || !m[i * ny + j + k]) all = false;
+          if (all) return true;
+        }
+        return false;
+      };
+      return { fwd, back, rest, wide, any: (m) => m.some(Boolean) };
     };
-    return !wide(fwd) || !wide(back) || wide(rest);
+    // a quarter of the columns first: pieces that plainly come apart (nothing in the way one way or the other) or
+    // plainly clash (a clash five columns across, wider than any sliver at the fine spacing) are settled there; only
+    // the close calls are looked at column by column (the owner's 500k-triangle doll spent two minutes a pick here)
+    const c = scan(2 * s0);
+    if (!c.any(c.fwd) || !c.any(c.back) || c.wide(c.rest, 2)) return true;
+    if (c.wide(c.fwd, 2) && c.wide(c.back, 2) && !c.any(c.rest)) return false;
+    const f = scan(s0);
+    return !f.wide(f.fwd) || !f.wide(f.back) || f.wide(f.rest);
   }
   // Pairs of pieces that touch but can't be pulled apart: they'd hook round each other. Keys set the direction
   // (straight along d); with no keys a slant up to 40° from it is allowed too, and any other directions given
