@@ -1079,8 +1079,21 @@ with sync_playwright() as p:
     if pg.locator('[data-act=keytype]').count() == 0: pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
     # a cut line drawn by hand: four points round a ball, closed with Enter, cut like any line
     pg.click('#drawLineBtn'); pg.wait_for_timeout(200)
-    check('the draw button turns drawing on and the hint explains', pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'true' and 'Click points' in pg.inner_text('#hint'), pg.inner_text('#hint'))
+    check('the draw button turns drawing on and the hint explains the stroke and the points', pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'true' and 'Drag a line across' in pg.inner_text('#hint') and 'click points' in pg.inner_text('#hint').lower(), pg.inner_text('#hint'))
     rb = math.sqrt(144 - 64); vv = [ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]]
+    # a stroke across the bar (1.64): the cut wraps round it there by itself and is picked with keys and checks
+    on_bar = [ax[k] * 30 + u[k] * 2.5 for k in range(3)]
+    rs = pg.evaluate(f"KeymasterDebug.strokeCut({on_bar}, {ax})")
+    print('    stroke across the bar:', rs)
+    check('a stroke across the bar wraps a cut round it, picked as a line that splits the dumbbell in two', rs['loop'] and rs['loops'] == 1 and rs['ok'] and rs['pieces'] == 2 and 'Cut along' in pg.inner_text('#cutAction'), rs)
+    rs2 = pg.evaluate(f"KeymasterDebug.strokeCut({[ax[k] * 26 + u[k] * 2.5 for k in range(3)]}, {ax}, true)")
+    check('a Shift-stroke adds a second line to the first: three pieces', rs2['loops'] == 2 and rs2['pieces'] == 3, rs2)
+    for _ in range(3):
+        if pg.evaluate("!!KeymasterDebug.pickInfo && false"): break
+        pg.keyboard.press('Escape'); pg.wait_for_timeout(150)  # stop drawing, then let the pick go
+    if not pg.evaluate('KeymasterDebug.regionsOn()'): toggle_regions(pg)
+    if pg.locator('[data-act=keytype]').count() == 0: pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
+    if pg.get_attribute('#drawLineBtn', 'aria-pressed') != 'true': pg.click('#drawLineBtn'); pg.wait_for_timeout(200)
     for a in (0, 90, 180, 270):
         q = [ax[k] * 20 + u[k] * rb * math.cos(a * math.pi / 180) + vv[k] * rb * math.sin(a * math.pi / 180) for k in range(3)]
         n_pts = pg.evaluate(f"KeymasterDebug.drawPoint(0, {q})")
@@ -1242,6 +1255,12 @@ with sync_playwright() as p:
     # a box over the whole view picks both towers' regions at once (both loose pieces)
     bx = pg.evaluate('KeymasterDebug.boxSelect(0.02, 0.02, 0.98, 0.98)')
     check('a box over the view picks every region in it: both loose towers', bx['loose'] == 2 and 'Separate these pieces' in pg.inner_text('#cutAction'), bx)
+    rcb = pg.evaluate('KeymasterDebug.regionColours()')
+    check('the two towers, which don\'t touch, are picked in two different colours', rcb['colours'] >= 2, rcb)
+    sc = pg.evaluate('KeymasterDebug.regionClick(0, [25.3, 3.3, 10.5], true)')
+    check('Shift-click on a boxed region takes it out of the box selection', sc['loose'] == 1 and 'Separate this piece' in pg.inner_text('#cutAction'), sc)
+    sc2 = pg.evaluate('KeymasterDebug.regionClick(0, [25.3, 3.3, 10.5], true)')
+    check('and Shift-click again puts it back', sc2['loose'] == 2, sc2)
     pg.evaluate("KeymasterDebug.pickCutLineAt(0, [25.3, 3.3, 10.5])"); pg.wait_for_timeout(300)
     check('the box button and B arm box select while regions show', pg.evaluate('KeymasterDebug.setBox(true)') and pg.get_attribute('#boxBtn', 'aria-pressed') == 'true' and 'Drag a box over the regions' in pg.inner_text('#hint'))
     pg.keyboard.press('Escape'); pg.wait_for_timeout(100)

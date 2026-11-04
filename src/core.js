@@ -2966,6 +2966,86 @@ const KMCore = (() => {
     let length = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; length += Math.hypot(P[3 * p] - P[3 * q], P[3 * p + 1] - P[3 * q + 1], P[3 * p + 2] - P[3 * q + 2]); }
     return { verts: ring, closed: true, length, drawn: true };
   }
+  // The connected pieces of a pick: triangles that are in (sel[t], or their region in `picked`), joined across shared
+  // edges. Returns a label per triangle (-1 when not picked) and the count, so separate pieces of a pick can show in
+  // colours of their own and touching ones share one (the owner's request).
+  function pickComponents(P, I, groupOf, picked, sel) {
+    const nt = I.length / 3, nv = P.length / 3, inside = (t) => (sel ? sel[t] === 1 : picked.has(groupOf[t]));
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    const em = new PairMap(I.length);
+    for (let t = 0; t < nt; t++) {
+      if (!inside(t)) continue;
+      for (let k = 0; k < 3; k++) {
+        const a = I[3 * t + k], b = I[3 * t + (k + 1) % 3], lo = a < b ? a : b, hi = a < b ? b : a, f = em.get(lo, hi);
+        if (f === -1) em.set(lo, hi, t); else { const x = find(f), y = find(t); if (x !== y) par[x] = y; }
+      }
+    }
+    const label = new Int32Array(nt).fill(-1), ids = new Map();
+    for (let t = 0; t < nt; t++) if (inside(t)) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); label[t] = ids.get(r); }
+    return { label, count: ids.size, nv };
+  }
+  /* ---------- a stroke that wraps a cut round a part ----------
+     ModelSplitter's Line tool, as the owner asked: "draw a line that automatically creates a cut after the line
+     analyzes the surface and wraps around parts smoothly". The stroke on the screen and the eye make a plane
+     through the model; `strokeLoop` starts from it at `o` (where the stroke crosses the part), tilts it, still
+     through `o` and never more than `maxTilt` from the stroke's plane, until the ring round the part under the
+     stroke is as short as it gets (square across a limb, or along a neck's narrowest), and then turns that ring
+     into a line on the surface (`drawnLoop` through points along it) and eases it (`smoothHandles`), so the cut
+     follows the model rather than a flat plane. It returns a loop as `drawnLoop` does, or null. */
+  function strokeLoop(P, I, req) {
+    const scale = req.scale || diag(bounds(P)), o = req.o, n0 = norm3(req.n), maxTilt = ((req.maxTilt === undefined ? 30 : req.maxTilt) * Math.PI) / 180;
+    const tol = Math.max(1e-3, scale * 0.02);
+    // the ring through o for a normal: the loop of the section passing nearest o (o lies on the plane), and its length
+    const ringFor = (n) => {
+      const F = frameFromNormal(n, o), sec = section(P, I, F, scale);
+      if (sec.error || !sec.loops.length) return null;
+      let best = null, bd = Infinity;
+      for (const L of sec.loops) {
+        const xy = L.xy, m = xy.length / 2;
+        for (let i = 0; i < m; i++) {
+          const j = (i + 1) % m, ax = xy[2 * i], ay = xy[2 * i + 1], bx = xy[2 * j], by = xy[2 * j + 1];
+          const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy, t = l2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+          const d = Math.hypot(ax + t * dx, ay + t * dy);
+          if (d < bd) { bd = d; best = L; }
+        }
+      }
+      if (!best || bd > tol) return null;
+      let len = 0; const xy = best.xy, m = xy.length / 2;
+      for (let i = 0; i < m; i++) { const j = (i + 1) % m; len += Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1]); }
+      return { n, F, loop: best, len };
+    };
+    const F0 = frameFromNormal(n0, o);
+    let best = ringFor(n0);
+    if (!best) return null;
+    const first = best.len;
+    const angleOf = (n) => Math.acos(Math.max(-1, Math.min(1, n[0] * n0[0] + n[1] * n0[1] + n[2] * n0[2])));
+    for (const deg of [12, 6, 3]) { // tilt, about the plane's own two axes, while the ring gets shorter
+      let improved = true, guard = 0;
+      while (improved && guard++ < 6) {
+        improved = false;
+        const r = (deg * Math.PI) / 180, F = best.F, nrm = best.n;
+        for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const tn = norm3([0, 1, 2].map(k => nrm[k] * Math.cos(r) + (F.u[k] * a + F.v[k] * b) * Math.sin(r)));
+          if (angleOf(tn) > maxTilt) continue;
+          const c = ringFor(tn);
+          if (c && c.len < best.len * 0.985 && c.len > first * 0.5) { best = c; improved = true; break; } // never down to a ring round some small detail beside the stroke
+        }
+      }
+    }
+    // the ring as points on the model, about one every 1.5% of its length (40 to 160), then a line on the surface
+    const xy = best.loop.xy, m = xy.length / 2, want = Math.max(40, Math.min(160, Math.round(m / 2)));
+    const pts = [];
+    for (let k = 0; k < want; k++) { const i = Math.floor((k * m) / want); pts.push(planePoint(best.F, xy[2 * i], xy[2 * i + 1])); }
+    let loop = drawnLoop(P, I, pts);
+    if (!loop) return null;
+    if (req.smooth !== 0) { // eased a little, so the mesh's zigzags don't show in the seam
+      const h = loopHandles(P, loop, Math.max(12, Math.min(48, Math.round(pts.length / 3))));
+      const eased = drawnLoop(P, I, smoothHandles(P, h, req.smooth || 2));
+      if (eased && eased.verts.length >= 3) loop = eased;
+    }
+    return { ...loop, stroke: true, normal: best.n, tilt: (angleOf(best.n) * 180) / Math.PI, ring: best.len };
+  }
   /* ---------- engraved joint numbers ----------
      The same number on both mating faces of a cut (modelsplitter's joint numbers), so a kit of many pieces goes
      together without guessing. Each digit is seven strokes, and each stroke is a shallow pocket cut by the key
@@ -5801,7 +5881,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, plainData,
+    segmentParts, regionBorderCurves, planPick, plainData, strokeLoop, pickComponents,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
