@@ -2460,6 +2460,12 @@
   const brushBall = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 20), new THREE.MeshBasicMaterial({ color: 0x2f6fe0, transparent: true, opacity: 0.18, depthWrite: false }));
   brushBall.renderOrder = 10; brushBall.visible = false; brushRing.add(brushBall);
   const brushSize = () => (state.tool === 'sculpt' ? state.sculpt.size : state.paint.size);
+  // The brush size slider runs on a log scale from 0.2 mm to two fifths of the part's size, so small and big
+  // brushes are both a short drag away
+  function sliderMax() { const p = selectedPart(); return Math.max(5, p ? K.diag(p.bbox) * 0.4 : 50); }
+  function sliderOf(size) { return Math.round(100 * Math.log(Math.max(0.2, size) / 0.2) / Math.log(sliderMax() / 0.2)); }
+  function sizeOfSlider(v) { return Math.round(0.2 * Math.pow(sliderMax() / 0.2, v / 100) * 10) / 10; }
+  function syncBrushSlider() { for (const [id, size] of [['#brushSlider', state.paint.size], ['#sculptSlider', state.sculpt.size]]) { const el = $(id); if (el) el.value = Math.max(0, Math.min(100, sliderOf(size))); } }
   function moveBrushRing(hit) {
     if (!hit || !(state.paint.on || state.tool === 'sculpt')) { if (brushRing.visible) { brushRing.visible = false; markDirty(); } return; }
     brushRing.position.copy(hit.point);
@@ -2573,7 +2579,7 @@
     if (state.tool === 'sculpt') { setSculptSize(size); return; }
     state.paint.size = Math.max(0.2, Math.round(size * 10) / 10); state.paint.sized = true;
     const inp = $('#brushSize'); if (inp) inp.value = state.paint.size;
-    brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); updateHint(); markDirty();
+    brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); syncBrushSlider(); updateHint(); markDirty();
   }
   /* ---------------- sculpting ----------------
      modelsplitter's Sculpt tool: Smooth, Inflate and Flatten brushes dragged over the chosen part. A stroke works
@@ -2589,14 +2595,14 @@
   function setSculptSize(size) {
     state.sculpt.size = Math.max(0.2, Math.round(size * 10) / 10); state.sculpt.sized = true;
     const inp = $('#sculptSize'); if (inp) inp.value = state.sculpt.size;
-    brushRing.scale.set(state.sculpt.size, state.sculpt.size, state.sculpt.size); updateHint(); markDirty();
+    brushRing.scale.set(state.sculpt.size, state.sculpt.size, state.sculpt.size); syncBrushSlider(); updateHint(); markDirty();
   }
   function sculptPanelHTML() {
     const p = selectedPart(), s = state.sculpt, mask = p && s.mask && s.mask.partId === p.id ? s.mask : null;
     const note = { smooth: 'Each vertex eases towards its neighbours: bumps and noise melt away.', inflate: 'The surface puffs out along itself. Hold Shift to push it in.', flatten: 'The surface is pressed towards a flat plane through the brush.' }[s.mode];
     return `<div class="sculpt-panel">
       <div class="inline"><span class="lbl">Brush</span>${seg('sculpt-mode', s.mode, [['smooth', 'Smooth'], ['inflate', 'Inflate'], ['flatten', 'Flatten']])}</div>
-      <div class="row2"><label class="inline-num" title="Brush size ([ and ] change it)"><span class="lbl">Size</span><input type="number" id="sculptSize" min="0.2" step="0.5" value="${s.size}" aria-label="Brush size in millimetres"><span class="unit">mm</span></label>
+      <div class="row2"><label class="inline-num" title="Brush size ([ and ] change it)"><span class="lbl">Size</span><input type="number" id="sculptSize" min="0.2" step="0.5" value="${s.size}" aria-label="Brush size in millimetres"><span class="unit">mm</span></label><input type="range" id="sculptSlider" class="brush-slider" min="0" max="100" step="1" value="${sliderOf(s.size)}" aria-label="Brush size" title="Brush size: drag to change ([ and ] too)">
         <label class="slider" title="How far each pass moves the surface"><span class="lbl">Strength</span><input type="range" id="sculptStrength" min="5" max="100" step="5" value="${Math.round(s.strength * 100)}" aria-label="Brush strength"><output id="sculptStrengthOut">${Math.round(s.strength * 100)}%</output></label></div>
       <p class="muted small">${note}</p>
       ${mask ? `<label class="check mask" title="The area painted with the Paint tool"><input type="checkbox" data-act-toggle="sculpt-mask" ${s.useMask ? 'checked' : ''}> Keep to the painted area (${fmtInt(mask.count)} faces)</label>` : ''}
@@ -3484,6 +3490,7 @@
       setKeyOwn(f, f === 'turn' ? normTurn(v) : v);
       return;
     }
+    if (t.id === 'sculptSlider') { setSculptSize(sizeOfSlider(+t.value)); return; }
     if (t.id === 'sculptSize') { const v = parseFloat(t.value); if (isFinite(v)) setSculptSize(v); else renderInspector(); return; }
     if (t.id === 'sculptStrength') { state.sculpt.strength = Math.max(0.05, Math.min(1, parseFloat(t.value) / 100)); const o = $('#sculptStrengthOut'); if (o) o.textContent = `${Math.round(state.sculpt.strength * 100)}%`; return; }
     if (t.dataset.actToggle === 'sculpt-mask') { state.sculpt.useMask = t.checked; updateHint(); return; }
@@ -3573,6 +3580,7 @@
   for (const el of [ins, planeBar]) {
     el.addEventListener('click', onPanelClick);
     el.addEventListener('change', onPanelChange);
+    el.addEventListener('input', (e) => { if (e.target.id === 'sculptSlider') setSculptSize(sizeOfSlider(+e.target.value)); }); // the slider sizes the brush while it is dragged
     el.addEventListener('input', onPanelInput);
   }
 
@@ -4370,7 +4378,8 @@
   $('#seamSmooth').addEventListener('change', (e) => { smoothSeam(+e.target.value); });
   $('#seamSnap').addEventListener('change', (e) => { if (state.edit) state.edit.snap = e.target.checked; });
   $('#explode').addEventListener('input', (e) => { state.explode = parseFloat(e.target.value); $('#explodeOut').textContent = `${Math.round(state.explode * 100)}%`; applyExplode(); });
-  $('#brushSize').addEventListener('change', (e) => { state.paint.size = Math.max(0.2, +e.target.value || 3); e.target.value = state.paint.size; state.paint.sized = true; brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); markDirty(); });
+  $('#brushSize').addEventListener('change', (e) => { state.paint.size = Math.max(0.2, +e.target.value || 3); e.target.value = state.paint.size; state.paint.sized = true; brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); syncBrushSlider(); markDirty(); });
+  $('#brushSlider').addEventListener('input', (e) => { const tool = state.tool; if (tool === 'sculpt') return; setBrushSize(sizeOfSlider(+e.target.value)); });
   function applyRegions() {
     const on = state.regions.on;
     let count = 0;

@@ -200,6 +200,7 @@ From the owner's Aysil arm ("must be smoother and not jagged or have fine, tiny 
 - **Holes fill themselves**: letting go of the brush fills every unpainted patch the paint closes round (`fillSelectionGaps` with `gap: 0`), and clicked regions that close round other regions take them in (`enclosedRegions`).
 - **Keys while painting**: `previewPainted` runs `planJoints` in the worker and draws the keys or plug on the painted outline; the cut still waits for Split off painted area.
 - **The Sphere brush shows as a ball**: `brushBall`, a see-through sphere of the brush's size, a child of `brushRing`, visible while painting in Sphere mode; Surface keeps the ring.
+- **Brush size sliders** (`#brushSlider` beside Brush, `#sculptSlider` beside Size): a log scale from 0.2 mm to two fifths of the part's size (`sliderOf`, `sizeOfSlider`), live while dragged, kept in step with the box and [ ] (`syncBrushSlider`).
 - **Show: Both | This piece | Other piece** under every pick (`state.pickShow`, `applyPickShow`): the hidden side's triangles leave the view's index, as Isolate does.
 
 ## Box select
