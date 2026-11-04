@@ -1279,10 +1279,22 @@
       <p class="muted small">${n === shells.length ? `All ${n} pieces will be separated.` : n ? `${n} of ${shells.length} pieces will be separated; the other ${shells.length - n === 1 ? 'one stays' : `${shells.length - n} stay`} together.` : 'Tick at least one piece.'}</p></div>`;
   }
   // Separate pieces that overlap another (by shellComponents): each chosen one becomes a part, the rest stay one part
+  // The chosen pieces (indices, with `trisOf(i)` the triangles each holds) in groups that touch one another
+  function touchGroups(p, ids, trisOf) {
+    if (ids.length < 2) return ids.map(i => [i]);
+    const label = new Int32Array(p.indices.length / 3).fill(-1);
+    ids.forEach((id, k) => { for (const t of trisOf(id)) label[t] = k; });
+    const m = K.touchingSets(p.positions, p.indices, label, ids.length), groups = Array.from({ length: m.count }, () => []);
+    ids.forEach((id, k) => groups[m.of[k]].push(id));
+    return groups;
+  }
   function separateComponents(p, chosen) {
     const v = views.get(p.id), c = (v && v.comps) || K.shellComponents(p.positions, p.indices);
-    const made = [];
-    for (const k of chosen) { const mask = new Uint8Array(c.label.length); for (let t = 0; t < mask.length; t++) mask[t] = c.label[t] === k ? 1 : 0; const m = K.extractTriangles(p.positions, p.indices, mask); made.push(makePart({ name: `${p.name} ${made.length + 1}`, color: nextColor(), positions: m.positions, indices: m.indices })); }
+    const made = [], tris = (k) => { const out = []; for (let t = 0; t < c.label.length; t++) if (c.label[t] === k) out.push(t); return out; };
+    for (const grp of touchGroups(p, [...chosen], tris)) { // touching pieces picked together come off as one part
+      const inGrp = new Set(grp), mask = new Uint8Array(c.label.length); for (let t = 0; t < mask.length; t++) mask[t] = inGrp.has(c.label[t]) ? 1 : 0;
+      const m = K.extractTriangles(p.positions, p.indices, mask); made.push(makePart({ name: `${p.name} ${made.length + 1}`, color: nextColor(), positions: m.positions, indices: m.indices }));
+    }
     const rest = new Uint8Array(c.label.length); for (let t = 0; t < rest.length; t++) rest[t] = chosen.has(c.label[t]) ? 0 : 1;
     const m = K.extractTriangles(p.positions, p.indices, rest);
     made.unshift(makePart({ name: p.name, color: p.color, positions: m.positions, indices: m.indices }));
@@ -1293,7 +1305,7 @@
     toast(`Separated ${chosen.size} ${chosen.size === 1 ? 'piece' : 'pieces'} pushed into the part: no cut needed. Check where ${chosen.size === 1 ? 'it' : 'they'} met the part before printing.`);
   }
   // Separate the ticked pieces (every piece when none are chosen in a preview): each becomes a part, the rest one part
-  function splitShells(chosen) {
+  function splitShells(chosen, together = false) {
     const p = selectedPart();
     if (!p) return;
     const shells = shellsOf(p);
@@ -1301,7 +1313,11 @@
     const pick = chosen || new Set(shells.map((s, i) => i));
     if (!pick.size) { toast('Tick at least one piece to separate.'); return; }
     const made = [], rest = [];
-    shells.forEach((sh, i) => { if (pick.has(i)) made.push(makePart({ name: `${p.name} ${made.length + 1}`, color: pick.size === shells.length ? nextColor() : shellColor(p, i), positions: sh.positions, indices: sh.indices })); else rest.push(sh); });
+    if (together) { // touching pieces picked together come off as one part (the owner's cuff and hand)
+      const groups = touchGroups(p, [...pick], (i) => shells[i].tris);
+      for (const grp of groups) { const ms = grp.map(i => shells[i]), m = ms.length === 1 ? ms[0] : K.mergeMeshes(ms); made.push(makePart({ name: `${p.name} ${made.length + 1}`, color: nextColor(), positions: m.positions, indices: m.indices })); }
+      shells.forEach((sh, i) => { if (!pick.has(i)) rest.push(sh); });
+    } else shells.forEach((sh, i) => { if (pick.has(i)) made.push(makePart({ name: `${p.name} ${made.length + 1}`, color: pick.size === shells.length ? nextColor() : shellColor(p, i), positions: sh.positions, indices: sh.indices })); else rest.push(sh); });
     if (rest.length) { const m = rest.length === 1 ? rest[0] : K.mergeMeshes(rest); made.unshift(makePart({ name: p.name, color: p.color, positions: m.positions, indices: m.indices })); }
     clearShellPick();
     const idx = state.parts.indexOf(p);
@@ -1310,7 +1326,8 @@
     state.explode = Math.max(state.explode, 0.35); // the pieces show apart
     syncScene();
     renderSuggestPins();
-    toast(`${rest.length ? `Separated ${pick.size} ${pick.size === 1 ? 'piece' : 'pieces'}; the rest stay together as ${p.name}` : `Split into ${made.length} pieces`}. Click a piece to cut it.`);
+    const freed = made.length - (rest.length ? 1 : 0);
+    toast(`${rest.length ? (together && freed === 1 && pick.size > 1 ? `Separated the ${pick.size} touching pieces as one part; the rest stay together as ${p.name}` : `Separated ${freed} ${freed === 1 ? 'piece' : 'pieces'}; the rest stay together as ${p.name}`) : `Split into ${made.length} pieces`}. Click a piece to cut it.`);
   }
   if (pinLayer) pinLayer.addEventListener('click', (e) => { const b = e.target.closest('[data-pin]'); if (b) applySuggestion(+b.dataset.pin); });
   /* ---------------- history ---------------- */
@@ -2020,12 +2037,14 @@
     if (n.lengthSq() < 1e-12) { toast('Drag a longer line across the part.', 'warn'); return null; }
     n.normalize();
     // where the stroke crosses the part: the hit nearest the stroke's middle
-    let o = null, bestT = Infinity;
-    for (let k = 0; k <= 24; k++) {
-      const t = k / 24, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+    // tried from the middle outwards and stopped at the first hit: each raycast is a pass over every triangle, and
+    // 25 of them on a 470k-triangle figure held the view for most of a second
+    let o = null;
+    for (let k = 0; k <= 24 && !o; k++) {
+      const t = 0.5 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) / 24, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
       ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1); raycaster.setFromCamera(ndc, camera);
       const hit = raycaster.intersectObjects([v.mesh], false)[0];
-      if (hit && Math.abs(t - 0.5) < bestT) { bestT = Math.abs(t - 0.5); o = hit.point.clone().sub(v.mesh.position); }
+      if (hit) o = hit.point.clone().sub(v.mesh.position);
     }
     if (!o) { toast('Draw the line across the part, so it crosses the model.', 'warn'); return null; }
     return strokeCutAt(p, [o.x, o.y, o.z], [n.x, n.y, n.z], add);
@@ -3745,7 +3764,13 @@
       }
     }
     let regions = prev ? prev.regions.filter(x => x !== g) : []; // a region already in the pick comes out again
-    if (!prev || regions.length === prev.regions.length) regions.push(g);
+    if (!prev || regions.length === prev.regions.length) {
+      if (prev && prev.regions.length) { // a Shift-click further along a limb fills in the regions between (the owner's shoulder, then hand)
+        let between = []; try { between = K.regionPath(p.positions, p.indices, seg, prev.regions, g); } catch (err) { between = []; }
+        if (between.length) { regions.push(...between.filter(x => !regions.includes(x))); toast(`Filled in ${between.length} ${between.length === 1 ? 'region' : 'regions'} between. Shift-click one to take it out.`); }
+      }
+      regions.push(g);
+    }
     if (!regions.length) { renderPick(); return; }
     const loops = K.groupLoops(p.positions, p.indices, seg, regions);
     if (!loops.length) { pickLoose(p, seg, regions); return Promise.resolve(); }
@@ -3825,8 +3850,19 @@
     drawPickLines(p, pick); renderPick(); markDirty();
     const seg = info.seg ? { groupOf: info.seg.groupOf, count: info.seg.count, borders: info.seg.borders, areas: info.seg.areas } : null;
     const req = { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint };
-    const done = coreTask('planPick', [p.positions, p.indices, req]).then((out) => {
-      if (run !== pickRun || state.regions.pick !== pick) return; // a newer pick took over
+    const live = () => run === pickRun && state.regions.pick === pick;
+    // the joints first (quick), drawn while the cut is checked: on a big figure the check takes seconds, and the
+    // owner saw no keys at all until it was done
+    const done = coreTask('planJoints', [p.positions, p.indices, req]).then((joints) => {
+      if (!live()) return null;
+      pick.loops = joints.loops; pick.loop = joints.loops[0];
+      pick.perLoop = joints.perLoop; pick.frames = joints.frames; pick.draw = joints.draw;
+      pick.keys = joints.perLoop.flatMap(per => per.keys); pick.plugs = joints.perLoop.flatMap(per => per.plugs);
+      pick.noKeys = noKeysText(joints.noKeys, joints.loops.length > 1);
+      drawPickLines(p, pick); renderPick(); markDirty();
+      return coreTask('planPick', [p.positions, p.indices, { ...req, planned: joints }]);
+    }).then((out) => {
+      if (!out || !live()) return; // a newer pick took over
       pick.pending = false;
       pick.loops = out.loops; pick.loop = out.loops[0];
       pick.perLoop = out.perLoop; pick.frames = out.frames; pick.draw = out.draw;
@@ -3986,7 +4022,11 @@
     const region = !!pick.regions, nr = region ? pick.regions.length : 0, nl = pick.loops.length, painted = !!pick.painted;
     const len = `${fmt(pick.loops.reduce((s, l) => s + l.length, 0))} mm`;
     const addHint = '<p class="muted small">Shift-click adds another line, or another region to split off with this one.</p>';
-    if (pick.pending) { el.innerHTML = `<p class="status muted checking"><span class="spin" aria-hidden="true"></span><span>${pick.cutWhenReady ? 'It will be cut as soon as the check passes. ' : ''}Checking the cut: ${region ? (nr === 1 ? 'this region’s' : `these ${nr} regions’`) : nl === 1 ? 'the line’s' : `the ${nl} lines’`} ${state.cfg.type === 'none' ? 'pieces' : 'joints and pieces'}…</span></p>`; renderAction(); return; }
+    if (pick.pending) {
+      const nk = pick.keys.length, np = pick.plugs.length, planned = pick.draw && pick.draw.length;
+      const jointsNow = !planned || state.cfg.type === 'none' ? '' : np ? `${np === 1 ? 'The plug is' : `${np} plugs are`} drawn in blue. ` : nk ? `${nk === 1 ? 'The key is' : `${nk} keys are`} drawn in blue. ` : pick.noKeys ? pick.noKeys + ' ' : '';
+      el.innerHTML = `<p class="status muted checking"><span class="spin" aria-hidden="true"></span><span>${pick.cutWhenReady ? 'It will be cut as soon as the check passes. ' : ''}${jointsNow}Checking the cut: ${region ? (nr === 1 ? 'this region’s' : `these ${nr} regions’`) : nl === 1 ? 'the line’s' : `the ${nl} lines’`} ${state.cfg.type === 'none' || planned ? 'pieces' : 'joints and pieces'}…</span></p>`; renderAction(); return;
+    }
     if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>${painted ? '' : addHint}`; renderAction(); return; }
     if (pick.loose) {
       const one = pick.loose.length === 1;
@@ -4166,7 +4206,7 @@
     if (splits || loose) { state.selectedId = null; state.explode = Math.max(wasExplode, 0.35); applyExplode(); const ex = $('#explode'); if (ex) ex.value = state.explode; }
     syncScene(); renderParts(); renderInspector(); updateChrome();
     busy(null);
-    toast(splits || loose ? `${loose ? `${loose} loose pieces separated${splits ? ', then the biggest split' : ''}. ` : ''}${splits ? `Split into ${splits + 1} parts, each with its keys. ` : ''}Ctrl+Z undoes it.${refused ? ` ${refused} ${refused === 1 ? 'part' : 'parts'} couldn’t be split: too thin, hooked or not sealed.` : ''}` : refused ? 'No part could be split off: each is too thin, hooked or not sealed. Try the Regions tool to pick them by hand.' : 'Nothing to split: the model reads as one part. Try Regions with Folds, or a flat cut.', splits ? '' : 'warn');
+    toast(splits || loose ? `${loose ? `${loose} loose pieces separated${splits ? ', then the biggest split' : ''}. ` : ''}${splits ? `Split into ${splits + 1} parts, each with its keys. ` : ''}Ctrl+Z undoes it.${refused ? ` ${refused} ${refused === 1 ? 'part' : 'parts'} couldn’t be split: too thin, hooked or not sealed.` : ''}` : refused ? 'No part could be split off: each is too thin, hooked or not sealed. Try the Regions tool to pick them by hand.' : 'Nothing to split: the model reads as one part. Try Regions by Creases, or a flat cut.', splits ? '' : 'warn');
     return { splits, refused, loose, parts: state.parts.length };
   }
   function cutAlongPick() {
@@ -4177,7 +4217,7 @@
       const loose = new Set(pick.loose);
       clearPick(); state.regions.last = null;
       if (state.selectedId !== p.id) selectPart(p.id);
-      if (pick.raw) separateComponents(p, loose); else splitShells(loose);
+      if (pick.raw) separateComponents(p, loose); else splitShells(loose, true);
       renderPick();
       return;
     }

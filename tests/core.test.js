@@ -600,6 +600,28 @@ console.log('cut suggestions');
     const sp = (s) => K.pickComponents(P, I, new Int32Array(nt), null, s).count;
     const rb = K.fillSelectionGaps(P, I, two, { gap: 1.5 });
     check('Fill gaps with a width bridges a channel narrower than it between two picked pieces', sp(two) > 1 && sp(rb.sel) === 1, { before: sp(two), after: sp(rb.sel) }); }
+  { // pieces that touch without sharing an edge (1.68: the owner's cuff and hand) are one piece of a pick; a piece apart is not
+    const box = (x) => { const b = K.shapeMesh({ kind: 'cube', w: 10, d: 10, h: 10 }); const pp = new Float64Array(b.positions); for (let i = 0; i < pp.length; i += 3) pp[i] += x; return { positions: pp, indices: b.indices }; };
+    const mm = K.mergeMeshes([box(0), box(10), box(30)]), P = mm.positions, I = mm.indices, nt = I.length / 3;
+    const c = K.shellComponents(P, I), all = new Uint8Array(nt).fill(1);
+    const pc = K.pickComponents(P, I, new Int32Array(nt), null, all);
+    const ts = K.touchingSets(P, I, c.label, c.count);
+    check('two boxes face to face are one piece of the pick, a box apart another', c.count === 3 && pc.count === 2 && ts.count === 2, { shells: c.count, pick: pc.count, sets: ts.count });
+    // the nearest vertex to many points from a grid matches a pass over every vertex
+    const ball = K.prepareMesh(uvSphere(10, 96, 64)), pts = []; let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let k = 0; k < 200; k++) pts.push([rnd() * 30 - 15, rnd() * 30 - 15, rnd() * 30 - 15]);
+    for (let k = 0; k < 20; k++) { const v = Math.floor(rnd() * ball.positions.length / 3); pts.push([ball.positions[3 * v], ball.positions[3 * v + 1], ball.positions[3 * v + 2]]); }
+    const fast = K.nearestVertices(ball.positions, pts), slow = pts.map(q => K.nearestVertex(ball.positions, q));
+    check('the nearest vertices from a grid match the nearest by a full pass, ties and all', fast.every((v, i) => v === slow[i]), fast.filter((v, i) => v !== slow[i]).length);
+    // a Shift-click further along fills the regions between: a rod in six bands, the last one a big body
+    const rod = K.prepareMesh(uvSphere(10, 48, 96)), RP = rod.positions, RI = rod.indices, rt = RI.length / 3;
+    const band = (t) => { const z = (RP[3 * RI[3 * t] + 2] + RP[3 * RI[3 * t + 1] + 2] + RP[3 * RI[3 * t + 2] + 2]) / 3; return Math.min(5, Math.floor((z + 10) / 3.4)); };
+    const groupOf = new Int32Array(rt); for (let t = 0; t < rt; t++) groupOf[t] = band(t);
+    const seg = K.bordersFromGroups(RP, RI, groupOf), areas = new Float64Array(seg.count);
+    for (let t = 0; t < rt; t++) { const a = 3 * RI[3 * t], b = 3 * RI[3 * t + 1], d = 3 * RI[3 * t + 2]; const u = [RP[b] - RP[a], RP[b + 1] - RP[a + 1], RP[b + 2] - RP[a + 2]], w = [RP[d] - RP[a], RP[d + 1] - RP[a + 1], RP[d + 2] - RP[a + 2]]; areas[groupOf[t]] += Math.hypot(u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]) / 2; }
+    seg.areas = areas;
+    const p03 = K.regionPath(RP, RI, seg, [0], 3), p01 = K.regionPath(RP, RI, seg, [0], 1), p33 = K.regionPath(RP, RI, seg, [3], 3);
+    check('a Shift-click three regions along fills in the two between; a neighbour or the same region adds nothing', p03.join() === '1,2' && p01.length === 0 && p33.length === 0, { p03, p01 }); }
   { // each piece lists the triangles of the original it holds (the inner ball's with its host), every triangle once, in order
     const m = K.prepareMesh(K.mergeMeshes([uvSphere(10, 24, 16), uvSphere(10, 24, 16, [40, 0, 0]), uvSphere(3, 12, 8, [40, 0, 0])]));
     const sh = K.separateShells(m.positions, m.indices), nt = m.indices.length / 3, seen = new Uint8Array(nt);
@@ -860,6 +882,13 @@ console.log('form: the parts of a figure by thickness');
     check('a pick planned as plain data splits the arm off sealed, the volumes adding up, and can be sent from a worker', !out.error && parts.length >= 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002 && sent.result.parts.length === parts.length && sent.draw.length === out.loops.length, { error: out.error, n: parts.length, vol, whole: K.volume(P, I) });
     const plain = K.splitRegions(P, I, req.seg, [arm], { cfg, minThickness: 0.8, sink: 1, perLoop: out.perLoop });
     check('trying the cut forced first gives the very pieces an unforced cut gives', !out.forced && plain.parts.length === parts.length && plain.parts.every((q, i) => Math.abs(q.volume - parts[i].volume) < 1e-6), { forced: out.forced }); }
+  // the joints first (1.68): planJoints alone gives the keys to draw, and planPick going on from it gives the same cut
+  { const cfg = { type: 'peg', shape: 'round', diameter: 3, length: 4, clearance: 0.2, margin: 0.8, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 1.5, printer: 'fdm', pegSide: 'below', perArea: 1, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, sizeMax: 3 };
+    let arm = -1; { const m = new Map(); for (let t = 0; t < nt; t++) if (partOf(t) === 'arm R') m.set(ps.groupOf[t], (m.get(ps.groupOf[t]) || 0) + 1); arm = [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]; }
+    const req = { loops: K.groupLoops(P, I, ps, [arm]), regions: [arm], seg: { groupOf: ps.groupOf, count: ps.count, borders: ps.borders, areas: ps.areas }, cfg, minThickness: 0.8, sink: 1, perArea: 1, numberJoints: false, joint: 1 };
+    const j = K.planJoints(P, I, req), sentJ = typeof structuredClone === 'function' ? structuredClone(K.plainData(j)) : K.plainData(j);
+    const whole = K.planPick(P, I, req), after = K.planPick(P, I, { ...req, planned: sentJ });
+    check('the joints alone are planned first, with keys to draw and no cut yet, and the cut that goes on from them is the whole pick’s', j.keys > 0 && !j.result && j.draw.every((d, i) => d.keys.length === j.perLoop[i].keys.length) && after.result && whole.result && after.keys === whole.keys && after.result.parts.length === whole.result.parts.length && after.result.parts.every((q, i) => Math.abs(q.volume - whole.result.parts[i].volume) < 1e-6 && K.edgeReport(q.indices).closed), { keys: j.keys, after: after.keys, whole: whole.keys }); }
   // a stroke across a limb (1.64): the ring round the part under it, made a line on the surface, cuts sealed
   { const D = K.diag(K.bounds(P)), near = (q) => { const t = K.nearestTriangle(P, I, q, D); const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; return [(P[a] + P[b] + P[c]) / 3, (P[a + 1] + P[b + 1] + P[c + 1]) / 3, (P[a + 2] + P[b + 2] + P[c + 2]) / 3]; };
     for (const [name, q, n, side] of [['the right arm', [21, 0, 10.5], [1, 0, 0.15], (c) => c[0] > 18], ['the neck', [0, 2.5, 15.5], [0.1, 0, 1], (c) => c[2] > 15]]) {

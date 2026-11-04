@@ -784,6 +784,7 @@ with sync_playwright() as p:
     check('Big parts finds no more parts than Fine', n_coarse <= n_fine, (n_coarse, n_fine))
     pg.click('[data-act=regions-detail][data-value=balanced]'); pg.wait_for_function('!KeymasterDebug.regionsLoading()', timeout=60000); pg.wait_for_timeout(300)
     n_form = pg.inner_text('#regionsCount')
+    check('the two ways to find regions are named Thickness and Creases', pg.inner_text('[data-act=regions-by][data-value=form]').strip() == 'Thickness' and pg.inner_text('[data-act=regions-by][data-value=folds]').strip() == 'Creases')
     pg.click('[data-act=regions-by][data-value=folds]'); pg.wait_for_timeout(1500)
     check('switching to folds shows the fold slider and finds regions its own way', pg.is_visible('#regionsAngle') and not pg.is_visible('#regionsDetail') and 'region' in pg.inner_text('#regionsCount'), pg.inner_text('#regionsCount'))
     # the rest of the suite works the fold borders it was written for
