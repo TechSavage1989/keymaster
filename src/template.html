@@ -28,6 +28,7 @@
   --stage-b: #8D9298;
   --stage-ink: #1E2124;
   --chip: rgba(255,255,255,.78);
+  --accent: #C4561C; --accent-ink: #FFFFFF; --accent-soft: rgba(196,86,28,.12);
   color-scheme: light;
   box-sizing: border-box;
   padding-top: env(safe-area-inset-top, 0px);
@@ -38,6 +39,7 @@
     --page: #141618; --panel: #1C1F22; --panel-2: #23272A; --ink: #E6E7E8; --muted: #9AA0A6; --line: #30353A; --field: #25292D;
     --warn: #F0A06A; --warn-bg: #3A2618; --ok: #6CC596; --danger: #F07177; --focus: #7FA8F0;
     --stage-a: #50555B; --stage-b: #26292D; --stage-ink: #E6E7E8; --chip: rgba(28,31,34,.82);
+    --accent: #F0844A; --accent-ink: #1B1A15; --accent-soft: rgba(240,132,74,.14);
     color-scheme: dark;
   }
 }
@@ -45,6 +47,7 @@
   --page: #141618; --panel: #1C1F22; --panel-2: #23272A; --ink: #E6E7E8; --muted: #9AA0A6; --line: #30353A; --field: #25292D;
   --warn: #F0A06A; --warn-bg: #3A2618; --ok: #6CC596; --danger: #F07177; --focus: #7FA8F0;
   --stage-a: #50555B; --stage-b: #26292D; --stage-ink: #E6E7E8; --chip: rgba(28,31,34,.82);
+  --accent: #F0844A; --accent-ink: #1B1A15; --accent-soft: rgba(240,132,74,.14);
   color-scheme: dark;
 }
 *, *::before, *::after { box-sizing: border-box; }
@@ -102,6 +105,8 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .btn:hover { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
 .btn:disabled { opacity: .45; cursor: default; }
 canvas.is-aiming { cursor: crosshair; }
+.box-sel { position: absolute; z-index: 6; pointer-events: none; border: 1.5px dashed var(--accent); background: var(--accent-soft); border-radius: 2px; }
+.multi h2 { margin: 0 0 4px; font-size: 15px; }
 .across-line { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
 .across-line line { stroke: var(--cut); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 10 6; }
 .btn.small { min-height: 28px; padding: 3px 9px; font-size: 13px; }
@@ -168,13 +173,15 @@ h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 .model-tools .inline-num input { width: 56px; }
 .view-tools { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: var(--chip); backdrop-filter: blur(8px); }
 .view-tools .icon-btn[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
-.axis-widget { position: absolute; top: 60px; right: 14px; width: 72px; height: 72px; pointer-events: none; }
-.axis-widget svg { position: absolute; inset: 0; width: 72px; height: 72px; }
+.axis-widget { position: absolute; top: 60px; right: 14px; width: 84px; height: 110px; pointer-events: none; }
+.axis-widget svg { position: absolute; left: 6px; top: 6px; width: 72px; height: 72px; }
+.axis-widget .reset-view { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); pointer-events: auto; white-space: nowrap; font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); background: var(--chip); cursor: pointer; }
+.axis-widget .reset-view:hover { background: var(--accent-soft); }
 .axis-widget svg line { stroke-width: 2; stroke-linecap: round; opacity: .8; }
 .axis-widget .ax-x { --ax: #e5484d; } .axis-widget .ax-y { --ax: #3fa65b; } .axis-widget .ax-z { --ax: #3b7ddd; }
 .axis-widget svg line { stroke: var(--ax); }
-.axis-dot { position: absolute; left: 0; top: 0; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--ax); background: var(--ax); color: #fff; font: inherit; font-size: 10px; font-weight: 700; line-height: 1; padding: 0; cursor: pointer; pointer-events: auto; transform: translate(36px, 36px) translate(-50%, -50%); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
-.axis-dot.neg { width: 14px; height: 14px; background: var(--panel); }
+.axis-dot { position: absolute; left: 6px; top: 6px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--ax); background: var(--ax); color: #fff; font: inherit; font-size: 10px; font-weight: 700; line-height: 1; padding: 0; cursor: pointer; pointer-events: auto; transform: translate(36px, 36px) translate(-50%, -50%); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+.axis-dot.neg { width: 15px; height: 15px; background: var(--panel); }
 .axis-dot.is-behind { opacity: .45; }
 .axis-dot:hover { filter: brightness(1.15); opacity: 1; }
 .part .row-acts { display: none; flex: none; gap: 0; }
@@ -186,8 +193,8 @@ h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 #themeBtn { margin-right: 6px; }
 #themeBtn[aria-pressed="true"] svg { transform: rotate(180deg); }
 .hint {
-  position: absolute; left: 50%; bottom: calc(16px + var(--bar-h, 0px)); transform: translateX(-50%); max-width: min(92%, 640px);
-  padding: 7px 14px; border-radius: 999px; background: var(--chip); backdrop-filter: blur(8px);
+  position: absolute; left: 50%; top: 58px; transform: translateX(-50%); max-width: min(70%, 620px);
+  padding: 6px 16px; border-radius: 999px; background: var(--chip); backdrop-filter: blur(8px); border: 1px solid var(--line);
   font-size: 13px; text-align: center; color: var(--ink); pointer-events: none;
 }
 .toast {
@@ -358,7 +365,11 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .cut-line-info .status + .status { margin-top: 6px; }
 .cut-line-info .btn-row { margin-top: 6px; }
 /* sections with a heading that opens and closes, as the guide's panels do */
-.sec { border-bottom: 1px solid var(--line); }
+.sec { border: 1px solid var(--line); border-radius: 8px; margin: 3px 8px; background: var(--panel); }
+.sec.tool-sec { border: 0; margin: 0; background: transparent; }
+.sec > summary { text-transform: uppercase; letter-spacing: .08em; font-size: 11.5px; color: var(--accent); }
+.sec > summary .sec-sum { text-transform: none; letter-spacing: 0; }
+.sec > summary::before { border-color: var(--accent); }
 .sec > summary, .sec-head { display: flex; align-items: center; gap: 8px; padding: 8px 16px; cursor: pointer; list-style: none; user-select: none; font-weight: 600; font-size: 13.5px; }
 .sec > summary::-webkit-details-marker { display: none; }
 .sec > summary::before { content: ""; width: 7px; height: 7px; border-right: 1.6px solid var(--muted); border-bottom: 1.6px solid var(--muted); transform: rotate(-45deg); transition: transform .12s; margin: 0 4px 0 1px; }
@@ -381,7 +392,7 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .tool-grid .tool { display: grid; justify-items: center; gap: 1px; padding: 5px 2px 3px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; line-height: 1.2; }
 .tool-grid .tool svg { width: 18px; height: 18px; }
 .tool-grid .tool:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); }
-.tool-grid .tool[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.tool-grid .tool[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); box-shadow: 0 1px 4px var(--accent-soft); }
 .tool-help { margin-top: 8px; font-size: 12.5px; line-height: 1.35; }
 .tool-label { display: none; }
 .edit-grid { grid-template-columns: repeat(3, 1fr); margin-top: 4px; }
@@ -394,6 +405,10 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .shell-row em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; }
 .swatch { width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--line); }
 .region-hover { margin-bottom: 4px; }
+.checking { display: flex; align-items: center; gap: 8px; }
+.spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--ink); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
 .shape-panel .kinds { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 6px; }
 .shape-panel .kinds .btn { padding: 4px 2px; font-size: 12.5px; }
 .shape-panel .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
@@ -590,6 +605,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
       <div class="view-tools" id="viewTools" hidden>
         <select id="viewFrom" class="view-from" aria-label="Look from" title="Look at the model from a side, the top or the bottom"><option value="" selected>View from…</option><option value="front">Front</option><option value="back">Back</option><option value="left">Left</option><option value="right">Right</option><option value="top">Top</option><option value="bottom">Bottom</option></select>
         <button class="icon-btn" id="frameBtn" aria-label="Frame the model" title="Frame the model (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="10" cy="10" r="2.5" fill="currentColor"/></svg></button>
+        <button class="icon-btn" id="boxBtn" aria-label="Box select" aria-pressed="false" title="Box select (B): drag a box to pick several regions, parts or pieces at once. Ctrl-drag works any time"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2"/><path d="M12.5 11.5l4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
         <button class="icon-btn" id="flatBtn" aria-label="Show faces" aria-pressed="false" title="Show faces: flat shading, so every face of the mesh shows"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7z" fill="currentColor" opacity=".25"/><path d="M10 2.5l7 4-7 4-7-4zM10 10.5v7M3 6.5v7l7 4M17 6.5v7l-7 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
         <button class="icon-btn" id="wireBtn" aria-label="Show wireframe" aria-pressed="false" title="Show wireframe"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7zM10 2.5v15M3 6.5l14 7M17 6.5l-14 7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
       </div>
@@ -601,9 +617,11 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <button type="button" class="axis-dot ax-x neg" data-view="left" aria-label="Look from the left (−X)"></button>
         <button type="button" class="axis-dot ax-y neg" data-view="front" aria-label="Look from the front (−Y)"></button>
         <button type="button" class="axis-dot ax-z neg" data-view="bottom" aria-label="Look from the bottom (−Z)"></button>
+        <button type="button" class="reset-view" id="resetView" title="Frame the model again (F)">Reset view</button>
       </div>
       <div class="area-tags" id="areaTags" aria-label="Areas on the cut face"></div>
       <div class="drag-chip" id="dragChip" hidden></div>
+      <div class="box-sel" id="boxSel" hidden aria-hidden="true"></div>
       <svg id="acrossLine" class="across-line" hidden aria-hidden="true"><line x1="0" y1="0" x2="0" y2="0"/></svg>
       <div class="suggest-pins" id="suggestPins" aria-label="Suggested cut spots"></div>
       <p class="hint" id="hint" hidden></p>
@@ -640,7 +658,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
   <div id="bedPanel" hidden></div>
   <div class="regions-panel" id="regionsPanel" hidden>
     <div class="rp-row rp-by"><span class="lbl">Find parts by</span><div class="seg" role="group" aria-label="Find parts by"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="The parts of a figure: limbs, a head, a torso, a weapon, a hat, clothing, told apart by the thickness under the surface and the creases between them">Parts</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Where the surface folds inward: cloth meeting skin, collars, belts, cuffs">Folds</button></div><output id="regionsCount"></output></div>
-    <div class="rp-row rp-ratio"><label class="slider" title="How different in thickness two parts must be to be told apart: lower finds more parts, higher fewer"><span class="lbl">Tell apart at</span><input type="range" id="regionsRatio" min="15" max="80" step="5" value="35" aria-label="How different in thickness two parts must be to be told apart"><output id="regionsRatioOut">35%</output></label></div>
+    <div class="rp-row rp-ratio"><span class="lbl" title="How finely the model is split into parts">Detail</span><div class="seg" role="group" aria-label="Detail" id="regionsDetail"><button type="button" data-act="regions-detail" data-value="coarse" aria-pressed="false" title="Only the big parts: head, limbs, body, base">Big</button><button type="button" data-act="regions-detail" data-value="balanced" aria-pressed="true" title="The parts a kit would have: head, hands, feet, hat, clothing">Balanced</button><button type="button" data-act="regions-detail" data-value="fine" aria-pressed="false" title="Smaller parts too: ears, fingers, buttons, straps">Fine</button></div></div>
     <div class="rp-row rp-fold" hidden><label class="slider" title="Where the surface folds inward more sharply than this, it is split into regions, like ZBrush polygroups"><span class="lbl">Split at folds over</span><input type="range" id="regionsAngle" min="5" max="45" step="5" value="15" aria-label="Split the surface where it folds inward more sharply than this"><output id="regionsAngleOut">15°</output></label></div>
     <div class="btn-row"><label class="inline-num" title="Push the cut face this far into the other piece, with a wall down from the line, so the piece keeps its thickness to the edge. 0 turns it off."><span class="lbl">Sink face</span><input type="number" id="sinkDepth" min="0" step="0.2" value="1" aria-label="Sink the cut face into the other piece by this much"><span class="unit">mm</span></label></div>
     <div id="paintTools" class="paint-tools" hidden>
@@ -688,6 +706,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
       <dt>Click the cut face</dt><dd>Add a key; click a key to set it up on its own</dd>
       <dt>Click a region or line</dt><dd>With Regions on, pick it to split off or cut along</dd>
       <dt>Click a part</dt><dd>With Select on, choose it with no cut plane in the way; with loose pieces shown, tick or untick one</dd>
+      <dt><kbd>B</kbd> or <kbd>Ctrl</kbd> + drag</dt><dd>Box select: pick every region in the box, choose several parts with Select, or tick loose pieces; Shift adds</dd>
       <dt>Axis dots</dt><dd>Top right of the view: click X, Y, Z or the hollow dot opposite to look from that side</dd>
       <dt>Double-click a part's name</dt><dd>Rename it</dd>
       <dt>Panel edges</dt><dd>Drag to resize a panel; double-click to reset</dd></dl>
