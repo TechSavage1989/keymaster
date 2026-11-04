@@ -1377,19 +1377,78 @@
     else el.hidden = true;
   }
   const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 16)));
+  // Opening a file: STL, OBJ, 3MF and STEP, read and prepared in the worker so a big file never holds the page
+  // still (the owner: "uploading some larger STLs takes a while"), then repaired there too if it needs it
+  const OPENS = ['stl', 'obj', '3mf', 'step', 'stp', 'zip'];
   async function loadFile(file) {
     const ext = (file.name.split('.').pop() || '').toLowerCase();
-    if (ext !== 'stl' && ext !== 'obj' && ext !== 'zip') { toast('Keymaster opens STL and OBJ files, and its own saved projects (.keymaster.zip). Export your model in one of those formats, then open it here.', 'error'); return; }
+    if (!OPENS.includes(ext)) { toast('Keymaster opens STL, OBJ, 3MF and STEP files, and its own saved projects (.keymaster.zip). Export your model in one of those formats, then open it here.', 'error'); return; }
     busy('Opening ' + file.name);
     await nextFrame();
+    let m = null;
     try {
       const buf = await file.arrayBuffer();
       if (ext === 'zip') { openProject(buf, file.name); return; }
-      const raw = ext === 'stl' ? K.parseSTL(buf) : K.parseOBJ(new TextDecoder().decode(buf));
-      setModel(file.name.replace(/\.[^.]+$/, ''), K.prepareMesh(raw));
+      let raw;
+      if (ext === '3mf') raw = await read3MF(buf);
+      else if (ext === 'step' || ext === 'stp') { busy('Reading the STEP file (the reader loads the first time)'); raw = await readSTEP(buf); }
+      else raw = await coreTask(ext === 'stl' ? 'parseSTL' : 'parseOBJ', [ext === 'stl' ? buf : new TextDecoder().decode(buf)]);
+      busy('Preparing ' + file.name);
+      m = await coreTask('prepareMesh', [raw]);
     } catch (err) {
+      busy(null);
       toast(err.message || 'This file couldn’t be read.', 'error');
-    } finally { busy(null); }
+      return;
+    }
+    busy(null);
+    await setModel(file.name.replace(/\.[^.]+$/, ''), m);
+  }
+  // A 3MF is a ZIP whose parts are deflated: the model and its relationships are inflated here (the browser's own
+  // DecompressionStream), then read in the worker by core's parse3MF
+  async function inflateRaw(u8) {
+    if (typeof DecompressionStream === 'undefined') throw new Error('This browser can’t unpack a 3MF. Try a recent Chrome, Edge, Firefox or Safari, or export the model as STL.');
+    const ds = new DecompressionStream('deflate-raw'), out = new Response(new Blob([u8]).stream().pipeThrough(ds));
+    return new Uint8Array(await out.arrayBuffer());
+  }
+  async function read3MF(buf) {
+    let entries;
+    try { entries = K.readZip(buf); } catch (err) { throw new Error('This 3MF couldn’t be opened: it isn’t a ZIP inside. Export it again from your slicer or modelling app.'); }
+    for (const e of entries) if (e.compressed && /\.(model|rels)$/i.test(e.name)) { if (e.method !== 8) throw new Error('This 3MF is packed in a way Keymaster can’t unpack. Export it again, or as STL.'); e.data = await inflateRaw(e.raw); }
+    return coreTask('parse3MF', [entries.filter(e => e.data).map(e => ({ name: e.name, data: e.data }))]);
+  }
+  // STEP is a CAD format of exact surfaces, not triangles: it is turned into triangles by OpenCascade (occt-import-js,
+  // pinned on jsDelivr, loaded only the first time a STEP file is opened; the file itself never leaves the browser)
+  const OCCT_URL = 'https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/';
+  let occtReady = null;
+  function loadOcct() {
+    if (window.occtimportjs) return Promise.resolve(window.occtimportjs({ locateFile: (f) => OCCT_URL + f }));
+    if (occtReady) return occtReady;
+    occtReady = new Promise((resolve, reject) => {
+      const sc = document.createElement('script');
+      sc.src = OCCT_URL + 'occt-import-js.js'; sc.async = true; sc.crossOrigin = 'anonymous';
+      sc.onload = () => { try { resolve(window.occtimportjs({ locateFile: (f) => OCCT_URL + f })); } catch (err) { reject(err); } };
+      sc.onerror = () => { occtReady = null; reject(new Error('The STEP reader couldn’t be loaded. Check the internet connection and try again, or export the model as STL.')); };
+      document.head.appendChild(sc);
+    });
+    return occtReady;
+  }
+  async function readSTEP(buf) {
+    const occt = await loadOcct();
+    const r = occt.ReadStepFile(new Uint8Array(buf), { linearUnit: 'millimeter', linearDeflectionType: 'bounding_box_ratio', linearDeflection: 0.0005, angularDeflection: 0.25 });
+    if (!r || !r.success || !r.meshes || !r.meshes.length) throw new Error('This STEP file has no solid shapes Keymaster could read. Export it again as STEP (AP214 or AP242), or as STL.');
+    return stepMeshes(r.meshes);
+  }
+  function stepMeshes(meshes) { // the STEP reader's meshes as one model
+    const P = [], I = [];
+    for (const mesh of meshes) {
+      const pos = mesh.attributes && mesh.attributes.position && mesh.attributes.position.array, idx = mesh.index && mesh.index.array;
+      if (!pos || !idx) continue;
+      const base = P.length / 3;
+      for (let i = 0; i < pos.length; i++) P.push(pos[i]);
+      for (let i = 0; i < idx.length; i++) I.push(base + idx[i]);
+    }
+    if (!I.length) throw new Error('This STEP file has no solid shapes Keymaster could read. Export it again as STEP (AP214 or AP242), or as STL.');
+    return { positions: new Float32Array(P), indices: new Uint32Array(I) };
   }
   async function loadSample() {
     busy('Building the sample');
@@ -1407,7 +1466,7 @@
     state.cfg.length = Math.max(1, Math.round(d * 1.2 * 2) / 2);
     savePrefs();
   }
-  function setModel(name, m) {
+  function setModel(name, m) { // returns a promise when the model is repaired as it opens
     state.model = { name, report: m.report, tris: m.indices.length / 3 };
     state.nextColor = 1; state.joint = 1; state.cutId = 0;
     state.parts = [makePart({ name, color: PALETTE[0], positions: m.positions, indices: m.indices })];
@@ -1421,10 +1480,12 @@
     state.start = snapshot(state.parts);
     const specks = m.report.specks ? ` Removed ${m.report.specks} loose ${m.report.specks === 1 ? 'speck' : 'specks'} too small to print.` : '';
     if (!m.report.closed) { // a surface with gaps or tangles can't be cut: repair it now, rather than refuse later
-      repairSurface(`This model’s surface had ${m.report.badEdges ? 'tangles' : 'gaps'}, so Keymaster repaired it.`);
-      history.past = []; history.future = []; updateChrome();
-      state.start = snapshot(state.parts); // the repaired model is the one to start over from
-      return;
+      const opened = state.parts;
+      return repairSurface(`This model’s surface had ${m.report.badEdges ? 'tangles' : 'gaps'}, so Keymaster repaired it.`).then((done) => {
+        if (!done || history.past.length !== 1 || history.past[0].parts !== opened) return;
+        history.past = []; history.future = []; updateChrome();
+        state.start = snapshot(state.parts); // the repaired model is the one to start over from
+      });
     }
     if (m.report.flipped) toast('The model was inside out, so Keymaster flipped it to print correctly.' + specks);
     else if (state.model.tris > 3e6) toast('This is a very dense model. Cuts may take a few seconds.' + specks, 'warn');
@@ -1567,15 +1628,25 @@
   }
   // Repair every part's surface: faces stored twice, parts welded along a seam, patches facing the wrong way,
   // loose slivers, pinched vertices and holes, in that order. Says what it did, and what it couldn't.
-  function repairSurface(lead = '') {
+  // The repair runs in the worker (a 6 s repair of a tangled export had held the page still as it opened), under the
+  // busy sign; the view keeps drawing meanwhile
+  async function repairSurface(lead = '') {
     const sum = { duplicates: 0, untangled: 0, pinched: 0, flipped: 0, slivers: 0, filled: 0 };
     let open = 0, bad = 0;
-    const parts = state.parts.map(p => {
-      const r = K.repairMesh(p.positions, p.indices);
-      for (const k of Object.keys(sum)) sum[k] += r[k];
-      open += r.report.openEdges; bad += r.report.badEdges;
-      return makePart({ ...p, positions: r.positions, indices: r.indices });
-    });
+    const before = state.parts;
+    busy('Repairing the surface');
+    let parts;
+    try {
+      parts = [];
+      for (const p of before) {
+        const r = await coreTask('repairMesh', [p.positions, p.indices]);
+        for (const k of Object.keys(sum)) sum[k] += r[k] || 0;
+        open += r.report.openEdges; bad += r.report.badEdges;
+        parts.push(makePart({ ...p, positions: r.positions, indices: r.indices }));
+      }
+    } catch (err) { busy(null); toast(`The surface couldn’t be repaired: ${err.message}`, 'error'); return false; }
+    busy(null);
+    if (state.parts !== before) return false; // something else changed the model meanwhile (another file opened)
     commit(parts, 'the repair');
     state.model.report = { ...state.model.report, openEdges: open, badEdges: bad, closed: open === 0 && bad === 0 };
     syncScene();
@@ -1590,6 +1661,7 @@
     const closed = open === 0 && bad === 0;
     const head = lead ? lead + ' ' : '';
     toast(closed ? `${head}${what} The model is closed now.` : `${head}${what} ${fmtInt(open + bad)} ${open + bad === 1 ? 'edge is' : 'edges are'} still open or tangled; that needs Blender or Meshmixer. Cuts away from them still work.`, closed ? '' : 'warn');
+    return true;
   }
 
   // Reduce detail: every part collapsed to fewer triangles within the chosen tolerance (quadric edge collapse in
@@ -1970,7 +2042,7 @@
     if (ptr.handle) { dragHandle(e); return; }
     if (ptr.across) { showAcrossLine(ptr.across.x, ptr.across.y, e.clientX, e.clientY); return; }
     if (state.tool === 'bed' || state.tool === 'shape' || state.tool === 'boolean' || state.tool === 'select' || state.shellPick) { if (!ptr.down) canvas.style.cursor = ''; return; }
-    if (state.regions.on) { if (!ptr.down) { canvas.style.cursor = state.paint.on ? 'crosshair' : handleAt(e) ? 'grab' : ''; if (state.paint.on) hoverBrush(e); else if (!state.draw.on) hoverRegion(e); } return; } // nothing on the hidden plane to grab
+    if (state.regions.on) { if (!ptr.down) { canvas.style.cursor = state.paint.on ? 'crosshair' : handleAt(e) ? 'grab' : ''; if (state.paint.on) { hoverBrush(e); if (state.paint.fill) hoverRegion(e); else if (state.regions.hover) { const hp = selectedPart(); if (hp) setHoverRegion(hp, -1); } } else if (!state.draw.on) hoverRegion(e); } /* with Fill on, the region a click will paint lights up under the pointer first */ return; } // nothing on the hidden plane to grab
     if (!ptr.down && selectedPart() && !tc.dragging) {
       const ring = tc.axis ? null : pickRing(e);
       setRingHover(ring ? ring.ax : null);
@@ -2542,7 +2614,9 @@
     if (!paintCount()) { renderPick(); updateHint(); markDirty(); return; }
     // holes in the paint fill themselves, as paint fill in Bambu Studio does: every unpainted patch the paint closes
     // round (smaller than the paint) is painted too
-    try { const fg = K.fillSelectionGaps(p.positions, p.indices, state.paint.sel, { gap: 0 }); if (fg.added) { state.paint.sel = fg.sel; renderPaint(); } } catch (err) { /* left as painted */ }
+    // (1.73) and narrow gaps between painted pieces close too (the owner: "gap fill should automatically fill any holes
+    // in selection between selected parts"): channels up to half the Fill gaps width, a crack of robe between a book's straps
+    try { const fg = K.fillSelectionGaps(p.positions, p.indices, state.paint.sel, { gap: Math.min(state.paint.size, fillGapDefault() / 2) }); if (fg.added) { state.paint.sel = fg.sel; renderPaint(); } } catch (err) { /* left as painted */ }
     let loops = [], error = '';
     try { const seg = K.selectionSeg(p.positions, p.indices, state.paint.sel); loops = K.groupLoops(p.positions, p.indices, seg, [1]); } catch (err) { error = err.message; }
     const pick = { partId: p.id, loops, error, painted: true, preview: true, keys: [], plugs: [], perLoop: [], frames: [], draw: [], selection: state.paint.sel };
@@ -2857,7 +2931,7 @@
     else if (state.across.on) t = 'Drag a straight line across the model where the cut should go. The cut goes through it, straight into the view. Esc to stop.';
     else if (state.here.on) t = 'Click where the cut should go round, on a limb, a neck or an accessory. Keymaster finds the narrowest cut through that spot. Esc to stop.';
     else if (state.regions.on && state.paint.on && state.paint.iso) t = 'Only the painted area shows: the rest of the model is out of the way of the brush and clicks. Paint inside it, then split it off. Show whole model brings the rest back.';
-    else if (state.regions.on && state.paint.on && state.paint.fill) t = 'Fill is on: a click paints the whole surface region under the brush (Shift-click clears it). Press Fill again for the brush.';
+    else if (state.regions.on && state.paint.on && state.paint.fill) t = 'Fill is on: the region under the pointer lights up, and a click paints all of it (Shift-click clears it). Press Fill again for the brush.';
     else if (state.regions.on && state.paint.on) t = `Drag over the part to paint the area to split off (Shift-drag erases). The circle is the ${state.paint.mode === 'sphere' ? 'sphere brush, which reaches layers behind too' : 'brush'}, ${fmt(state.paint.size)} mm wide; [ and ] resize it. Let go to see the split. Esc stops painting.`;
     else if (state.regions.on && state.edit && !state.paint.on && !state.draw.on) t = 'Drag a handle to move the line along the surface; it snaps to a region border when close. Smooth eases the line. Enter cuts, Esc picks again.';
     else if (state.regions.on && state.draw.on && !state.draw.points.length) t = 'Drag a line across a limb, a neck or a tail: the cut wraps round the part there by itself (Shift adds another). Or click points for a line of your own. Alt-drag orbits.';
@@ -3024,7 +3098,7 @@
       $('#toolHolder').appendChild(toolPanel);
       el.innerHTML = `<div class="ins-section intro"><h2>Cut sculptures into printable pieces</h2>
         <p>Open a figure or sculpture, slide a cut through it, and Keymaster adds pegs, dowel holes or magnet pockets so the pieces line up when you glue them.</p>
-        <p class="muted">Works with closed STL and OBJ meshes in millimeters. Everything runs in your browser; your model isn’t uploaded anywhere.</p></div>`;
+        <p class="muted">Opens STL, OBJ, 3MF and STEP files, in millimeters. Everything runs in your browser; your model isn’t uploaded anywhere.</p></div>`;
       return;
     }
     const p = selectedPart();
@@ -3501,7 +3575,7 @@
       case 'sculpt-mode': state.sculpt.mode = val; renderInspector(); updateHint(); break;
       case 'boolean': doBoolean(); break;
       case 'export-one': exportParts(state.selectedId); break;
-      case 'fill-holes': busy('Repairing the surface'); setTimeout(() => { repairSurface(); busy(null); }, 30); break;
+      case 'fill-holes': repairSurface(); break;
       case 'reduce': reduceModel(); break;
       case 'start-over': startOver(); break;
       case 'save-project': saveProject(); break;

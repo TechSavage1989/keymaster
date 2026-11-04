@@ -593,9 +593,9 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
             <path d="M18 62h132" stroke="#F2B705" stroke-width="3" stroke-dasharray="7 4"/>
           </svg>
           <h1>Open a model to start</h1>
-          <p>Drop an STL or OBJ here, or choose a file. Keymaster splits it into printable pieces with keys that line them up.</p>
+          <p>Drop an STL, OBJ, 3MF or STEP file here, or choose one. Keymaster splits it into printable pieces with keys that line them up.</p>
           <div class="row">
-            <button class="btn cut" id="emptyOpen">Open STL or OBJ</button>
+            <button class="btn cut" id="emptyOpen">Open a model</button>
             <button class="btn" id="emptySample">Try the sample</button>
           </div>
         </div>
@@ -716,7 +716,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
     </div>
   </div>
 </dialog>
-<input type="file" id="fileInput" accept=".stl,.obj,.zip" hidden>
+<input type="file" id="fileInput" accept=".stl,.obj,.3mf,.step,.stp,.zip" hidden>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/TransformControls.js"></script>

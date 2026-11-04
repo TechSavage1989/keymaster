@@ -32,6 +32,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Smoother region cuts, plugs on miniatures, outlines that never pinch, runs of parts in Split into parts, a faster hook check, Find: Parts | Sections (1.70).
 - Sliced region and painted cuts (smooth rims, no teeth), a print check after every curved cut, keys while painting, Show: Both | This piece | Other piece, picks kept across Find and Detail, small bumps by Shift-click, holes in picks filled (1.71).
 - Clear part boundaries kept at Balanced and Fine (a hand on a book, a book on a robe), the brush shown while it is sized, Ctrl+Z for drawn points, Made in inches? × 25.4 (1.72).
+- Opening 3MF and STEP, files read and repaired in the background, Fill showing the region it will paint, narrow gaps filled as the brush lets go (1.73).
 - Faster parts and picks, cut while checking, the stroke's line shows (1.66).
 - Split into parts that works on real figures (1.65): tested on the owner's ten reference sculpts; planned candidates, no dips or crumbs, neighbour retries, two to four times faster.
 - A stroke that wraps a cut round a part, a colour per separate picked piece, Shift-click with box select (1.64).
@@ -81,7 +82,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 
 ## Next
 
-- Next up from the owner: faster opening of big STLs (repair in the background), opening 3MF and STEP (1.73); scale % that follows the real scale, X/Y/Z size boxes with a lock, free turning of the model, and Inlay cut explained (1.74).
+- Next up from the owner: scale % that follows the real scale, X/Y/Z size boxes with a lock, free turning of the model, and Inlay cut explained (1.74).
 
 1. **Curved cuts along the model's own contours.** The owner chose curved cuts that follow a line, and wants Keymaster to find those lines itself: split the surface into regions by creases, normal changes and contours, the way ZBrush makes polygroups, and cut along a region border, such as an arm off at the sleeve hem. Planned in steps, each its own pull request: (a) show the detected surface regions (done: splits at sharp turns, which suits hard-surface models); (a2) also split organic sculpts by concave folds (done; thickness changes still to try); (b) a sealed curved cut along a chosen border (done: click a border line while regions show); (c) keys on a curved cut face (done, on a face that follows the line however it bends); (d) draw the cut line by hand (done: click points, the line follows the surface between them) or paint the area with a brush (done); (e) split off a region along its whole outline (done).
 2. **Curved cuts through hollowed models.** A curved cut only cuts the outer surface; an inner void shell the cap passes through should be cut by the cap too (a hollowed figure's cavity spans both pieces). Today such a cut is refused as a dip.

@@ -5626,10 +5626,74 @@ const KMCore = (() => {
       const method = dv.getUint16(o + 10, true), size = dv.getUint32(o + 20, true), full = dv.getUint32(o + 24, true), nl = dv.getUint16(o + 28, true), el = dv.getUint16(o + 30, true), cl = dv.getUint16(o + 32, true), off = dv.getUint32(o + 42, true);
       const name = dec.decode(u8.subarray(o + 46, o + 46 + nl));
       const lnl = dv.getUint16(off + 26, true), lel = dv.getUint16(off + 28, true), start = off + 30 + lnl + lel;
-      out.push(method === 0 ? { name, data: u8.slice(start, start + size) } : { name, compressed: true, size: full });
+      out.push(method === 0 ? { name, data: u8.slice(start, start + size) } : { name, compressed: true, method, raw: u8.slice(start, start + size), size: full }); // a compressed entry carries its raw deflate data, for the app to inflate (core has no inflater)
       o += 46 + nl + el + cl;
     }
     return out;
+  }
+  // A 3MF's model as one mesh, in millimetres (`files`: the ZIP's entries, each { name, data } with its bytes
+  // inflated). The model part is the one _rels/.rels names (3D/3dmodel.model by default); every build item is
+  // placed by its transform, an object made of components takes each component's object (from this part or another,
+  // as the production extension stores them) by its transform too, and a mirrored transform turns its triangles
+  // round so they still face out. Units (micron to metre, inch, foot) are scaled to millimetres. Plain string
+  // scanning, no DOM, so it runs in the worker. Returns { positions, indices, objects, items, unit }.
+  function parse3MF(files) {
+    const dec = new TextDecoder(), byName = new Map();
+    for (const f of files) if (f.data) byName.set(f.name.replace(/^\/+/, '').toLowerCase(), f.data);
+    const text = (name) => { const d = byName.get(String(name).replace(/^\/+/, '').toLowerCase()); return d ? dec.decode(d) : null; };
+    let start = '3D/3dmodel.model';
+    const rels = text('_rels/.rels');
+    if (rels) { const m = rels.match(/<Relationship[^>]*Type="[^"]*3dmodel"[^>]*>/i) || rels.match(/<Relationship[^>]*Target="([^"]+\.model)"[^>]*>/i); if (m) { const t = m[0].match(/Target="([^"]+)"/i); if (t) start = t[1]; } }
+    if (!text(start)) { const any = [...byName.keys()].find(n => n.endsWith('.model')); if (!any) throw new Error('This 3MF has no model inside it. Export it again from your slicer or modelling app.'); start = any; }
+    const UNITS = { micron: 0.001, millimeter: 1, centimeter: 10, inch: 25.4, foot: 304.8, meter: 1000 };
+    const attr = (tag, name) => { const m = tag.match(new RegExp('(?:^|\\s)' + name + '="([^"]*)"')); return m ? m[1] : null; };
+    const docs = new Map();
+    const docOf = (name) => {
+      const key = String(name).replace(/^\/+/, '').toLowerCase();
+      if (docs.has(key)) return docs.get(key);
+      const xml = text(key); if (!xml) return null;
+      const modelTag = (xml.match(/<model\b[^>]*>/) || [''])[0], unit = UNITS[(attr(modelTag, 'unit') || 'millimeter').toLowerCase()] || 1;
+      const objects = new Map();
+      const re = /<object\b([^>]*)>([\s\S]*?)<\/object>/g; let m;
+      while ((m = re.exec(xml))) {
+        const id = attr(m[1], 'id'), body = m[2], obj = { id, verts: null, tris: null, comps: [] };
+        const mesh = body.match(/<mesh\b[\s\S]*?<\/mesh>/);
+        if (mesh) {
+          const v = [], t = [];
+          const vr = /<vertex\b([^>]*)\/?>/g; let a; while ((a = vr.exec(mesh[0]))) v.push(+attr(a[1], 'x'), +attr(a[1], 'y'), +attr(a[1], 'z'));
+          const tr = /<triangle\b([^>]*)\/?>/g; while ((a = tr.exec(mesh[0]))) t.push(+attr(a[1], 'v1'), +attr(a[1], 'v2'), +attr(a[1], 'v3'));
+          obj.verts = v; obj.tris = t;
+        }
+        const cr = /<component\b([^>]*)\/?>/g; let c; while ((c = cr.exec(body))) obj.comps.push({ id: attr(c[1], 'objectid'), path: attr(c[1], 'p:path') || attr(c[1], 'path'), transform: attr(c[1], 'transform') });
+        objects.set(id, obj);
+      }
+      const items = []; const ir = /<item\b([^>]*)\/?>/g; let it; while ((it = ir.exec(xml))) items.push({ id: attr(it[1], 'objectid'), path: attr(it[1], 'p:path') || attr(it[1], 'path'), transform: attr(it[1], 'transform') });
+      const doc = { objects, items, unit }; docs.set(key, doc); return doc;
+    };
+    const root = docOf(start); if (!root) throw new Error('This 3MF’s model couldn’t be read.');
+    const matOf = (s) => { if (!s) return [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]; const v = s.trim().split(/\s+/).map(Number); return v.length === 12 && v.every(isFinite) ? v : [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]; };
+    const mul = (a, b) => { // a then b, row vectors: p' = (p·a)·b
+      const r = new Array(12);
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) { let s2 = i === 3 ? b[9 + j] : 0; for (let k = 0; k < 3; k++) s2 += a[3 * i + k] * b[3 * k + j]; r[3 * i + j] = s2; }
+      return r;
+    };
+    const P = [], I = []; let objects = 0, items = 0;
+    const place = (doc, id, M, depth) => {
+      if (depth > 16) return;
+      const obj = doc.objects.get(id); if (!obj) return;
+      if (obj.verts && obj.tris && obj.tris.length) {
+        const base = P.length / 3, u = doc.unit, v = obj.verts;
+        for (let i = 0; i < v.length; i += 3) { const x = v[i] * u, y = v[i + 1] * u, z = v[i + 2] * u; P.push(x * M[0] + y * M[3] + z * M[6] + M[9] * u, x * M[1] + y * M[4] + z * M[7] + M[10] * u, x * M[2] + y * M[5] + z * M[8] + M[11] * u); }
+        const det = M[0] * (M[4] * M[8] - M[5] * M[7]) - M[1] * (M[3] * M[8] - M[5] * M[6]) + M[2] * (M[3] * M[7] - M[4] * M[6]), t = obj.tris, nv = v.length / 3;
+        for (let i = 0; i < t.length; i += 3) { if (t[i] >= nv || t[i + 1] >= nv || t[i + 2] >= nv) continue; if (det < 0) I.push(base + t[i], base + t[i + 2], base + t[i + 1]); else I.push(base + t[i], base + t[i + 1], base + t[i + 2]); }
+        objects++;
+      }
+      for (const c of obj.comps) { const d2 = c.path ? docOf(c.path) : doc; if (d2) place(d2, c.id, mul(matOf(c.transform), M), depth + 1); }
+    };
+    const list = root.items.length ? root.items : [...root.objects.keys()].map(id => ({ id }));
+    for (const it of list) { const d2 = it.path ? docOf(it.path) : root; if (d2) { place(d2, it.id, matOf(it.transform), 0); items++; } }
+    if (!I.length) throw new Error('This 3MF has no triangles in it. Export it again from your slicer or modelling app.');
+    return { positions: new Float32Array(P), indices: new Uint32Array(I), objects, items, unit: root.unit };
   }
   // Every part in one 3MF (a ZIP of XML, as slicers open directly), each a named, coloured object, in millimetres.
   function make3MF(parts) {
@@ -6564,7 +6628,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
     KEY_SHAPES, MAGNET_SHAPES, keyProfile, profileFit, profileArea, keyAngle, keyCfg, KEY_OVERRIDES, autoFitKeys, sizeLadder, PRINTERS, MAGNET_SIZES,
     sweepDirections, neckSweep, refineNecks, freedBy, cutHere, creaseEdges, creasePlanes, separateShells,
-    segmentSurface, segmentForm, shapeDiameter, meshGrid, castInward, subdivideMesh, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, loopFrame, readZip, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, sphereTriangles, sculptDab, vertexTriangles, refreshCreased, snapSelectionToRegions, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
+    segmentSurface, segmentForm, shapeDiameter, meshGrid, castInward, subdivideMesh, regionCuts, regionBorderLines, bordersFromGroups, borderLoops, regionOutlines, cutLines, borderLoopNear, cutAlongLoop, analyzeLoop, orientLoops, sunkRing, keyLevels, capHeight, planPlugs, plugShape, offsetRing, splitRegion, splitRegions, groupLoops, regionLoops, regionAtPoint, cutAlongLoops, surfacePath, drawnLoop, nearestVertex, planBedCuts, bedFit, inlayCut, loopSelection, loopFrame, readZip, parse3MF, make3MF, assemblySheet, packProject, unpackProject, reduceMesh, jointMarks, markKeys, loopHandles, smoothHandles, nearestBorderPoint, brushTriangles, sphereTriangles, sculptDab, vertexTriangles, refreshCreased, snapSelectionToRegions, growSelection, shrinkSelection, tidySelection, selectionSeg, nearestTriangle,
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
