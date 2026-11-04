@@ -558,7 +558,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.67, build 460420. After an update, refresh the page and check this changes.">v1.67 · 460420</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.68, build 44b10d. After an update, refresh the page and check this changes.">v1.68 · 44b10d</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -657,7 +657,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
   <div id="suggestPanel" hidden></div>
   <div id="bedPanel" hidden></div>
   <div class="regions-panel" id="regionsPanel" hidden>
-    <div class="rp-row rp-by"><span class="lbl">Find parts by</span><div class="seg" role="group" aria-label="Find parts by"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="The parts of a figure: limbs, a head, a torso, a weapon, a hat, clothing, told apart by the thickness under the surface and the creases between them">Parts</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Where the surface folds inward: cloth meeting skin, collars, belts, cuffs">Folds</button></div><output id="regionsCount"></output></div>
+    <div class="rp-row rp-by"><span class="lbl">Find regions by</span><div class="seg" role="group" aria-label="Find regions by"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="Thickness: thick and thin parts of the solid told apart (a limb against a torso, a sword against a hand), with creases helping, in big pieces set by Detail">Thickness</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Creases: wherever the surface folds inward by more than the angle below (sleeves, collars, belts, cuffs, armour plates), in smaller pieces">Creases</button></div><output id="regionsCount"></output></div>
     <div class="rp-row rp-ratio"><span class="lbl" title="How finely the model is split into parts">Detail</span><div class="seg" role="group" aria-label="Detail" id="regionsDetail"><button type="button" data-act="regions-detail" data-value="coarse" aria-pressed="false" title="Only the big parts: head, limbs, body, base">Big</button><button type="button" data-act="regions-detail" data-value="balanced" aria-pressed="true" title="The parts a kit would have: head, hands, feet, hat, clothing">Balanced</button><button type="button" data-act="regions-detail" data-value="fine" aria-pressed="false" title="Smaller parts too: ears, fingers, buttons, straps">Fine</button></div></div>
     <div class="rp-row rp-fold" hidden><label class="slider" title="Where the surface folds inward more sharply than this, it is split into regions, like ZBrush polygroups"><span class="lbl">Split at folds over</span><input type="range" id="regionsAngle" min="5" max="45" step="5" value="15" aria-label="Split the surface where it folds inward more sharply than this"><output id="regionsAngleOut">15°</output></label></div>
     <div class="btn-row"><label class="inline-num" title="Push the cut face this far into the other piece, with a wall down from the line, so the piece keeps its thickness to the edge. 0 turns it off."><span class="lbl">Sink face</span><input type="number" id="sinkDepth" min="0" step="0.2" value="1" aria-label="Sink the cut face into the other piece by this much"><span class="unit">mm</span></label></div>
@@ -3745,6 +3745,40 @@ const KMCore = (() => {
     for (let v = 0; v < P.length / 3; v++) { const d = (P[3 * v] - point[0]) ** 2 + (P[3 * v + 1] - point[1]) ** 2 + (P[3 * v + 2] - point[2]) ** 2; if (d < bd) { bd = d; best = v; } }
     return best;
   }
+  // The vertex nearest each of many points, as `nearestVertex` gives (ties to the lower index), from a grid of the
+  // vertices built once: a stroke's line snaps 160 points, and one pass over 470k vertices per point took most of
+  // its time.
+  function nearestVertices(P, points) {
+    const nv = P.length / 3;
+    if (points.length < 4 || nv < 2000) return points.map(q => nearestVertex(P, q));
+    const b = bounds(P), cell = Math.max(1e-9, Math.cbrt((Math.max(b.size[0], 1e-9) * Math.max(b.size[1], 1e-9) * Math.max(b.size[2], 1e-9)) / (nv / 4)));
+    const nx = Math.floor(b.size[0] / cell) + 1, ny = Math.floor(b.size[1] / cell) + 1, nz = Math.floor(b.size[2] / cell) + 1;
+    const ci = (x, y, z) => (z * ny + y) * nx + x, cl = (v, n) => (v < 0 ? 0 : v >= n ? n - 1 : v);
+    const cellOf = new Int32Array(nv), start = new Int32Array(nx * ny * nz + 1);
+    for (let v = 0; v < nv; v++) { const c = ci(cl(Math.floor((P[3 * v] - b.min[0]) / cell), nx), cl(Math.floor((P[3 * v + 1] - b.min[1]) / cell), ny), cl(Math.floor((P[3 * v + 2] - b.min[2]) / cell), nz)); cellOf[v] = c; start[c + 1]++; }
+    for (let c = 0; c < nx * ny * nz; c++) start[c + 1] += start[c];
+    const items = new Int32Array(nv), fill = start.slice(0, -1);
+    for (let v = 0; v < nv; v++) items[fill[cellOf[v]]++] = v; // in index order within each cell
+    return points.map((q) => {
+      const gx = Math.floor((q[0] - b.min[0]) / cell), gy = Math.floor((q[1] - b.min[1]) / cell), gz = Math.floor((q[2] - b.min[2]) / cell);
+      let best = -1, bd = Infinity;
+      const maxR = Math.max(nx, ny, nz) + Math.max(Math.abs(gx), Math.abs(gy), Math.abs(gz));
+      for (let r = 0; r <= maxR; r++) {
+        // cells on the shell r away (Chebyshev); stop once the nearest possible point in it is farther than the best
+        if (best >= 0) { const near = (r - 1) * cell; if (near > 0 && near * near > bd) break; }
+        for (let z = gz - r; z <= gz + r; z++) { if (z < 0 || z >= nz) continue;
+          for (let y = gy - r; y <= gy + r; y++) { if (y < 0 || y >= ny) continue;
+            const edge = Math.abs(z - gz) === r || Math.abs(y - gy) === r;
+            for (let x = gx - r; x <= gx + r; x += (edge || r === 0) ? 1 : 2 * r) { if (x < 0 || x >= nx) continue;
+              const c = ci(x, y, z);
+              for (let k = start[c]; k < start[c + 1]; k++) { const v = items[k], d = (P[3 * v] - q[0]) ** 2 + (P[3 * v + 1] - q[1]) ** 2 + (P[3 * v + 2] - q[2]) ** 2; if (d < bd || (d === bd && v < best)) { bd = d; best = v; } }
+            }
+          }
+        }
+      }
+      return best;
+    });
+  }
   // The shortest way along the surface's edges from vertex a to vertex b (Dijkstra with a binary heap), as the
   // vertices from a to b inclusive. Edges are charged a little extra for straying from the straight line between
   // the two points, so the way runs where a hand would draw it instead of wandering round bumps.
@@ -3778,7 +3812,7 @@ const KMCore = (() => {
   // Returns a loop like borderLoops gives (verts, closed, length, drawn), or null if the points can't be joined.
   function drawnLoop(P, I, points) {
     if (points.length < 3) return null;
-    const vs = points.map(q => nearestVertex(P, q)), verts = [];
+    const vs = nearestVertices(P, points), verts = [];
     for (let i = 0; i < vs.length; i++) {
       const path = surfacePath(P, I, vs[i], vs[(i + 1) % vs.length]);
       if (!path) return null;
@@ -3808,7 +3842,93 @@ const KMCore = (() => {
     }
     const label = new Int32Array(nt).fill(-1), ids = new Map();
     for (let t = 0; t < nt; t++) if (inside(t)) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); label[t] = ids.get(r); }
+    if (ids.size > 1) { // separate pieces of the model that touch (a hand pushed into its cuff) are one piece of the pick
+      const m = touchingSets(P, I, label, ids.size, { apart: shellComponents(P, I).label });
+      for (let t = 0; t < nt; t++) if (label[t] >= 0) label[t] = m.of[label[t]];
+      return { label, count: m.count, nv };
+    }
     return { label, count: ids.size, nv };
+  }
+  // Which labelled sets of triangles touch: `label[t]` (-1 for none, else 0 .. count-1) per triangle; two sets
+  // touch where a vertex of one lies within `tol` of a vertex of the other (by default one and a half of the sets'
+  // median edges, at most 0.6% of the model's size), as a hand pushed into its cuff does along the rim, though they share no edge. Returns
+  // `{ of, count }`: each set's group, numbered from 0.
+  function touchingSets(P, I, label, count, opts = {}) { // opts.pairs (a Set): every touching pair a·count + b (a < b) is added to it instead; opts.apart (a label per triangle, as `shellComponents` gives): only vertices on different pieces count
+    const nt = I.length / 3, par = new Int32Array(count), pairs = opts.pairs || null, apart = opts.apart || null; let tol = opts.tol; for (let k = 0; k < count; k++) par[k] = k;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    if (!(tol > 0)) {
+      const L = [], step = Math.max(1, Math.floor(nt / 4000));
+      for (let t = 0; t < nt; t += step) if (label[t] >= 0) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1]; L.push(Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2])); }
+      L.sort((x, y) => x - y); tol = Math.min(1.5 * (L[L.length >> 1] || 0), 0.006 * diag(bounds(P))); // never more than a hair of the model: a coarse mesh's long edges would join pieces well apart
+    }
+    if (!(tol > 0) || count < 2) { const of = new Int32Array(count); for (let k = 0; k < count; k++) of[k] = k; return { of, count }; }
+    const vl = new Int32Array(P.length / 3).fill(-1);
+    const va = apart ? new Int32Array(P.length / 3) : null;
+    for (let t = 0; t < nt; t++) if (label[t] >= 0) for (let k = 0; k < 3; k++) { vl[I[3 * t + k]] = label[t]; if (va) va[I[3 * t + k]] = apart[t]; }
+    const cell = new Map(), key = (x, y, z) => x * 73856093 ^ y * 19349663 ^ z * 83492791;
+    for (let v = 0; v < vl.length; v++) {
+      if (vl[v] < 0) continue;
+      const k = key(Math.floor(P[3 * v] / tol), Math.floor(P[3 * v + 1] / tol), Math.floor(P[3 * v + 2] / tol));
+      let arr = cell.get(k); if (!arr) cell.set(k, arr = []); arr.push(v);
+    }
+    const t2 = tol * tol;
+    for (let v = 0; v < vl.length; v++) {
+      if (vl[v] < 0) continue;
+      const cx = Math.floor(P[3 * v] / tol), cy = Math.floor(P[3 * v + 1] / tol), cz = Math.floor(P[3 * v + 2] / tol);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        const arr = cell.get(key(cx + dx, cy + dy, cz + dz)); if (!arr) continue;
+        for (const w of arr) {
+          if ((pairs ? vl[w] === vl[v] : find(vl[w]) === find(vl[v])) || (va && va[w] === va[v])) continue;
+          const ex = P[3 * w] - P[3 * v], ey = P[3 * w + 1] - P[3 * v + 1], ez = P[3 * w + 2] - P[3 * v + 2];
+          if (ex * ex + ey * ey + ez * ez <= t2) { if (pairs) pairs.add(Math.min(vl[v], vl[w]) * count + Math.max(vl[v], vl[w])); else par[find(vl[w])] = find(vl[v]); }
+        }
+      }
+    }
+    const of = new Int32Array(count), ids = new Map();
+    for (let k = 0; k < count; k++) { const r = find(k); if (!ids.has(r)) ids.set(r, ids.size); of[k] = ids.get(r); }
+    return { of, count: ids.size };
+  }
+  // The regions between a pick and a region further along (the owner: a click on a shoulder, then a Shift-click
+  // on the hand, should take the arm between): the cheapest chain of neighbouring regions from any of `from` to
+  // `to`, each region charged the square root of its area, so a chain runs along a limb rather than across the
+  // body. Regions neighbour across a border or where their pieces touch without sharing an edge (a hand pushed
+  // into its cuff). The biggest region (the body) is never passed through, nor a region over three times the
+  // bigger of the two ends (the pick so far and `to`), nor more than `maxSteps` (6) regions,
+  // nor more than `maxShare` (40%) of the surface. Returns the regions in between (not `from`, not `to`); empty
+  // when the two already touch or no such chain is found.
+  function regionPath(P, I, seg, from, to, opts = {}) {
+    const n = seg.count, areas = seg.areas, maxSteps = opts.maxSteps || 6, maxShare = opts.maxShare || 0.4;
+    const adj = Array.from({ length: n }, () => new Set()), b = seg.borders, g = seg.groupOf;
+    for (let e = 0; e < b.length; e += 4) { const x = g[b[e]], y = g[b[e + 1]]; if (x !== y) { adj[x].add(y); adj[y].add(x); } }
+    const sh = shellComponents(P, I);
+    if (sh.count > 1) { // regions on different pieces that touch
+      const lab = new Int32Array(g.length); for (let t = 0; t < g.length; t++) lab[t] = g[t];
+      const pairs = new Set(); touchingSets(P, I, lab, n, { tol: opts.tol, pairs, apart: sh.label });
+      for (const k of pairs) { const x = Math.floor(k / n), y = k % n; adj[x].add(y); adj[y].add(x); }
+    }
+    let total = 0, big = 0; for (let r = 0; r < n; r++) { total += areas[r]; if (areas[r] > areas[big]) big = r; }
+    const src = new Set(from);
+    if (src.has(to)) return [];
+    let ends = areas[to], picked = 0; for (const f of src) picked += areas[f];
+    const cap = 3 * Math.max(ends, picked); // nothing in between much bigger than what was clicked: a hand and a shoulder don't take the torso between
+    for (const f of src) if (adj[f].has(to)) return [];
+    const dist = new Float64Array(n).fill(Infinity), prev = new Int32Array(n).fill(-1), steps = new Int32Array(n), done = new Uint8Array(n);
+    for (const f of src) dist[f] = 0;
+    for (;;) {
+      let u = -1; for (let r = 0; r < n; r++) if (!done[r] && dist[r] < Infinity && (u < 0 || dist[r] < dist[u])) u = r;
+      if (u < 0 || u === to) break;
+      done[u] = 1;
+      for (const w of adj[u]) {
+        if (done[w] || src.has(w)) continue;
+        if (w !== to && (w === big || areas[w] > cap || steps[u] + 1 > maxSteps)) continue;
+        const d = dist[u] + Math.sqrt(areas[w]);
+        if (d < dist[w]) { dist[w] = d; prev[w] = u; steps[w] = steps[u] + 1; }
+      }
+    }
+    if (prev[to] < 0) return [];
+    const out = []; let area = 0;
+    for (let r = prev[to]; r >= 0 && !src.has(r); r = prev[r]) { out.push(r); area += areas[r]; }
+    return area > maxShare * total ? [] : out.reverse();
   }
   /* ---------- a stroke that wraps a cut round a part ----------
      ModelSplitter's Line tool, as the owner asked: "draw a line that automatically creates a cut after the line
@@ -4043,7 +4163,7 @@ const KMCore = (() => {
     if (n < 3) return pts;
     const step = (t) => { pts = pts.map((q, i) => { const a = pts[(i + n - 1) % n], b = pts[(i + 1) % n]; return [q[0] + t * ((a[0] + b[0]) / 2 - q[0]), q[1] + t * ((a[1] + b[1]) / 2 - q[1]), q[2] + t * ((a[2] + b[2]) / 2 - q[2])]; }); };
     for (let k = 0; k < passes; k++) { step(0.5); step(-0.53); }
-    return pts.map(q => { const v = nearestVertex(P, q); return [P[3 * v], P[3 * v + 1], P[3 * v + 2]]; });
+    return nearestVertices(P, pts).map(v => [P[3 * v], P[3 * v + 1], P[3 * v + 2]]);
   }
   // The nearest point on any region border to a point, and how far it is.
   function nearestBorderPoint(P, seg, point) {
@@ -4827,7 +4947,10 @@ const KMCore = (() => {
     return out;
   }
   function curvedSideOf(pref, into2) { return (pref === 'below') === (into2 > 0) ? 'below' : 'above'; }
-  function planPick(P, I, req) {
+  // The joints alone, the quick first half of a pick (the app draws them while the cut is checked: on a big
+  // figure the owner saw no keys for the many seconds the check took): the lines oriented, each line's frame,
+  // keys or plug, joint marks and what to draw. `planPick(P, I, { ...req, planned })` goes on from it.
+  function planJoints(P, I, req) {
     const cfg = req.cfg, D = diag(bounds(P));
     let loops = req.loops;
     if (!req.regions && loops.length && loops.every(l => l.closed)) { try { loops = orientLoops(P, I, loops, { what: 'lines' }).loops; } catch (err) { /* the cut will say why */ } }
@@ -4860,6 +4983,10 @@ const KMCore = (() => {
         out.perLoop.push(per); out.draw.push(draw); out.keys += per.keys.length; out.plugs += per.plugs.length;
       }
     } else { out.perLoop = loops.map(() => ({ keys: [], plugs: [] })); out.draw = loops.map(() => ({ keys: [], plugs: [] })); }
+    return out;
+  }
+  function planPick(P, I, req) {
+    const cfg = req.cfg, out = req.planned ? { ...req.planned, result: null, error: null, errorCode: null, forced: null, dropped: null } : planJoints(P, I, req), loops = out.loops;
     const run = (withJoints, force) => {
       const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, perLoop: withJoints ? out.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
       if (req.regions) return splitRegions(P, I, req.seg, req.regions, o);
@@ -6744,7 +6871,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles,
+    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices,
   };
 })();
 
@@ -8032,10 +8159,22 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       <p class="muted small">${n === shells.length ? `All ${n} pieces will be separated.` : n ? `${n} of ${shells.length} pieces will be separated; the other ${shells.length - n === 1 ? 'one stays' : `${shells.length - n} stay`} together.` : 'Tick at least one piece.'}</p></div>`;
   }
   // Separate pieces that overlap another (by shellComponents): each chosen one becomes a part, the rest stay one part
+  // The chosen pieces (indices, with `trisOf(i)` the triangles each holds) in groups that touch one another
+  function touchGroups(p, ids, trisOf) {
+    if (ids.length < 2) return ids.map(i => [i]);
+    const label = new Int32Array(p.indices.length / 3).fill(-1);
+    ids.forEach((id, k) => { for (const t of trisOf(id)) label[t] = k; });
+    const m = K.touchingSets(p.positions, p.indices, label, ids.length), groups = Array.from({ length: m.count }, () => []);
+    ids.forEach((id, k) => groups[m.of[k]].push(id));
+    return groups;
+  }
   function separateComponents(p, chosen) {
     const v = views.get(p.id), c = (v && v.comps) || K.shellComponents(p.positions, p.indices);
-    const made = [];
-    for (const k of chosen) { const mask = new Uint8Array(c.label.length); for (let t = 0; t < mask.length; t++) mask[t] = c.label[t] === k ? 1 : 0; const m = K.extractTriangles(p.positions, p.indices, mask); made.push(makePart({ name: `${p.name} ${made.length + 1}`, color: nextColor(), positions: m.positions, indices: m.indices })); }
+    const made = [], tris = (k) => { const out = []; for (let t = 0; t < c.label.length; t++) if (c.label[t] === k) out.push(t); return out; };
+    for (const grp of touchGroups(p, [...chosen], tris)) { // touching pieces picked together come off as one part
+      const inGrp = new Set(grp), mask = new Uint8Array(c.label.length); for (let t = 0; t < mask.length; t++) mask[t] = inGrp.has(c.label[t]) ? 1 : 0;
+      const m = K.extractTriangles(p.positions, p.indices, mask); made.push(makePart({ name: `${p.name} ${made.length + 1}`, color: nextColor(), positions: m.positions, indices: m.indices }));
+    }
     const rest = new Uint8Array(c.label.length); for (let t = 0; t < rest.length; t++) rest[t] = chosen.has(c.label[t]) ? 0 : 1;
     const m = K.extractTriangles(p.positions, p.indices, rest);
     made.unshift(makePart({ name: p.name, color: p.color, positions: m.positions, indices: m.indices }));
@@ -8046,7 +8185,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     toast(`Separated ${chosen.size} ${chosen.size === 1 ? 'piece' : 'pieces'} pushed into the part: no cut needed. Check where ${chosen.size === 1 ? 'it' : 'they'} met the part before printing.`);
   }
   // Separate the ticked pieces (every piece when none are chosen in a preview): each becomes a part, the rest one part
-  function splitShells(chosen) {
+  function splitShells(chosen, together = false) {
     const p = selectedPart();
     if (!p) return;
     const shells = shellsOf(p);
@@ -8054,7 +8193,11 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const pick = chosen || new Set(shells.map((s, i) => i));
     if (!pick.size) { toast('Tick at least one piece to separate.'); return; }
     const made = [], rest = [];
-    shells.forEach((sh, i) => { if (pick.has(i)) made.push(makePart({ name: `${p.name} ${made.length + 1}`, color: pick.size === shells.length ? nextColor() : shellColor(p, i), positions: sh.positions, indices: sh.indices })); else rest.push(sh); });
+    if (together) { // touching pieces picked together come off as one part (the owner's cuff and hand)
+      const groups = touchGroups(p, [...pick], (i) => shells[i].tris);
+      for (const grp of groups) { const ms = grp.map(i => shells[i]), m = ms.length === 1 ? ms[0] : K.mergeMeshes(ms); made.push(makePart({ name: `${p.name} ${made.length + 1}`, color: nextColor(), positions: m.positions, indices: m.indices })); }
+      shells.forEach((sh, i) => { if (!pick.has(i)) rest.push(sh); });
+    } else shells.forEach((sh, i) => { if (pick.has(i)) made.push(makePart({ name: `${p.name} ${made.length + 1}`, color: pick.size === shells.length ? nextColor() : shellColor(p, i), positions: sh.positions, indices: sh.indices })); else rest.push(sh); });
     if (rest.length) { const m = rest.length === 1 ? rest[0] : K.mergeMeshes(rest); made.unshift(makePart({ name: p.name, color: p.color, positions: m.positions, indices: m.indices })); }
     clearShellPick();
     const idx = state.parts.indexOf(p);
@@ -8063,7 +8206,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     state.explode = Math.max(state.explode, 0.35); // the pieces show apart
     syncScene();
     renderSuggestPins();
-    toast(`${rest.length ? `Separated ${pick.size} ${pick.size === 1 ? 'piece' : 'pieces'}; the rest stay together as ${p.name}` : `Split into ${made.length} pieces`}. Click a piece to cut it.`);
+    const freed = made.length - (rest.length ? 1 : 0);
+    toast(`${rest.length ? (together && freed === 1 && pick.size > 1 ? `Separated the ${pick.size} touching pieces as one part; the rest stay together as ${p.name}` : `Separated ${freed} ${freed === 1 ? 'piece' : 'pieces'}; the rest stay together as ${p.name}`) : `Split into ${made.length} pieces`}. Click a piece to cut it.`);
   }
   if (pinLayer) pinLayer.addEventListener('click', (e) => { const b = e.target.closest('[data-pin]'); if (b) applySuggestion(+b.dataset.pin); });
   /* ---------------- history ---------------- */
@@ -8773,12 +8917,14 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     if (n.lengthSq() < 1e-12) { toast('Drag a longer line across the part.', 'warn'); return null; }
     n.normalize();
     // where the stroke crosses the part: the hit nearest the stroke's middle
-    let o = null, bestT = Infinity;
-    for (let k = 0; k <= 24; k++) {
-      const t = k / 24, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+    // tried from the middle outwards and stopped at the first hit: each raycast is a pass over every triangle, and
+    // 25 of them on a 470k-triangle figure held the view for most of a second
+    let o = null;
+    for (let k = 0; k <= 24 && !o; k++) {
+      const t = 0.5 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) / 24, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
       ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1); raycaster.setFromCamera(ndc, camera);
       const hit = raycaster.intersectObjects([v.mesh], false)[0];
-      if (hit && Math.abs(t - 0.5) < bestT) { bestT = Math.abs(t - 0.5); o = hit.point.clone().sub(v.mesh.position); }
+      if (hit) o = hit.point.clone().sub(v.mesh.position);
     }
     if (!o) { toast('Draw the line across the part, so it crosses the model.', 'warn'); return null; }
     return strokeCutAt(p, [o.x, o.y, o.z], [n.x, n.y, n.z], add);
@@ -10498,7 +10644,13 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       }
     }
     let regions = prev ? prev.regions.filter(x => x !== g) : []; // a region already in the pick comes out again
-    if (!prev || regions.length === prev.regions.length) regions.push(g);
+    if (!prev || regions.length === prev.regions.length) {
+      if (prev && prev.regions.length) { // a Shift-click further along a limb fills in the regions between (the owner's shoulder, then hand)
+        let between = []; try { between = K.regionPath(p.positions, p.indices, seg, prev.regions, g); } catch (err) { between = []; }
+        if (between.length) { regions.push(...between.filter(x => !regions.includes(x))); toast(`Filled in ${between.length} ${between.length === 1 ? 'region' : 'regions'} between. Shift-click one to take it out.`); }
+      }
+      regions.push(g);
+    }
     if (!regions.length) { renderPick(); return; }
     const loops = K.groupLoops(p.positions, p.indices, seg, regions);
     if (!loops.length) { pickLoose(p, seg, regions); return Promise.resolve(); }
@@ -10578,8 +10730,19 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     drawPickLines(p, pick); renderPick(); markDirty();
     const seg = info.seg ? { groupOf: info.seg.groupOf, count: info.seg.count, borders: info.seg.borders, areas: info.seg.areas } : null;
     const req = { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint };
-    const done = coreTask('planPick', [p.positions, p.indices, req]).then((out) => {
-      if (run !== pickRun || state.regions.pick !== pick) return; // a newer pick took over
+    const live = () => run === pickRun && state.regions.pick === pick;
+    // the joints first (quick), drawn while the cut is checked: on a big figure the check takes seconds, and the
+    // owner saw no keys at all until it was done
+    const done = coreTask('planJoints', [p.positions, p.indices, req]).then((joints) => {
+      if (!live()) return null;
+      pick.loops = joints.loops; pick.loop = joints.loops[0];
+      pick.perLoop = joints.perLoop; pick.frames = joints.frames; pick.draw = joints.draw;
+      pick.keys = joints.perLoop.flatMap(per => per.keys); pick.plugs = joints.perLoop.flatMap(per => per.plugs);
+      pick.noKeys = noKeysText(joints.noKeys, joints.loops.length > 1);
+      drawPickLines(p, pick); renderPick(); markDirty();
+      return coreTask('planPick', [p.positions, p.indices, { ...req, planned: joints }]);
+    }).then((out) => {
+      if (!out || !live()) return; // a newer pick took over
       pick.pending = false;
       pick.loops = out.loops; pick.loop = out.loops[0];
       pick.perLoop = out.perLoop; pick.frames = out.frames; pick.draw = out.draw;
@@ -10739,7 +10902,11 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const region = !!pick.regions, nr = region ? pick.regions.length : 0, nl = pick.loops.length, painted = !!pick.painted;
     const len = `${fmt(pick.loops.reduce((s, l) => s + l.length, 0))} mm`;
     const addHint = '<p class="muted small">Shift-click adds another line, or another region to split off with this one.</p>';
-    if (pick.pending) { el.innerHTML = `<p class="status muted checking"><span class="spin" aria-hidden="true"></span><span>${pick.cutWhenReady ? 'It will be cut as soon as the check passes. ' : ''}Checking the cut: ${region ? (nr === 1 ? 'this region’s' : `these ${nr} regions’`) : nl === 1 ? 'the line’s' : `the ${nl} lines’`} ${state.cfg.type === 'none' ? 'pieces' : 'joints and pieces'}…</span></p>`; renderAction(); return; }
+    if (pick.pending) {
+      const nk = pick.keys.length, np = pick.plugs.length, planned = pick.draw && pick.draw.length;
+      const jointsNow = !planned || state.cfg.type === 'none' ? '' : np ? `${np === 1 ? 'The plug is' : `${np} plugs are`} drawn in blue. ` : nk ? `${nk === 1 ? 'The key is' : `${nk} keys are`} drawn in blue. ` : pick.noKeys ? pick.noKeys + ' ' : '';
+      el.innerHTML = `<p class="status muted checking"><span class="spin" aria-hidden="true"></span><span>${pick.cutWhenReady ? 'It will be cut as soon as the check passes. ' : ''}${jointsNow}Checking the cut: ${region ? (nr === 1 ? 'this region’s' : `these ${nr} regions’`) : nl === 1 ? 'the line’s' : `the ${nl} lines’`} ${state.cfg.type === 'none' || planned ? 'pieces' : 'joints and pieces'}…</span></p>`; renderAction(); return;
+    }
     if (pick.error) { el.innerHTML = `<p class="status warn">${ICONS.alert}<span>${esc(pick.error)}</span></p>${painted ? '' : addHint}`; renderAction(); return; }
     if (pick.loose) {
       const one = pick.loose.length === 1;
@@ -10919,7 +11086,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     if (splits || loose) { state.selectedId = null; state.explode = Math.max(wasExplode, 0.35); applyExplode(); const ex = $('#explode'); if (ex) ex.value = state.explode; }
     syncScene(); renderParts(); renderInspector(); updateChrome();
     busy(null);
-    toast(splits || loose ? `${loose ? `${loose} loose pieces separated${splits ? ', then the biggest split' : ''}. ` : ''}${splits ? `Split into ${splits + 1} parts, each with its keys. ` : ''}Ctrl+Z undoes it.${refused ? ` ${refused} ${refused === 1 ? 'part' : 'parts'} couldn’t be split: too thin, hooked or not sealed.` : ''}` : refused ? 'No part could be split off: each is too thin, hooked or not sealed. Try the Regions tool to pick them by hand.' : 'Nothing to split: the model reads as one part. Try Regions with Folds, or a flat cut.', splits ? '' : 'warn');
+    toast(splits || loose ? `${loose ? `${loose} loose pieces separated${splits ? ', then the biggest split' : ''}. ` : ''}${splits ? `Split into ${splits + 1} parts, each with its keys. ` : ''}Ctrl+Z undoes it.${refused ? ` ${refused} ${refused === 1 ? 'part' : 'parts'} couldn’t be split: too thin, hooked or not sealed.` : ''}` : refused ? 'No part could be split off: each is too thin, hooked or not sealed. Try the Regions tool to pick them by hand.' : 'Nothing to split: the model reads as one part. Try Regions by Creases, or a flat cut.', splits ? '' : 'warn');
     return { splits, refused, loose, parts: state.parts.length };
   }
   function cutAlongPick() {
@@ -10930,7 +11097,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       const loose = new Set(pick.loose);
       clearPick(); state.regions.last = null;
       if (state.selectedId !== p.id) selectPart(p.id);
-      if (pick.raw) separateComponents(p, loose); else splitShells(loose);
+      if (pick.raw) separateComponents(p, loose); else splitShells(loose, true);
       renderPick();
       return;
     }

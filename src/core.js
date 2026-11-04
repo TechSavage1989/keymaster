@@ -3024,6 +3024,40 @@ const KMCore = (() => {
     for (let v = 0; v < P.length / 3; v++) { const d = (P[3 * v] - point[0]) ** 2 + (P[3 * v + 1] - point[1]) ** 2 + (P[3 * v + 2] - point[2]) ** 2; if (d < bd) { bd = d; best = v; } }
     return best;
   }
+  // The vertex nearest each of many points, as `nearestVertex` gives (ties to the lower index), from a grid of the
+  // vertices built once: a stroke's line snaps 160 points, and one pass over 470k vertices per point took most of
+  // its time.
+  function nearestVertices(P, points) {
+    const nv = P.length / 3;
+    if (points.length < 4 || nv < 2000) return points.map(q => nearestVertex(P, q));
+    const b = bounds(P), cell = Math.max(1e-9, Math.cbrt((Math.max(b.size[0], 1e-9) * Math.max(b.size[1], 1e-9) * Math.max(b.size[2], 1e-9)) / (nv / 4)));
+    const nx = Math.floor(b.size[0] / cell) + 1, ny = Math.floor(b.size[1] / cell) + 1, nz = Math.floor(b.size[2] / cell) + 1;
+    const ci = (x, y, z) => (z * ny + y) * nx + x, cl = (v, n) => (v < 0 ? 0 : v >= n ? n - 1 : v);
+    const cellOf = new Int32Array(nv), start = new Int32Array(nx * ny * nz + 1);
+    for (let v = 0; v < nv; v++) { const c = ci(cl(Math.floor((P[3 * v] - b.min[0]) / cell), nx), cl(Math.floor((P[3 * v + 1] - b.min[1]) / cell), ny), cl(Math.floor((P[3 * v + 2] - b.min[2]) / cell), nz)); cellOf[v] = c; start[c + 1]++; }
+    for (let c = 0; c < nx * ny * nz; c++) start[c + 1] += start[c];
+    const items = new Int32Array(nv), fill = start.slice(0, -1);
+    for (let v = 0; v < nv; v++) items[fill[cellOf[v]]++] = v; // in index order within each cell
+    return points.map((q) => {
+      const gx = Math.floor((q[0] - b.min[0]) / cell), gy = Math.floor((q[1] - b.min[1]) / cell), gz = Math.floor((q[2] - b.min[2]) / cell);
+      let best = -1, bd = Infinity;
+      const maxR = Math.max(nx, ny, nz) + Math.max(Math.abs(gx), Math.abs(gy), Math.abs(gz));
+      for (let r = 0; r <= maxR; r++) {
+        // cells on the shell r away (Chebyshev); stop once the nearest possible point in it is farther than the best
+        if (best >= 0) { const near = (r - 1) * cell; if (near > 0 && near * near > bd) break; }
+        for (let z = gz - r; z <= gz + r; z++) { if (z < 0 || z >= nz) continue;
+          for (let y = gy - r; y <= gy + r; y++) { if (y < 0 || y >= ny) continue;
+            const edge = Math.abs(z - gz) === r || Math.abs(y - gy) === r;
+            for (let x = gx - r; x <= gx + r; x += (edge || r === 0) ? 1 : 2 * r) { if (x < 0 || x >= nx) continue;
+              const c = ci(x, y, z);
+              for (let k = start[c]; k < start[c + 1]; k++) { const v = items[k], d = (P[3 * v] - q[0]) ** 2 + (P[3 * v + 1] - q[1]) ** 2 + (P[3 * v + 2] - q[2]) ** 2; if (d < bd || (d === bd && v < best)) { bd = d; best = v; } }
+            }
+          }
+        }
+      }
+      return best;
+    });
+  }
   // The shortest way along the surface's edges from vertex a to vertex b (Dijkstra with a binary heap), as the
   // vertices from a to b inclusive. Edges are charged a little extra for straying from the straight line between
   // the two points, so the way runs where a hand would draw it instead of wandering round bumps.
@@ -3057,7 +3091,7 @@ const KMCore = (() => {
   // Returns a loop like borderLoops gives (verts, closed, length, drawn), or null if the points can't be joined.
   function drawnLoop(P, I, points) {
     if (points.length < 3) return null;
-    const vs = points.map(q => nearestVertex(P, q)), verts = [];
+    const vs = nearestVertices(P, points), verts = [];
     for (let i = 0; i < vs.length; i++) {
       const path = surfacePath(P, I, vs[i], vs[(i + 1) % vs.length]);
       if (!path) return null;
@@ -3087,7 +3121,93 @@ const KMCore = (() => {
     }
     const label = new Int32Array(nt).fill(-1), ids = new Map();
     for (let t = 0; t < nt; t++) if (inside(t)) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); label[t] = ids.get(r); }
+    if (ids.size > 1) { // separate pieces of the model that touch (a hand pushed into its cuff) are one piece of the pick
+      const m = touchingSets(P, I, label, ids.size, { apart: shellComponents(P, I).label });
+      for (let t = 0; t < nt; t++) if (label[t] >= 0) label[t] = m.of[label[t]];
+      return { label, count: m.count, nv };
+    }
     return { label, count: ids.size, nv };
+  }
+  // Which labelled sets of triangles touch: `label[t]` (-1 for none, else 0 .. count-1) per triangle; two sets
+  // touch where a vertex of one lies within `tol` of a vertex of the other (by default one and a half of the sets'
+  // median edges, at most 0.6% of the model's size), as a hand pushed into its cuff does along the rim, though they share no edge. Returns
+  // `{ of, count }`: each set's group, numbered from 0.
+  function touchingSets(P, I, label, count, opts = {}) { // opts.pairs (a Set): every touching pair a·count + b (a < b) is added to it instead; opts.apart (a label per triangle, as `shellComponents` gives): only vertices on different pieces count
+    const nt = I.length / 3, par = new Int32Array(count), pairs = opts.pairs || null, apart = opts.apart || null; let tol = opts.tol; for (let k = 0; k < count; k++) par[k] = k;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    if (!(tol > 0)) {
+      const L = [], step = Math.max(1, Math.floor(nt / 4000));
+      for (let t = 0; t < nt; t += step) if (label[t] >= 0) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1]; L.push(Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2])); }
+      L.sort((x, y) => x - y); tol = Math.min(1.5 * (L[L.length >> 1] || 0), 0.006 * diag(bounds(P))); // never more than a hair of the model: a coarse mesh's long edges would join pieces well apart
+    }
+    if (!(tol > 0) || count < 2) { const of = new Int32Array(count); for (let k = 0; k < count; k++) of[k] = k; return { of, count }; }
+    const vl = new Int32Array(P.length / 3).fill(-1);
+    const va = apart ? new Int32Array(P.length / 3) : null;
+    for (let t = 0; t < nt; t++) if (label[t] >= 0) for (let k = 0; k < 3; k++) { vl[I[3 * t + k]] = label[t]; if (va) va[I[3 * t + k]] = apart[t]; }
+    const cell = new Map(), key = (x, y, z) => x * 73856093 ^ y * 19349663 ^ z * 83492791;
+    for (let v = 0; v < vl.length; v++) {
+      if (vl[v] < 0) continue;
+      const k = key(Math.floor(P[3 * v] / tol), Math.floor(P[3 * v + 1] / tol), Math.floor(P[3 * v + 2] / tol));
+      let arr = cell.get(k); if (!arr) cell.set(k, arr = []); arr.push(v);
+    }
+    const t2 = tol * tol;
+    for (let v = 0; v < vl.length; v++) {
+      if (vl[v] < 0) continue;
+      const cx = Math.floor(P[3 * v] / tol), cy = Math.floor(P[3 * v + 1] / tol), cz = Math.floor(P[3 * v + 2] / tol);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        const arr = cell.get(key(cx + dx, cy + dy, cz + dz)); if (!arr) continue;
+        for (const w of arr) {
+          if ((pairs ? vl[w] === vl[v] : find(vl[w]) === find(vl[v])) || (va && va[w] === va[v])) continue;
+          const ex = P[3 * w] - P[3 * v], ey = P[3 * w + 1] - P[3 * v + 1], ez = P[3 * w + 2] - P[3 * v + 2];
+          if (ex * ex + ey * ey + ez * ez <= t2) { if (pairs) pairs.add(Math.min(vl[v], vl[w]) * count + Math.max(vl[v], vl[w])); else par[find(vl[w])] = find(vl[v]); }
+        }
+      }
+    }
+    const of = new Int32Array(count), ids = new Map();
+    for (let k = 0; k < count; k++) { const r = find(k); if (!ids.has(r)) ids.set(r, ids.size); of[k] = ids.get(r); }
+    return { of, count: ids.size };
+  }
+  // The regions between a pick and a region further along (the owner: a click on a shoulder, then a Shift-click
+  // on the hand, should take the arm between): the cheapest chain of neighbouring regions from any of `from` to
+  // `to`, each region charged the square root of its area, so a chain runs along a limb rather than across the
+  // body. Regions neighbour across a border or where their pieces touch without sharing an edge (a hand pushed
+  // into its cuff). The biggest region (the body) is never passed through, nor a region over three times the
+  // bigger of the two ends (the pick so far and `to`), nor more than `maxSteps` (6) regions,
+  // nor more than `maxShare` (40%) of the surface. Returns the regions in between (not `from`, not `to`); empty
+  // when the two already touch or no such chain is found.
+  function regionPath(P, I, seg, from, to, opts = {}) {
+    const n = seg.count, areas = seg.areas, maxSteps = opts.maxSteps || 6, maxShare = opts.maxShare || 0.4;
+    const adj = Array.from({ length: n }, () => new Set()), b = seg.borders, g = seg.groupOf;
+    for (let e = 0; e < b.length; e += 4) { const x = g[b[e]], y = g[b[e + 1]]; if (x !== y) { adj[x].add(y); adj[y].add(x); } }
+    const sh = shellComponents(P, I);
+    if (sh.count > 1) { // regions on different pieces that touch
+      const lab = new Int32Array(g.length); for (let t = 0; t < g.length; t++) lab[t] = g[t];
+      const pairs = new Set(); touchingSets(P, I, lab, n, { tol: opts.tol, pairs, apart: sh.label });
+      for (const k of pairs) { const x = Math.floor(k / n), y = k % n; adj[x].add(y); adj[y].add(x); }
+    }
+    let total = 0, big = 0; for (let r = 0; r < n; r++) { total += areas[r]; if (areas[r] > areas[big]) big = r; }
+    const src = new Set(from);
+    if (src.has(to)) return [];
+    let ends = areas[to], picked = 0; for (const f of src) picked += areas[f];
+    const cap = 3 * Math.max(ends, picked); // nothing in between much bigger than what was clicked: a hand and a shoulder don't take the torso between
+    for (const f of src) if (adj[f].has(to)) return [];
+    const dist = new Float64Array(n).fill(Infinity), prev = new Int32Array(n).fill(-1), steps = new Int32Array(n), done = new Uint8Array(n);
+    for (const f of src) dist[f] = 0;
+    for (;;) {
+      let u = -1; for (let r = 0; r < n; r++) if (!done[r] && dist[r] < Infinity && (u < 0 || dist[r] < dist[u])) u = r;
+      if (u < 0 || u === to) break;
+      done[u] = 1;
+      for (const w of adj[u]) {
+        if (done[w] || src.has(w)) continue;
+        if (w !== to && (w === big || areas[w] > cap || steps[u] + 1 > maxSteps)) continue;
+        const d = dist[u] + Math.sqrt(areas[w]);
+        if (d < dist[w]) { dist[w] = d; prev[w] = u; steps[w] = steps[u] + 1; }
+      }
+    }
+    if (prev[to] < 0) return [];
+    const out = []; let area = 0;
+    for (let r = prev[to]; r >= 0 && !src.has(r); r = prev[r]) { out.push(r); area += areas[r]; }
+    return area > maxShare * total ? [] : out.reverse();
   }
   /* ---------- a stroke that wraps a cut round a part ----------
      ModelSplitter's Line tool, as the owner asked: "draw a line that automatically creates a cut after the line
@@ -3322,7 +3442,7 @@ const KMCore = (() => {
     if (n < 3) return pts;
     const step = (t) => { pts = pts.map((q, i) => { const a = pts[(i + n - 1) % n], b = pts[(i + 1) % n]; return [q[0] + t * ((a[0] + b[0]) / 2 - q[0]), q[1] + t * ((a[1] + b[1]) / 2 - q[1]), q[2] + t * ((a[2] + b[2]) / 2 - q[2])]; }); };
     for (let k = 0; k < passes; k++) { step(0.5); step(-0.53); }
-    return pts.map(q => { const v = nearestVertex(P, q); return [P[3 * v], P[3 * v + 1], P[3 * v + 2]]; });
+    return nearestVertices(P, pts).map(v => [P[3 * v], P[3 * v + 1], P[3 * v + 2]]);
   }
   // The nearest point on any region border to a point, and how far it is.
   function nearestBorderPoint(P, seg, point) {
@@ -4106,7 +4226,10 @@ const KMCore = (() => {
     return out;
   }
   function curvedSideOf(pref, into2) { return (pref === 'below') === (into2 > 0) ? 'below' : 'above'; }
-  function planPick(P, I, req) {
+  // The joints alone, the quick first half of a pick (the app draws them while the cut is checked: on a big
+  // figure the owner saw no keys for the many seconds the check took): the lines oriented, each line's frame,
+  // keys or plug, joint marks and what to draw. `planPick(P, I, { ...req, planned })` goes on from it.
+  function planJoints(P, I, req) {
     const cfg = req.cfg, D = diag(bounds(P));
     let loops = req.loops;
     if (!req.regions && loops.length && loops.every(l => l.closed)) { try { loops = orientLoops(P, I, loops, { what: 'lines' }).loops; } catch (err) { /* the cut will say why */ } }
@@ -4139,6 +4262,10 @@ const KMCore = (() => {
         out.perLoop.push(per); out.draw.push(draw); out.keys += per.keys.length; out.plugs += per.plugs.length;
       }
     } else { out.perLoop = loops.map(() => ({ keys: [], plugs: [] })); out.draw = loops.map(() => ({ keys: [], plugs: [] })); }
+    return out;
+  }
+  function planPick(P, I, req) {
+    const cfg = req.cfg, out = req.planned ? { ...req.planned, result: null, error: null, errorCode: null, forced: null, dropped: null } : planJoints(P, I, req), loops = out.loops;
     const run = (withJoints, force) => {
       const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, perLoop: withJoints ? out.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
       if (req.regions) return splitRegions(P, I, req.seg, req.regions, o);
@@ -6023,7 +6150,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles,
+    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
