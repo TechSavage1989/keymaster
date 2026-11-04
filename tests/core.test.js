@@ -581,6 +581,15 @@ console.log('cut suggestions');
   const sh = K.separateShells(...(() => { const m = K.prepareMesh(K.mergeMeshes([uvSphere(10, 24, 16), uvSphere(10, 24, 16, [40, 0, 0]), uvSphere(3, 12, 8, [40, 0, 0])])); return [m.positions, m.indices]; })());
   check('separate pieces found, an inner ball stays with its host', sh.length === 2 && sh.every(s => K.edgeReport(s.indices).closed), sh.map(s => s.volume));
   check('a single solid has no separate pieces', K.separateShells(uvSphere(10, 24, 16).positions, uvSphere(10, 24, 16).indices).length === 0);
+  { // each piece lists the triangles of the original it holds (the inner ball's with its host), every triangle once, in order
+    const m = K.prepareMesh(K.mergeMeshes([uvSphere(10, 24, 16), uvSphere(10, 24, 16, [40, 0, 0]), uvSphere(3, 12, 8, [40, 0, 0])]));
+    const sh = K.separateShells(m.positions, m.indices), nt = m.indices.length / 3, seen = new Uint8Array(nt);
+    let dup = 0, sorted = true;
+    for (const s of sh) for (let i = 0; i < s.tris.length; i++) { if (seen[s.tris[i]]++) dup++; if (i && s.tris[i] <= s.tris[i - 1]) sorted = false; }
+    const all = seen.every(v => v === 1);
+    const counts = sh.map(s => s.tris.length).sort((a, b) => a - b), each = sh.map(s => s.indices.length / 3).sort((a, b) => a - b);
+    check('each loose piece lists its triangles of the original: every triangle once, sorted, as many as the piece has', all && !dup && sorted && counts.join() === each.join(), { counts, each, dup });
+  }
 }
 
 console.log('engraved joint numbers');

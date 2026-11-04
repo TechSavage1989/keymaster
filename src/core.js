@@ -2010,16 +2010,17 @@ const KMCore = (() => {
       const idx = new Uint32Array(tris.length * 3), map = new Map(), pos = [];
       tris.forEach((t, k) => { for (let j = 0; j < 3; j++) { const v = I[3 * t + j]; let w = map.get(v); if (w === undefined) { w = pos.length / 3; map.set(v, w); pos.push(P[3 * v], P[3 * v + 1], P[3 * v + 2]); } idx[3 * k + j] = w; } });
       const positions = new Float32Array(pos);
-      return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions) };
+      return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions), tris };
     });
     shells.sort((a, b) => b.volume - a.volume);
     const inside = (a, b) => a.bbox.min.every((v, i) => v >= b.bbox.min[i] - 1e-6) && a.bbox.max.every((v, i) => v <= b.bbox.max[i] + 1e-6);
     const top = [];
     for (const s of shells) {
       const host = top.filter(h => inside(s, h)).sort((a, b) => a.volume - b.volume)[0];
-      if (host) { const m = mergeMeshes([host, s]); host.positions = m.positions; host.indices = m.indices; host.volume += s.volume; }
+      if (host) { const m = mergeMeshes([host, s]); host.positions = m.positions; host.indices = m.indices; host.volume += s.volume; host.tris = host.tris.concat(s.tris); } // an inner shell stays with its host
       else top.push(s);
     }
+    for (const s of top) s.tris.sort((a, b) => a - b); // the triangles of the original each piece holds (tris), so a clicked triangle maps to its piece
     return top.length > 1 ? top : [];
   }
 
