@@ -15,7 +15,7 @@
 
 ## Features
 
-- **Made parts and sculpted parts kept apart.** Keymaster reads the mesh itself: a book, a sword, a base or a buckle made in CAD has long thin triangles across flat panels, cloth and skin have even ones, and a selection never runs from one into the other. Drawn cut lines slice through the faces exactly where you drew them (Slice drawn lines, on by default).
+- **Made parts and sculpted parts kept apart.** Keymaster reads the mesh itself: a book, a sword, a base or a buckle made in CAD has long thin triangles across flat panels, cloth and skin have even ones, and a selection never runs from one into the other. Drawn cut lines slice through the faces exactly where you drew them (Slice drawn lines, on by default), and the smoothed cut line of a picked region is pinned to every sharp crease and every hard-to-organic edge along its outline, so a book on a robe comes off without a strip of robe.
 - **Size and turn it like any 3D app.** The scale % shows the model's real scale against how it opened; type a width, depth or height in mm with the sizes linked (even scaling) or free (stretch one way); turn it by any angle, freely with the rings, or click a face to lay it flat on the bed.
 - **Hard parts stand apart.** Where a made object (a book, a buckle, a crucifix, a base) meets cloth or skin, Sections and Parts put a border, and the Section size slider goes from a few large sections to many small ones.
 - **Open STL, OBJ, 3MF or STEP.** A 3MF from your slicer opens with every object placed as it was; a STEP file from CAD is turned into a printable mesh in your browser. Big files are read and repaired in the background, so the page never freezes while they open.

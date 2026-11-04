@@ -696,7 +696,14 @@ console.log('cut suggestions');
       let hb = 0, nbx = 0, hballs = 0, nball = 0; for (let t = 0; t < n2; t++) { if (onBox(t)) { nbx++; hb += seg.hard[t]; } else if (cz(t) < 8) { nball++; hballs += seg.hard[t]; } }
       const mix = new Map(); for (let t = 0; t < n2; t++) { const g = seg.groupOf[t]; if (!mix.has(g)) mix.set(g, [0, 0]); mix.get(g)[onBox(t) ? 0 : 1]++; }
       const mixed = [...mix.values()].filter(([a, b]) => Math.min(a, b) > 0.1 * Math.max(a, b)).length;
-      check('a crisp box pushed into a bumpy ball reads hard, the ball organic, and no region holds much of both', hb > 0.8 * nbx && hballs < 0.05 * nball && mixed === 0, { box: hb / nbx, ball: hballs / nball, mixed }); }
+      check('a crisp box pushed into a bumpy ball reads hard, the ball organic, and no region holds much of both', hb > 0.8 * nbx && hballs < 0.05 * nball && mixed === 0, { box: hb / nbx, ball: hballs / nball, mixed });
+      // 1.77: the box's regions picked and sliced: the slice is pinned to the sharp seam, so nothing of the ball is taken and
+      // the box keeps its area (the smoothing had blurred across the seam: the owner's book took a strip of robe)
+      { const boxRegions = [...mix.entries()].filter(([g, [a, b]]) => a > b).map(([g]) => g), sl = K.sliceRegionPick(Q, J, seg, boxRegions);
+        const triArea = (R, L, t) => { const a = 3 * L[3 * t], b = 3 * L[3 * t + 1], c = 3 * L[3 * t + 2]; const u = [R[b] - R[a], R[b + 1] - R[a + 1], R[b + 2] - R[a + 2]], w = [R[c] - R[a], R[c + 1] - R[a + 1], R[c + 2] - R[a + 2]]; return Math.hypot(u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]) / 2; };
+        const picked = new Set(boxRegions); let a0 = 0, raw = 0; for (let t = 0; t < n2; t++) if (picked.has(seg.groupOf[t])) { a0 += triArea(Q, J, t); if (!onBox(t)) raw += triArea(Q, J, t); } // (the pick's own area, and what of it already lies off the box's faces)
+        let kept = 0, onBall = 0; if (sl) for (let t = 0; t < sl.I.length / 3; t++) { if (sl.seg.groupOf[t] !== 1) continue; const a = triArea(sl.P, sl.I, t); kept += a; const cz2 = (sl.P[3 * sl.I[3 * t] + 2] + sl.P[3 * sl.I[3 * t + 1] + 2] + sl.P[3 * sl.I[3 * t + 2] + 2]) / 3, cx = (sl.P[3 * sl.I[3 * t]] + sl.P[3 * sl.I[3 * t + 1]] + sl.P[3 * sl.I[3 * t + 2]]) / 3, cy = (sl.P[3 * sl.I[3 * t] + 1] + sl.P[3 * sl.I[3 * t + 1] + 1] + sl.P[3 * sl.I[3 * t + 2] + 1]) / 3; if (Math.max(Math.abs(cx), Math.abs(cy)) > 4.05 || cz2 < 9.9) onBall += a; }
+        check('the box picked and sliced stays on the box: no more of the ball than the pick had, the pick\'s area kept', !!sl && K.edgeReport(sl.I).closed && onBall < raw + 0.01 * a0 && kept > 0.95 * a0 && kept < 1.05 * a0, { sliced: !!sl, onBall, raw, kept, a0 }); } }
     // 1.75: a line drawn by hand round a coarse ball, sliced through the faces: the surface stays sealed with its
     // volume, the line runs through new points, lies much closer to the tilted circle drawn than the edge path does,
     // and the pick cuts sealed

@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.76, build 8486d3. After an update, refresh the page and check this changes.">v1.76 · 8486d3</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.77, build f9bb03. After an update, refresh the page and check this changes.">v1.77 · f9bb03</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -3305,7 +3305,7 @@ const KMCore = (() => {
     unpinchGroups(P, I, groupOf);
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
-    seg.levels = form.levels; seg.sdf = sdf;
+    seg.levels = form.levels; seg.sdf = sdf; seg.hard = creases.hard || null; // (1.77) so a pick's slice can pin the seam where hard meets organic
     return seg;
   }
   // Every edge longer than maxEdge split at its middle, the triangles beside it with it (one split edge gives two
@@ -4604,6 +4604,12 @@ const KMCore = (() => {
       for (let i = 0; i < n; i++) { const v = l.verts[i]; if (on.has(v)) skip.add(v); else on.set(v, [l.verts[(i + n - 1) % n], l.verts[(i + 1) % n]]); }
     }
     for (const v of skip) on.delete(v);
+    { // (1.77) a vertex where the line runs along a sharp edge (a crease, a made object's rim on cloth) stays on it: eased, it left the seam
+      const tris = (a, b) => { const out = []; for (let k = vt.start[a]; k < vt.start[a + 1]; k++) { const t = vt.tri[k]; if (I[3 * t] === b || I[3 * t + 1] === b || I[3 * t + 2] === b) out.push(t); } return out; };
+      const edges = [];
+      for (const [v, [a, b]] of on) for (const w of [a, b]) { const ts = tris(v, w); if (ts.length === 2) edges.push(ts[0], ts[1], v, w); }
+      for (const v of sharpEdgeVertices(P, I, edges, null, opts.pinDeg || 25)) on.delete(v);
+    }
     if (!on.size) return { positions: P, moved: 0 };
     const limit = new Map(), nrm = (A, t) => { const a = pt(A, I[3 * t]), b = pt(A, I[3 * t + 1]), c = pt(A, I[3 * t + 2]); return cross3([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]); };
     for (const v of on.keys()) {
@@ -5281,6 +5287,22 @@ const KMCore = (() => {
   // gets one new vertex, 12% to 88% along it and computed from its lower-numbered end, so the two triangles beside it
   // share it and the surface stays sealed with the same volume; each crossed triangle becomes three. Returns the new
   // positions and indices and, per triangle, 1 where f > 0.
+  // The vertices of a pick's outline that sit on a sharp edge (the surface turning at least `deg` across the border
+  // edge there, or a hard surface meeting an organic one): a seam a smoothed or eased line must never leave. The
+  // owner's book on a robe: the region was right, but the slice that follows a click blurred across the seam and
+  // took a strip of robe with the book. `edges` are [t1, t2, va, vb] quads (as `seg.borders`), `hard` per triangle.
+  function sharpEdgeVertices(P, I, edges, keep, deg = 25, hard = null) {
+    const out = new Set(), cosD = Math.cos((deg * Math.PI) / 180);
+    const nrm = (t) => { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]); const L = Math.hypot(n[0], n[1], n[2]) || 1; return [n[0] / L, n[1] / L, n[2] / L]; };
+    for (let i = 0; i < edges.length; i += 4) {
+      const t1 = edges[i], t2 = edges[i + 1];
+      if (keep && !keep(t1, t2)) continue;
+      let sharp = hard && hard[t1] !== hard[t2];
+      if (!sharp) { const a = nrm(t1), b = nrm(t2); sharp = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] < cosD; }
+      if (sharp) { out.add(edges[i + 2]); out.add(edges[i + 3]); }
+    }
+    return out;
+  }
   function sliceByField(P, I, f) {
     const nt = I.length / 3, nv = P.length / 3;
     const Pn = []; for (let i = 0; i < P.length; i++) Pn.push(P[i]);
@@ -5296,6 +5318,15 @@ const KMCore = (() => {
     const d2 = (x, y) => (Pn[3 * x] - Pn[3 * y]) ** 2 + (Pn[3 * x + 1] - Pn[3 * y + 1]) ** 2 + (Pn[3 * x + 2] - Pn[3 * y + 2]) ** 2;
     for (let t = 0; t < nt; t++) {
       let a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
+      const za = f[a] === 0, zb = f[b] === 0, zc = f[c] === 0;
+      if (za || zb || zc) { // (1.77) a vertex exactly on the line (a pinned seam vertex): the line passes through it, no new point there
+        const pos = (f[a] > 0) + (f[b] > 0) + (f[c] > 0), neg = (f[a] < 0) + (f[b] < 0) + (f[c] < 0);
+        if (!pos || !neg) { In.push(a, b, c); gOf.push(pos ? 1 : neg ? 0 : (f[a] + f[b] + f[c] > 0 ? 1 : 0)); par.push(t); continue; }
+        // one zero, one positive, one negative: split the edge between the signed ends and fan from the zero vertex
+        if (zb) [a, b, c] = [b, c, a]; else if (zc) [a, b, c] = [c, a, b];
+        const x = cross(b, c);
+        In.push(a, b, x, a, x, c); gOf.push(f[b] > 0 ? 1 : 0, f[c] > 0 ? 1 : 0); par.push(t, t); continue;
+      }
       const sa = f[a] > 0, sb = f[b] > 0, sc = f[c] > 0;
       if (sa === sb && sb === sc) { In.push(a, b, c); gOf.push(sa ? 1 : 0); par.push(t); continue; }
       // turn the triangle so a is the lone vertex
@@ -5472,6 +5503,9 @@ const KMCore = (() => {
     // each vertex: inside (all its triangles picked), outside (none) or on the outline
     const cnt = new Int32Array(nv), cin = new Int32Array(nv);
     for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const v = I[3 * t + k]; cnt[v]++; if (inT[t]) cin[v]++; }
+    // (1.77) the outline's vertices on a sharp edge (a crease of 25° or more, or hard meeting organic) are pinned: the
+    // field is held at zero there through the smoothing, so the slice runs through them and never drifts off the seam
+    const pinned = sharpEdgeVertices(P, I, seg.borders, (t1, t2) => inT[t1] !== inT[t2], opts.pinDeg || 25, seg.hard || null);
     const band = 4 * scale, dist = new Float64Array(nv).fill(Infinity), heap = [];
     const push = (x) => { heap.push(x); let i = heap.length - 1; while (i > 0) { const pI = (i - 1) >> 1; if (heap[pI][0] <= heap[i][0]) break; [heap[pI], heap[i]] = [heap[i], heap[pI]]; i = pI; } };
     const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
@@ -5485,7 +5519,7 @@ const KMCore = (() => {
     const f = new Float64Array(nv), live = [];
     for (let v = 0; v < nv; v++) {
       const s = cin[v] === cnt[v] ? 1 : cin[v] === 0 ? -1 : 0, d = Math.min(dist[v], band);
-      f[v] = s * d; if (dist[v] < band) live.push(v);
+      f[v] = s * d; if (dist[v] < band && !pinned.has(v)) live.push(v);
     }
     // smoothing: plain neighbour averages, enough rounds to spread over `scale` (a walk of k steps reaches about √k edges)
     const passes = opts.passes || Math.max(4, Math.min(120, Math.round(1.5 * (scale / med) ** 2)));
@@ -5494,8 +5528,10 @@ const KMCore = (() => {
       for (const v of live) { let s = 0, n = 0; for (let j = adj.start[v]; j < adj.start[v + 1]; j++) { s += f[adj.to[j]]; n++; } g[v] = n ? 0.5 * f[v] + 0.5 * s / n : f[v]; }
       for (const v of live) f[v] = g[v];
     }
-    { // smoothing shrinks a convex pick and swells a concave one (a curve shortens as it is smoothed): the level is moved
-      // so the side kept holds as much surface as the pick did, by each vertex's share of its triangles' area
+    let onOutline = 0; for (let v = 0; v < nv; v++) if (cin[v] && cin[v] < cnt[v]) onOutline++;
+    if (pinned.size < 0.3 * onOutline) { // smoothing shrinks a convex pick and swells a concave one (a curve shortens as it is smoothed): the level is moved
+      // so the side kept holds as much surface as the pick did, by each vertex's share of its triangles' area.
+      // (1.77: not when much of the outline is pinned to a seam: the whole correction then lands on the few free stretches)
       const va = new Float64Array(nv); let a0 = 0;
       for (let t = 0; t < nt; t++) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], wx = P[c] - P[a], wy = P[c + 1] - P[a + 1], wz = P[c + 2] - P[a + 2]; const ar = Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 2; for (let k = 0; k < 3; k++) va[I[3 * t + k]] += ar / 3; if (inT[t]) a0 += ar; }
       const order = live.slice().sort((x, y) => f[y] - f[x]); // the band, from the most inside
@@ -5506,7 +5542,7 @@ const KMCore = (() => {
       for (const v of live) f[v] -= level;
     }
     const tiny = 1e-7 * med;
-    for (let v = 0; v < nv; v++) if (Math.abs(f[v]) < tiny) f[v] = cin[v] * 2 >= cnt[v] ? tiny : -tiny;
+    for (let v = 0; v < nv; v++) if (Math.abs(f[v]) < tiny) f[v] = pinned.has(v) ? 0 : cin[v] * 2 >= cnt[v] ? tiny : -tiny;
     // islands: vertex pieces of one sign (through edges between vertices of that sign); small ones that the field
     // touched take the other sign, unless the piece is a loose shell wholly in or out of the pick as it was
     const comps = shellComponents(P, I), shellMixed = new Uint8Array(comps.count), shellIn = new Uint8Array(comps.count).fill(1);
