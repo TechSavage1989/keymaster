@@ -15,6 +15,7 @@
 
 ## Features
 
+- **Open STL, OBJ, 3MF or STEP.** A 3MF from your slicer opens with every object placed as it was; a STEP file from CAD is turned into a printable mesh in your browser. Big files are read and repaired in the background, so the page never freezes while they open.
 - **Parts that stop where they should.** A hand resting on a book, a book against a robe, a plate on an arm: where two parts meet at a clear crease they stay apart at Balanced and Fine, however small one of them is, so a click or a Fill takes just the part you meant.
 - **Cuts that slice clean.** A region or a painted area is cut along a smooth curve through the model's triangles, not along their edges, so the rim of the cut face and its sunk wall come out even, with no teeth or tiny points, and the pieces slide together. After every cut, Keymaster checks that no piece is left too thin behind its cut face to print.
 - **See the joint.** Under any pick, **Show: Both | This piece | Other piece** hides one side so you can look at the key or plug and the whole cut face; keys show while you paint, too.
@@ -107,9 +108,9 @@
 
 ## Getting started
 
-Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com**. Open the page, drop in an STL or OBJ, and nothing is installed or uploaded.
+Keymaster runs entirely in your browser at **https://keymaster.techsavage3d.com**. Open the page, drop in an STL, OBJ, 3MF or STEP file, and nothing is installed or uploaded.
 
-1. Open the app and choose **Open STL or OBJ**, or drop a file onto the view. **Try the sample** loads a knot to experiment with.
+1. Open the app and choose **Open a model** (STL, OBJ, 3MF or STEP), or drop a file onto the view. **Try the sample** loads a knot to experiment with.
 2. Click a part to select it. The cut plane appears through its middle.
 3. Drag the arrow to slide the plane and a ring to tilt it, type exact values, or use **Align X/Y/Z** and **To view**. **Flip** swaps the solid and clear halves.
 4. Pick a key type and size. Choose a fit: Snug (0.1 mm per side), Standard (0.2 mm), or Loose (0.3 mm).

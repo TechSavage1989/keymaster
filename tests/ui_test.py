@@ -1547,6 +1547,22 @@ with sync_playwright() as p:
     wv0 = pg.evaluate('KeymasterDebug.workerVolume(0)')
     pg.evaluate('KeymasterDebug.scaleAll(10)'); wv1 = pg.evaluate('KeymasterDebug.workerVolume(0)')
     check('after scaling, the background worker works on the scaled part, not the copy it kept', abs(wv1['worker'] - wv1['here']) <= 1e-6 * abs(wv1['here']) and abs(wv1['here'] / wv0['here'] - 1000) < 1, {'before': wv0, 'after': wv1})
+    # 1.73: a 3MF (compressed, as slicers write it) and a STEP file open (the STEP reader is a stand-in here: the real
+    # one loads from jsDelivr, which the tests don't reach)
+    cubexml = '<vertices>' + ''.join(f'<vertex x="{x}" y="{y}" z="{z}"/>' for x, y, z in [(0,0,0),(20,0,0),(20,20,0),(0,20,0),(0,0,20),(20,0,20),(20,20,20),(0,20,20)]) + '</vertices><triangles>' + ''.join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in [(0,2,1),(0,3,2),(4,5,6),(4,6,7),(0,1,5),(0,5,4),(1,2,6),(1,6,5),(2,3,7),(2,7,6),(3,0,4),(3,4,7)]) + '</triangles>'
+    with zipfile.ZipFile(str(OUT / 'cube.3mf'), 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('[Content_Types].xml', '<Types/>')
+        zf.writestr('_rels/.rels', '<Relationships><Relationship Target="/3D/3dmodel.model" Id="r0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>')
+        zf.writestr('3D/3dmodel.model', f'<?xml version="1.0"?><model unit="millimeter"><resources><object id="1" type="model"><mesh>{cubexml}</mesh></object></resources><build><item objectid="1" transform="1 0 0 0 1 0 0 0 1 5 5 0"/></build></model>')
+    pg.set_input_files('#fileInput', str(OUT / 'cube.3mf'))
+    pg.wait_for_function("document.querySelector('#partList .part-name') && document.querySelector('#partList .part-name').innerText.includes('cube')", timeout=20000); pg.wait_for_timeout(300)
+    check('a compressed 3MF opens as the model it holds', '20' in pg.inner_text('#partList') and pg.locator('#partList li[data-id]').count() == 1, pg.inner_text('#partList'))
+    pg.evaluate("""() => { window.occtimportjs = () => ({ ReadStepFile: (bytes) => ({ success: bytes.length > 0, meshes: [{ attributes: { position: { array: [0,0,0, 30,0,0, 30,30,0, 0,30,0, 0,0,30, 30,0,30, 30,30,30, 0,30,30] } }, index: { array: [0,2,1, 0,3,2, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 1,2,6, 1,6,5, 2,3,7, 2,7,6, 3,0,4, 3,4,7] } }] }) }); }""")
+    (OUT / 'bracket.step').write_text('ISO-10303-21;\nEND-ISO-10303-21;\n')
+    pg.set_input_files('#fileInput', str(OUT / 'bracket.step'))
+    pg.wait_for_function("document.querySelector('#partList .part-name') && document.querySelector('#partList .part-name').innerText.includes('bracket')", timeout=20000); pg.wait_for_timeout(300)
+    check('a STEP file opens through the STEP reader as its solid', '30' in pg.inner_text('#partList'), pg.inner_text('#partList'))
+    check('the file chooser offers STL, OBJ, 3MF and STEP', all(x in pg.get_attribute('#fileInput', 'accept') for x in ('.stl', '.obj', '.3mf', '.step', '.stp')), pg.get_attribute('#fileInput', 'accept'))
     b.close()
 
 print('\nconsole errors:', errors if errors else 'none')
