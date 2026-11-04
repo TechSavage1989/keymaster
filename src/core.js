@@ -4413,10 +4413,124 @@ const KMCore = (() => {
     if (!l2.length || l2.some(l => !l.closed)) return null;
     return { seg: s2, groups: [1], loops: l2 };
   }
+  // A region pick sliced along a smooth curve through the triangles (the owner: "the application should be able to
+  // slice topology and not just cut along existing topology vertexes"). Any line made of the mesh's own edges steps
+  // from vertex to vertex, so on a coarse or uneven mesh the cut's rim and its sunk wall came out in teeth and points
+  // however the line was eased. Here the pick is a field over the vertices: the distance along the surface to its
+  // outline (Dijkstra over the edges, within a band), plus inside and minus outside, smoothed by `passes` rounds of
+  // neighbour averaging so the outline's steps and notches average out over about `scale` mm; the cut follows the
+  // field's zero level, which crosses edges anywhere along them. Each crossed edge gets one new vertex (shared by
+  // the two triangles beside it, so the surface stays sealed), placed between 12% and 88% of the way along so no
+  // new triangle is a sliver; each crossed triangle splits into three. Islands the smoothing makes or loses that
+  // are under 2% of the smaller side go back to the side round them; loose pieces wholly in the pick stay in it.
+  // Returns { P, I, seg, groups: [1], loops, scale } on the new mesh (the original is untouched), or null.
+  function sliceRegionPick(P, I, seg, groups, opts = {}) {
+    const nt = I.length / 3, nv = P.length / 3, set = new Set(groups);
+    const inT = new Uint8Array(nt); let nIn = 0;
+    for (let t = 0; t < nt; t++) if (set.has(seg.groupOf[t])) { inT[t] = 1; nIn++; }
+    if (!nIn || nIn === nt) return null;
+    const L = []; for (let t = 0; t < nt; t += Math.max(1, Math.floor(nt / 4000))) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1]; L.push(Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2])); }
+    L.sort((x, y) => x - y); const med = L[L.length >> 1] || 1;
+    let scale = opts.scale;
+    { // about 1/40 of the shortest outline, never under three edges, nor over 1/15 of it (a small patch on a coarse mesh would melt away)
+      let shortest = Infinity; for (const l of groupLoops(P, I, seg, groups)) if (l.closed) shortest = Math.min(shortest, l.length);
+      if (!isFinite(shortest)) return null;
+      if (!scale) scale = Math.min(Math.max(3 * med, shortest / 40), shortest / 15);
+    }
+    // each vertex: inside (all its triangles picked), outside (none) or on the outline
+    const cnt = new Int32Array(nv), cin = new Int32Array(nv);
+    for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const v = I[3 * t + k]; cnt[v]++; if (inT[t]) cin[v]++; }
+    const band = 4 * scale, dist = new Float64Array(nv).fill(Infinity), heap = [];
+    const push = (x) => { heap.push(x); let i = heap.length - 1; while (i > 0) { const pI = (i - 1) >> 1; if (heap[pI][0] <= heap[i][0]) break; [heap[pI], heap[i]] = [heap[i], heap[pI]]; i = pI; } };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+    for (let v = 0; v < nv; v++) if (cin[v] && cin[v] < cnt[v]) { dist[v] = 0; push([0, v]); }
+    const adj = vertexAdjacency(P, I);
+    while (heap.length) {
+      const [d, v] = pop();
+      if (d > dist[v] || d > band) continue;
+      for (let j = adj.start[v]; j < adj.start[v + 1]; j++) { const w = adj.to[j], nd = d + adj.len[j]; if (nd < dist[w]) { dist[w] = nd; push([nd, w]); } }
+    }
+    const f = new Float64Array(nv), live = [];
+    for (let v = 0; v < nv; v++) {
+      const s = cin[v] === cnt[v] ? 1 : cin[v] === 0 ? -1 : 0, d = Math.min(dist[v], band);
+      f[v] = s * d; if (dist[v] < band) live.push(v);
+    }
+    // smoothing: plain neighbour averages, enough rounds to spread over `scale` (a walk of k steps reaches about √k edges)
+    const passes = opts.passes || Math.max(4, Math.min(120, Math.round(1.5 * (scale / med) ** 2)));
+    const g = new Float64Array(nv);
+    for (let it = 0; it < passes; it++) {
+      for (const v of live) { let s = 0, n = 0; for (let j = adj.start[v]; j < adj.start[v + 1]; j++) { s += f[adj.to[j]]; n++; } g[v] = n ? 0.5 * f[v] + 0.5 * s / n : f[v]; }
+      for (const v of live) f[v] = g[v];
+    }
+    { // smoothing shrinks a convex pick and swells a concave one (a curve shortens as it is smoothed): the level is moved
+      // so the side kept holds as much surface as the pick did, by each vertex's share of its triangles' area
+      const va = new Float64Array(nv); let a0 = 0;
+      for (let t = 0; t < nt; t++) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], wx = P[c] - P[a], wy = P[c + 1] - P[a + 1], wz = P[c + 2] - P[a + 2]; const ar = Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 2; for (let k = 0; k < 3; k++) va[I[3 * t + k]] += ar / 3; if (inT[t]) a0 += ar; }
+      const order = live.slice().sort((x, y) => f[y] - f[x]); // the band, from the most inside
+      let acc = 0; for (let v = 0; v < nv; v++) if (dist[v] >= band && f[v] > 0) acc += va[v]; // inside, beyond the band
+      let level = 0;
+      for (const v of order) { if (acc + va[v] > a0) { level = f[v]; break; } acc += va[v]; }
+      level = Math.max(-0.75 * band, Math.min(0.75 * band, level));
+      for (const v of live) f[v] -= level;
+    }
+    const tiny = 1e-7 * med;
+    for (let v = 0; v < nv; v++) if (Math.abs(f[v]) < tiny) f[v] = cin[v] * 2 >= cnt[v] ? tiny : -tiny;
+    // islands: vertex pieces of one sign (through edges between vertices of that sign); small ones that the field
+    // touched take the other sign, unless the piece is a loose shell wholly in or out of the pick as it was
+    const comps = shellComponents(P, I), shellMixed = new Uint8Array(comps.count), shellIn = new Uint8Array(comps.count).fill(1);
+    for (let t = 0; t < nt; t++) { if (!inT[t]) shellIn[comps.label[t]] = 0; }
+    for (let t = 0; t < nt; t++) if (inT[t] !== shellIn[comps.label[t]]) shellMixed[comps.label[t]] = 1;
+    const vShell = new Int32Array(nv); for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) vShell[I[3 * t + k]] = comps.label[t];
+    const par = new Int32Array(nv); for (let v = 0; v < nv; v++) par[v] = v;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let v = 0; v < nv; v++) for (let j = adj.start[v]; j < adj.start[v + 1]; j++) { const w = adj.to[j]; if ((f[v] > 0) === (f[w] > 0)) { const x = find(v), y = find(w); if (x !== y) par[x] = y; } }
+    const size = new Map(); let pos = 0;
+    for (let v = 0; v < nv; v++) { const r = find(v); size.set(r, (size.get(r) || 0) + 1); if (f[v] > 0) pos++; }
+    const small = Math.max(6, 0.02 * Math.min(pos, nv - pos));
+    for (let v = 0; v < nv; v++) if (shellMixed[vShell[v]] && size.get(find(v)) < small) f[v] = -f[v];
+    // the slice: one new vertex per crossed edge
+    const Pn = []; for (let i = 0; i < P.length; i++) Pn.push(P[i]);
+    const mid = new Map(), In = [], gOf = [];
+    const cross = (a, b) => {
+      const key = a < b ? a * nv + b : b * nv + a; let m = mid.get(key);
+      if (m !== undefined) return m;
+      const lo = a < b ? a : b, hi = a < b ? b : a; // from the lower end, so both triangles get the same point
+      let s = f[lo] / (f[lo] - f[hi]); s = Math.max(0.12, Math.min(0.88, s));
+      m = Pn.length / 3; Pn.push(P[3 * lo] + s * (P[3 * hi] - P[3 * lo]), P[3 * lo + 1] + s * (P[3 * hi + 1] - P[3 * lo + 1]), P[3 * lo + 2] + s * (P[3 * hi + 2] - P[3 * lo + 2]));
+      mid.set(key, m); return m;
+    };
+    const d2 = (x, y) => (Pn[3 * x] - Pn[3 * y]) ** 2 + (Pn[3 * x + 1] - Pn[3 * y + 1]) ** 2 + (Pn[3 * x + 2] - Pn[3 * y + 2]) ** 2;
+    for (let t = 0; t < nt; t++) {
+      let a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
+      const sa = f[a] > 0, sb = f[b] > 0, sc = f[c] > 0;
+      if (sa === sb && sb === sc) { In.push(a, b, c); gOf.push(sa ? 1 : 0); continue; }
+      // turn the triangle so a is the lone vertex
+      if (sb !== sa && sb !== sc) [a, b, c] = [b, c, a]; else if (sc !== sa && sc !== sb) [a, b, c] = [c, a, b];
+      const x = cross(a, b), y = cross(a, c), ga = f[a] > 0 ? 1 : 0;
+      In.push(a, x, y); gOf.push(ga);
+      if (d2(x, c) <= d2(b, y)) { In.push(x, b, c, x, c, y); } else { In.push(x, b, y, y, b, c); }
+      gOf.push(1 - ga, 1 - ga);
+    }
+    const P2 = new (P.constructor === Float64Array ? Float64Array : Float32Array)(Pn), I2 = new Uint32Array(In), G = Int32Array.from(gOf);
+    let n1 = 0; for (const x of G) n1 += x;
+    if (!n1 || n1 === G.length) return null;
+    const s2 = bordersFromGroups(P2, I2, G), l2 = groupLoops(P2, I2, s2, [1]);
+    if (!l2.length || l2.some(l => !l.closed)) return null;
+    // the smoothing must not eat much of the pick, nor add much (a small patch on a coarse mesh melts away)
+    const triArea = (Q, J, t) => { const a = 3 * J[3 * t], b = 3 * J[3 * t + 1], c = 3 * J[3 * t + 2]; const ux = Q[b] - Q[a], uy = Q[b + 1] - Q[a + 1], uz = Q[b + 2] - Q[a + 2], wx = Q[c] - Q[a], wy = Q[c + 1] - Q[a + 1], wz = Q[c + 2] - Q[a + 2]; return Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 2; };
+    let a0 = 0, a1 = 0; for (let t = 0; t < nt; t++) if (inT[t]) a0 += triArea(P, I, t);
+    for (let t = 0; t < G.length; t++) if (G[t]) a1 += triArea(P2, I2, t);
+    if (a1 < 0.75 * a0 || a1 > 1.33 * a0) return null;
+    return { P: P2, I: I2, seg: s2, groups: [1], loops: l2, scale, added: mid.size };
+  }
   // The mesh a pick works on: with `req.smooth`, the picked lines eased along the surface (`smoothLoopVertices`)
   // on a copy, with its own index array so no cache kept for the original's positions is read for it
   function pickMesh(P, I, req) {
-    if (!req.smooth || !req.loops || !req.loops.length) return { P, I, req };
+    if (!req.smooth || !req.loops || !req.loops.length || req.sliced) return { P, I, req }; // (a pick already sliced is not sliced again)
+    if (req.regions && req.seg && !req.noReroute && !req.noSlice) { // a region pick sliced along a smooth curve through the triangles
+      let sl = null; try { sl = sliceRegionPick(P, I, req.seg, req.regions, typeof req.smooth === 'object' ? req.smooth : {}); } catch (err) { sl = null; }
+      if (sl) return { P: sl.P, I: sl.I, req: { ...req, seg: sl.seg, regions: sl.groups, loops: sl.loops, sliced: true } };
+    }
     if (req.regions && req.seg && !req.noReroute) { // a region's outline re-routed smooth first, then its points eased
       let sr = null; try { sr = smoothRegionPick(P, I, req.seg, req.regions); } catch (err) { sr = null; }
       if (sr) req = { ...req, seg: sr.seg, regions: sr.groups, loops: sr.loops, rerouted: true };
@@ -4430,6 +4544,7 @@ const KMCore = (() => {
     let loops = req.loops;
     if (!req.regions && loops.length && loops.every(l => l.closed)) { try { loops = orientLoops(P, I, loops, { what: 'lines' }).loops; } catch (err) { /* the cut will say why */ } }
     const out = { loops, perLoop: [], frames: [], draw: [], keys: 0, plugs: 0, noKeys: null, result: null, error: null, errorCode: null, forced: null, dropped: null };
+    if (req.sliced) out.paths = loops.map(l => { const a = new Float32Array(3 * l.verts.length); l.verts.forEach((v, i) => { a[3 * i] = P[3 * v]; a[3 * i + 1] = P[3 * v + 1]; a[3 * i + 2] = P[3 * v + 2]; }); return a; }); // the sliced lines' points: their vertices are new, so the app draws them from these
     const closed = loops.length > 0 && loops.every(l => l.closed);
     if (closed && cfg.type !== 'none') {
       for (const loop of loops) {
@@ -4460,9 +4575,70 @@ const KMCore = (() => {
     } else { out.perLoop = loops.map(() => ({ keys: [], plugs: [] })); out.draw = loops.map(() => ({ keys: [], plugs: [] })); }
     return out;
   }
+  // The last word on whether a cut prints (the owner: "after any cut of any kind, the topology is physically
+  // printable and does not have unprintably thin walls or parts"), whatever made the cut: every face the cut made
+  // on each piece (triangles whose three corners are new: the cut face, sunk walls, plug and key walls), sampled
+  // up to `samples` faces, casts a line straight into its piece (`castInward`) for the piece's thickness behind it.
+  // The band within a wall of the cut's own edge is left out, as `thinAreas` leaves it out on flat cuts: where a
+  // slanted surface meets the face the piece always tapers to its edge. A piece is too thin when two fifths or more
+  // of the rest, and at least (2 walls)² of it, has less than a wall behind it (a shell, a lens, a lip round a
+  // recess), or when the whole piece is smaller than a wall cubed (a crumb). Returns [{ part, thin, share, crumb }].
+  function cutPrintCheck(Pin, parts, wall, opts = {}) {
+    const out = [];
+    if (!(wall > 0)) return out;
+    const orig = new Set(); for (let i = 0; i < Pin.length; i += 3) orig.add(Pin[i] + ',' + Pin[i + 1] + ',' + Pin[i + 2]);
+    const samples = opts.samples || 3000, cell = wall;
+    parts.forEach((q, pi) => {
+      const Q = q.positions, J = q.indices, nv = Q.length / 3, nt = J.length / 3, isNew = new Uint8Array(nv);
+      const vol = q.volume !== undefined ? q.volume : volume(Q, J);
+      if (Math.abs(vol) < wall * wall * wall) { out.push({ part: pi, thin: true, crumb: true, share: 1 }); return; }
+      const hash = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
+      for (let v = 0; v < nv; v++) {
+        isNew[v] = orig.has(Q[3 * v] + ',' + Q[3 * v + 1] + ',' + Q[3 * v + 2]) ? 0 : 1;
+        if (!isNew[v]) { const k = key(Math.floor(Q[3 * v] / cell), Math.floor(Q[3 * v + 1] / cell), Math.floor(Q[3 * v + 2] / cell)); let h = hash.get(k); if (!h) { h = []; hash.set(k, h); } h.push(v); }
+      }
+      const nearOld = (p) => { const cx = Math.floor(p[0] / cell), cy = Math.floor(p[1] / cell), cz = Math.floor(p[2] / cell); for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) { const h = hash.get(key(cx + i, cy + j, cz + k)); if (h) for (const v of h) if ((Q[3 * v] - p[0]) ** 2 + (Q[3 * v + 1] - p[1]) ** 2 + (Q[3 * v + 2] - p[2]) ** 2 < wall * wall) return true; } return false; };
+      const fresh = []; for (let t = 0; t < nt; t++) if (isNew[J[3 * t]] && isNew[J[3 * t + 1]] && isNew[J[3 * t + 2]]) fresh.push(t);
+      if (!fresh.length) { out.push({ part: pi, thin: false, share: 0 }); return; }
+      const step = Math.max(1, Math.floor(fresh.length / samples)), grid = meshGrid(Q, J, 64), D = diag(bounds(Q));
+      let A = 0, thinA = 0;
+      for (let s = 0; s < fresh.length; s += step) {
+        const t = fresh[s], a = J[3 * t], b = J[3 * t + 1], c = J[3 * t + 2];
+        const ux = Q[3 * b] - Q[3 * a], uy = Q[3 * b + 1] - Q[3 * a + 1], uz = Q[3 * b + 2] - Q[3 * a + 2], wx = Q[3 * c] - Q[3 * a], wy = Q[3 * c + 1] - Q[3 * a + 1], wz = Q[3 * c + 2] - Q[3 * a + 2];
+        const n = [uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx], L = Math.hypot(n[0], n[1], n[2]);
+        if (!L) continue;
+        n[0] /= L; n[1] /= L; n[2] /= L;
+        const o = [0, 1, 2].map(k => (Q[3 * a + k] + Q[3 * b + k] + Q[3 * c + k]) / 3 - n[k] * 1e-5 * D);
+        if (nearOld(o)) continue;
+        const ar = L / 2, d = castInward(grid, Q, J, o, [-n[0], -n[1], -n[2]], 3 * wall);
+        A += ar;
+        if (d >= 0.02 * wall && d < wall) thinA += ar; // nearer than a fiftieth of a wall is a face touching its neighbour (a fit ring), not a wall
+      }
+      const share = A ? thinA / A : 0, thinMm2 = thinA * step;
+      out.push({ part: pi, thin: share >= 0.4 && thinMm2 >= 4 * wall * wall, share, area: A * step });
+    });
+    return out;
+  }
+  function printMessage(bad) {
+    return bad.some(b => b.crumb) ? 'This cut leaves a crumb too small to print. Pick a little more, or cut somewhere else.'
+      : 'This cut leaves a piece with walls thinner than the Wall setting behind its cut face, which won’t print well. Move the line, turn off Sink face, or pick a little more.';
+  }
+  // A pick planned (`planPickPieces`) and its pieces checked for printing (`cutPrintCheck`): a cut that would leave
+  // a piece too thin is offered only forced, with the reason, as any thin refusal is
+  const pickMeshOf = new WeakMap();
   function planPick(P0, I0, req0) {
+    const out = planPickPieces(P0, I0, req0), P = pickMeshOf.get(out) || P0;
+    if (out.result && !out.error && req0.minThickness > 0 && !req0.noPrintCheck) {
+      let bad = [];
+      try { bad = cutPrintCheck(P, out.result.parts, req0.minThickness).filter(b => b.thin); } catch (err) { bad = []; }
+      if (bad.length) { out.printCheck = bad.map(b => ({ part: b.part, crumb: !!b.crumb, share: b.share })); if (!out.forced) out.forced = printMessage(bad); }
+    }
+    return out;
+  }
+  function planPickPieces(P0, I0, req0) {
     const { P, I, req } = pickMesh(P0, I0, req0); // the same eased lines as planJoints worked on (it is quick and comes out alike)
     const cfg = req.cfg, out = req.planned ? { ...req.planned, result: null, error: null, errorCode: null, forced: null, dropped: null } : planJoints(P, I, req), loops = out.loops;
+    pickMeshOf.set(out, P);
     const run = (withJoints, force) => {
       const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, perLoop: withJoints ? out.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
       if (req.regions) return splitRegions(P, I, req.seg, req.regions, o);
@@ -6369,7 +6545,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, unpinchGroups,
+    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, cutPrintCheck, unpinchGroups,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;

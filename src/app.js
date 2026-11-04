@@ -1860,7 +1860,7 @@
     dragChip.style.transform = `translate(${Math.round(e.clientX - r.left + 16)}px, ${Math.round(e.clientY - r.top - 34)}px)`;
   }
   // For the interface tests: where a tilt ring is on screen.
-  window.KeymasterDebug = { async workerVolume(i) { const p = state.parts[i]; return { worker: await coreTask('volume', [p.positions, p.indices]), here: K.volume(p.positions, p.indices), inWorker: !!coreWorker && !coreWorkerBroken }; }, scaleAll(f) { scaleAll(f); return state.parts.map(q => q.volume); }, planeHolder: () => [planeHolder.position.x, planeHolder.position.y, planeHolder.position.z], keyMarkColour: () => KEY_MARK, async fillGaps(mm) { if (mm) { state.fillGap = mm; const i = $('#fillGapBy'); if (i) i.value = mm; } const r = await fillPickGaps(); await pickSettled(); const pk = state.regions.pick; return { added: r ? r.added : 0, holes: r ? r.holes : 0, painted: !!(pk && pk.painted), loops: pk ? pk.loops.length : 0, ok: !!(pk && pk.result), pieces: pk && pk.result ? pk.result.parts.length : 0 }; }, pressCut() { cutAlongPick(); const pk = state.regions.pick; return { pending: !!(pk && pk.pending), queued: !!(pk && pk.cutWhenReady), label: $('#cutAction').innerText }; }, strokeLineShown() { const el = document.querySelector('#acrossLine'); return !!el && !el.hasAttribute('hidden') && getComputedStyle(el).display !== 'none'; }, async strokeCut(o, n, add = false) { const L = await strokeCutAt(selectedPart(), o, n, add); await pickSettled(); const pk = state.regions.pick; return { loop: !!L, loops: pk ? pk.loops.length : 0, ok: !!(pk && pk.result), error: pk ? pk.error || '' : '', pieces: pk && pk.result ? pk.result.parts.length : 0, toast: $('#toast').innerText }; }, async boxSelect(x0, y0, x1, y1, add = false) { const r = canvas.getBoundingClientRect(); boxSelect(r.left + x0 * r.width, r.top + y0 * r.height, r.left + x1 * r.width, r.top + y1 * r.height, add); await pickSettled(); const pk = state.regions.pick; return { regions: pk && pk.regions ? pk.regions.length : 0, loose: pk && pk.loose ? pk.loose.length : 0, ok: !!(pk && (pk.result || pk.loose)), multi: state.multi.size, ticked: state.shellPick ? state.shellPick.chosen.size : -1 }; }, setBox(on) { setBox(on); return state.box.on; }, borderSegments() { const p = selectedPart(), v = p && views.get(p.id); if (!v || !v.borders) return null; const seg = regionsFor(p); return { curve: v.borders.geometry.attributes.position.array.length / 6, edges: seg.borders.length / 4, opacity: v.borders.material.opacity }; }, coreWorker: () => !!coreWorker && !coreWorkerBroken, toggleRegions() { toggleRegions(); }, regionsOn: () => !!state.regions.on, regionsLoading: () => !!state.regions.loading, planeShown: () => planeShown(), sectionLoops: () => sectionLines.children.length, sectionShown: () => !!(sectionLines.visible && planeGroup.visible), axisDots: () => AXIS_DOTS.map(d => ({ view: d.el.dataset.view, behind: d.el.classList.contains('is-behind'), z: d.el.style.zIndex })), ringOpacity: () => [rings.x.material.opacity, rings.y.material.opacity], hoverAt(i, point) { const p = state.parts[i]; setHoverRegion(p, point ? K.regionAtPoint(p.positions, p.indices, regionsFor(p), point) : -1); return { g: state.regions.hover ? state.regions.hover.g : -1, text: ($('#regionHover') || {}).textContent || '', shown: !!$('#regionHover') && !$('#regionHover').hidden }; }, selectClick(i) { if (i === null) { selectPart(null); return null; } const p = state.parts[i]; if (state.shellPick && p.id === state.shellPick.partId) { const sh = shellsOf(p), k = shellAtFace(p, sh[arguments[1] || 0].tris[0]); toggleShell(k); return k; } selectPart(p.id); return state.selectedId; }, planeAt: () => [planeGroup.position.x, planeGroup.position.y, planeGroup.position.z, planeGroup.quaternion.x, planeGroup.quaternion.y, planeGroup.quaternion.z, planeGroup.quaternion.w].map(v => +v.toFixed(3)).join(','), gizmo: () => ({ attached: !!tc.object, rings: gripGroup.visible }), shellPick() { const sp = state.shellPick, p = sp && state.parts.find(q => q.id === sp.partId); return sp ? { chosen: [...sp.chosen].sort(), n: shellsOf(p).length, colours: new Set(Array.from(views.get(p.id).geom.attributes.color.array).map((v, i, a) => i % 3 === 0 ? a.slice(i, i + 3).map(c => Math.round(c * 50)).join(',') : null).filter(Boolean)).size } : null; }, hoverRegion() { return state.regions.hover ? state.regions.hover.g : -1; }, async autoSplit() { const r = await autoSplit(); return r ? { ...r, closed: state.parts.every(q => K.edgeReport(q.indices).closed), toast: $('#toast').innerText } : null; }, partColours() { return state.parts.map(q => q.color); }, regionColours() { const p = selectedPart(), v = p && views.get(p.id); if (!v || !v.geom.attributes.color) return { colours: 0, vertexColors: !!(v && v.mat.vertexColors) }; const a = v.geom.attributes.color.array, set = new Set(); for (let i = 0; i < a.length; i += 9) set.add(a[i].toFixed(3) + ',' + a[i + 1].toFixed(3) + ',' + a[i + 2].toFixed(3)); return { colours: set.size, vertexColors: v.mat.vertexColors, borders: !!v.borders, part: p.color }; }, sculptAt(partIndex, point, opts = {}) { const part = state.parts[partIndex]; if (state.selectedId !== part.id) selectPart(part.id); if (state.tool !== 'sculpt') setTool('sculpt'); Object.assign(state.sculpt, opts.mode ? { mode: opts.mode } : {}, opts.size ? { size: opts.size, sized: true } : {}, opts.strength ? { strength: opts.strength } : {}); const v = views.get(part.id), start = K.nearestTriangle(part.positions, part.indices, point, K.diag(part.bbox) * 0.05); stroke = { partId: part.id, P: part.positions.slice(), moved: 0 }; for (let i = 0; i < (opts.dabs || 1); i++) { const r = K.sculptDab(stroke.P, part.indices, { centre: point, radius: state.sculpt.size, strength: state.sculpt.strength, mode: state.sculpt.mode, reverse: !!opts.reverse, start, mask: state.sculpt.useMask && state.sculpt.mask && state.sculpt.mask.partId === part.id ? state.sculpt.mask.sel : null }); stroke.moved += r.moved.length; if (v && r.tris.length) K.refreshCreased(stroke.P, part.indices, r.tris, v.geom.attributes.position.array, v.geom.attributes.normal.array, 38); } const moved = stroke.moved; endSculpt(); const q = state.parts[partIndex]; return { moved, volume: q.volume, closed: K.edgeReport(q.indices).closed, tris: q.tris, tool: state.tool, mask: !!(state.sculpt.mask && state.sculpt.mask.partId === q.id) }; }, markerBounds() { const out = []; for (const g of keyGroup.children) for (const m of g.children) { if (!m.geometry || !m.geometry.attributes.position) continue; const a = m.geometry.attributes.position.array, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]; for (let i = 0; i < a.length; i += 3) for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], a[i + k]); max[k] = Math.max(max[k], a[i + k]); } out.push({ kind: m instanceof THREE.Mesh ? 'Mesh' : 'Line', min: [min[0] + g.position.x, min[1] + g.position.y, min[2]], max: [max[0] + g.position.x, max[1] + g.position.y, max[2]] }); } return out; }, plugRings() { return plugsShown().filter(q => q.ok).map(q => { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const [x, y] of q.base) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } return { x: q.x, y: q.y, min: [x0, y0], max: [x1, y1], depth: q.depth }; }); }, async boolean(op) { if (op) state.bool.op = op; if (state.tool !== 'boolean') setTool('boolean'); const sh = booleanShape(); const part = await doBoolean(); return part ? { name: part.name, tris: part.tris, volume: part.volume, closed: K.edgeReport(part.indices).closed, parts: state.parts.length, tool: state.tool, shape: sh ? sh.name : null } : { error: $('#toast').innerText, parts: state.parts.length, tool: state.tool, shape: sh ? sh.name : null }; }, addShape(kind) { const p = addShape(kind); return { id: p.id, name: p.name, size: p.bbox.size, tris: p.tris }; }, setShape(fields) { const p = setShape(fields); return p ? { size: p.bbox.size, center: p.bbox.center, tris: p.tris, volume: p.volume, closed: K.edgeReport(p.indices).closed } : null; }, shapeMode(m) { state.shapeMode = m; attachGizmo(); renderInspector(); return tc.mode; }, panelWidths, setPanelWidth(side, px) { setPanelWidth(side, px); savePanels(); renderInspector(); return panelWidths(); }, cameraDir() { const d = camera.position.clone().sub(orbit.target).normalize(); return [d.x, d.y, d.z]; }, setTool(t) { setTool(t); return state.tool; }, tool() { return state.tool; }, cutAcross(x0, y0, x1, y1) { const r = canvas.getBoundingClientRect(); setAcross(true); const out = cutAcross(r.left + x0, r.top + y0, r.left + x1, r.top + y1); return out ? { ...out, selected: !!selectedPart(), regions: state.regions.on } : null; }, async movePick(dir, mm) { if (mm) { state.moveBy = mm; const i = $('#moveLineBy'); if (i) i.value = mm; } movePick(dir); await pickSettled(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, flatHere() { flatFromPick(); return { regions: state.regions.on, focus: state.cut.focus ? state.cut.focus.length : 0 }; }, paintMode(mode) { state.paint.mode = mode; renderPaintTools(); updateHint(); return state.paint.mode; }, paintFill(on) { state.paint.fill = !!on; renderPaintTools(); updateHint(); return state.paint.fill; }, regionTriangles(partIndex, point) { const part = state.parts[partIndex], seg = regionsFor(part), g = seg.groupOf[K.nearestTriangle(part.positions, part.indices, point)]; let n = 0; for (const x of seg.groupOf) if (x === g) n++; return n; }, paintIsolate() { paintEdit('paint-isolate'); const p = selectedPart(), v = p && views.get(p.id); return { shown: v && v.isoMap ? v.isoMap.length : 0, isolated: !!state.paint.iso }; }, paintShowAll() { paintEdit('paint-show'); const p = selectedPart(), v = p && views.get(p.id); return { indexed: !!(v && v.geom.index), isolated: !!state.paint.iso }; }, inlayCut() { inlayFromPick(); return true; }, splitPlan() { planSplit(null); const b = modelBounds(); return state.split.planes ? { planes: state.split.planes.map(q => [q.axis, +q.pos.toFixed(2)]), ...K.bedFit(b, state.split.planes, state.bed, SPLIT_MARGIN) } : null; }, seamEdit() { startSeamEdit(); return state.edit ? state.edit.loops.map(l => l.pts.length) : null; }, async seamDrag(li, i, point) { moveHandle(li, i, point); ptr.handle = { li, i }; endHandle(); await pickSettled(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', length: pk.loops.reduce((s, l) => s + l.length, 0), handle: state.edit.loops[li].pts[i] } : null; }, async seamSmooth(passes) { smoothSeam(passes); await pickSettled(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, cutHereAt(partIndex, point) { const part = state.parts[partIndex]; const it = K.cutHere(part.positions, part.indices, point, K.diag(part.bbox)); if (!it) return null; addHereSuggestion(part, it); return { width: it.width, freed: it.freed, areas: it.areas.length, normal: it.normal }; }, explodeOffsets() { return state.parts.map(p => { const v = views.get(p.id); return { pull: p.pull, at: v ? [v.mesh.position.x - v.offset.x, v.mesh.position.y - v.offset.y, v.mesh.position.z - v.offset.z] : null }; }); }, async regionClick(partIndex, point, add = false) { regionClick(state.parts[partIndex], point, add); await pickSettled(); const pk = state.regions.pick; return { selected: state.selectedId === state.parts[partIndex].id, picked: !!pk, regions: pk && pk.regions ? pk.regions.length : 0, loose: pk && pk.loose ? pk.loose.length : 0 }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintLetGo() { previewPainted(); const pk = state.regions.pick; return pk ? { preview: !!pk.preview, loops: pk.loops.length, error: pk.error || '' } : null; }, async paintDone() { pickPainted(); await pickSettled(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, async closeDrawing() { closeDrawing(); await pickSettled(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, async pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); await pickSettled(); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
+  window.KeymasterDebug = { brushShape() { return { ring: brushRing.visible, ball: brushBall.visible }; }, hoverBrushAt(i, point) { const p = state.parts[i]; moveBrushRing({ point: new THREE.Vector3(...point), face: { normal: new THREE.Vector3(0, 0, 1) } }); return { ring: brushRing.visible, ball: brushBall.visible }; }, pickInfo() { const pk = state.regions.pick, p = pk && state.parts.find(q => q.id === pk.partId), v = p && views.get(p.id); return pk ? { painted: !!pk.painted, preview: !!pk.preview, loops: pk.loops.length, frames: (pk.frames || []).filter(Boolean).length, joints: pk.keys.length + pk.plugs.length, markers: v && v.pickKeys ? v.pickKeys.children.length : 0, shown: v && v.pickShown ? v.isoMap.length : -1, tris: p.indices.length / 3, ok: !!pk.result, pending: !!pk.pending, sliced: !!pk.paths } : null; }, async workerVolume(i) { const p = state.parts[i]; return { worker: await coreTask('volume', [p.positions, p.indices]), here: K.volume(p.positions, p.indices), inWorker: !!coreWorker && !coreWorkerBroken }; }, scaleAll(f) { scaleAll(f); return state.parts.map(q => q.volume); }, planeHolder: () => [planeHolder.position.x, planeHolder.position.y, planeHolder.position.z], keyMarkColour: () => KEY_MARK, async fillGaps(mm) { if (mm) { state.fillGap = mm; const i = $('#fillGapBy'); if (i) i.value = mm; } const r = await fillPickGaps(); await pickSettled(); const pk = state.regions.pick; return { added: r ? r.added : 0, holes: r ? r.holes : 0, painted: !!(pk && pk.painted), loops: pk ? pk.loops.length : 0, ok: !!(pk && pk.result), pieces: pk && pk.result ? pk.result.parts.length : 0 }; }, pressCut() { cutAlongPick(); const pk = state.regions.pick; return { pending: !!(pk && pk.pending), queued: !!(pk && pk.cutWhenReady), label: $('#cutAction').innerText }; }, strokeLineShown() { const el = document.querySelector('#acrossLine'); return !!el && !el.hasAttribute('hidden') && getComputedStyle(el).display !== 'none'; }, async strokeCut(o, n, add = false) { const L = await strokeCutAt(selectedPart(), o, n, add); await pickSettled(); const pk = state.regions.pick; return { loop: !!L, loops: pk ? pk.loops.length : 0, ok: !!(pk && pk.result), error: pk ? pk.error || '' : '', pieces: pk && pk.result ? pk.result.parts.length : 0, toast: $('#toast').innerText }; }, async boxSelect(x0, y0, x1, y1, add = false) { const r = canvas.getBoundingClientRect(); boxSelect(r.left + x0 * r.width, r.top + y0 * r.height, r.left + x1 * r.width, r.top + y1 * r.height, add); await pickSettled(); const pk = state.regions.pick; return { regions: pk && pk.regions ? pk.regions.length : 0, loose: pk && pk.loose ? pk.loose.length : 0, ok: !!(pk && (pk.result || pk.loose)), multi: state.multi.size, ticked: state.shellPick ? state.shellPick.chosen.size : -1 }; }, setBox(on) { setBox(on); return state.box.on; }, borderSegments() { const p = selectedPart(), v = p && views.get(p.id); if (!v || !v.borders) return null; const seg = regionsFor(p); return { curve: v.borders.geometry.attributes.position.array.length / 6, edges: seg.borders.length / 4, opacity: v.borders.material.opacity }; }, coreWorker: () => !!coreWorker && !coreWorkerBroken, toggleRegions() { toggleRegions(); }, regionsOn: () => !!state.regions.on, regionsLoading: () => !!state.regions.loading, planeShown: () => planeShown(), sectionLoops: () => sectionLines.children.length, sectionShown: () => !!(sectionLines.visible && planeGroup.visible), axisDots: () => AXIS_DOTS.map(d => ({ view: d.el.dataset.view, behind: d.el.classList.contains('is-behind'), z: d.el.style.zIndex })), ringOpacity: () => [rings.x.material.opacity, rings.y.material.opacity], hoverAt(i, point) { const p = state.parts[i]; setHoverRegion(p, point ? K.regionAtPoint(p.positions, p.indices, regionsFor(p), point) : -1); return { g: state.regions.hover ? state.regions.hover.g : -1, text: ($('#regionHover') || {}).textContent || '', shown: !!$('#regionHover') && !$('#regionHover').hidden }; }, selectClick(i) { if (i === null) { selectPart(null); return null; } const p = state.parts[i]; if (state.shellPick && p.id === state.shellPick.partId) { const sh = shellsOf(p), k = shellAtFace(p, sh[arguments[1] || 0].tris[0]); toggleShell(k); return k; } selectPart(p.id); return state.selectedId; }, planeAt: () => [planeGroup.position.x, planeGroup.position.y, planeGroup.position.z, planeGroup.quaternion.x, planeGroup.quaternion.y, planeGroup.quaternion.z, planeGroup.quaternion.w].map(v => +v.toFixed(3)).join(','), gizmo: () => ({ attached: !!tc.object, rings: gripGroup.visible }), shellPick() { const sp = state.shellPick, p = sp && state.parts.find(q => q.id === sp.partId); return sp ? { chosen: [...sp.chosen].sort(), n: shellsOf(p).length, colours: new Set(Array.from(views.get(p.id).geom.attributes.color.array).map((v, i, a) => i % 3 === 0 ? a.slice(i, i + 3).map(c => Math.round(c * 50)).join(',') : null).filter(Boolean)).size } : null; }, hoverRegion() { return state.regions.hover ? state.regions.hover.g : -1; }, async autoSplit() { const r = await autoSplit(); return r ? { ...r, closed: state.parts.every(q => K.edgeReport(q.indices).closed), toast: $('#toast').innerText } : null; }, partColours() { return state.parts.map(q => q.color); }, regionColours() { const p = selectedPart(), v = p && views.get(p.id); if (!v || !v.geom.attributes.color) return { colours: 0, vertexColors: !!(v && v.mat.vertexColors) }; const a = v.geom.attributes.color.array, set = new Set(); for (let i = 0; i < a.length; i += 9) set.add(a[i].toFixed(3) + ',' + a[i + 1].toFixed(3) + ',' + a[i + 2].toFixed(3)); return { colours: set.size, vertexColors: v.mat.vertexColors, borders: !!v.borders, part: p.color }; }, sculptAt(partIndex, point, opts = {}) { const part = state.parts[partIndex]; if (state.selectedId !== part.id) selectPart(part.id); if (state.tool !== 'sculpt') setTool('sculpt'); Object.assign(state.sculpt, opts.mode ? { mode: opts.mode } : {}, opts.size ? { size: opts.size, sized: true } : {}, opts.strength ? { strength: opts.strength } : {}); const v = views.get(part.id), start = K.nearestTriangle(part.positions, part.indices, point, K.diag(part.bbox) * 0.05); stroke = { partId: part.id, P: part.positions.slice(), moved: 0 }; for (let i = 0; i < (opts.dabs || 1); i++) { const r = K.sculptDab(stroke.P, part.indices, { centre: point, radius: state.sculpt.size, strength: state.sculpt.strength, mode: state.sculpt.mode, reverse: !!opts.reverse, start, mask: state.sculpt.useMask && state.sculpt.mask && state.sculpt.mask.partId === part.id ? state.sculpt.mask.sel : null }); stroke.moved += r.moved.length; if (v && r.tris.length) K.refreshCreased(stroke.P, part.indices, r.tris, v.geom.attributes.position.array, v.geom.attributes.normal.array, 38); } const moved = stroke.moved; endSculpt(); const q = state.parts[partIndex]; return { moved, volume: q.volume, closed: K.edgeReport(q.indices).closed, tris: q.tris, tool: state.tool, mask: !!(state.sculpt.mask && state.sculpt.mask.partId === q.id) }; }, markerBounds() { const out = []; for (const g of keyGroup.children) for (const m of g.children) { if (!m.geometry || !m.geometry.attributes.position) continue; const a = m.geometry.attributes.position.array, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]; for (let i = 0; i < a.length; i += 3) for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], a[i + k]); max[k] = Math.max(max[k], a[i + k]); } out.push({ kind: m instanceof THREE.Mesh ? 'Mesh' : 'Line', min: [min[0] + g.position.x, min[1] + g.position.y, min[2]], max: [max[0] + g.position.x, max[1] + g.position.y, max[2]] }); } return out; }, plugRings() { return plugsShown().filter(q => q.ok).map(q => { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const [x, y] of q.base) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } return { x: q.x, y: q.y, min: [x0, y0], max: [x1, y1], depth: q.depth }; }); }, async boolean(op) { if (op) state.bool.op = op; if (state.tool !== 'boolean') setTool('boolean'); const sh = booleanShape(); const part = await doBoolean(); return part ? { name: part.name, tris: part.tris, volume: part.volume, closed: K.edgeReport(part.indices).closed, parts: state.parts.length, tool: state.tool, shape: sh ? sh.name : null } : { error: $('#toast').innerText, parts: state.parts.length, tool: state.tool, shape: sh ? sh.name : null }; }, addShape(kind) { const p = addShape(kind); return { id: p.id, name: p.name, size: p.bbox.size, tris: p.tris }; }, setShape(fields) { const p = setShape(fields); return p ? { size: p.bbox.size, center: p.bbox.center, tris: p.tris, volume: p.volume, closed: K.edgeReport(p.indices).closed } : null; }, shapeMode(m) { state.shapeMode = m; attachGizmo(); renderInspector(); return tc.mode; }, panelWidths, setPanelWidth(side, px) { setPanelWidth(side, px); savePanels(); renderInspector(); return panelWidths(); }, cameraDir() { const d = camera.position.clone().sub(orbit.target).normalize(); return [d.x, d.y, d.z]; }, setTool(t) { setTool(t); return state.tool; }, tool() { return state.tool; }, cutAcross(x0, y0, x1, y1) { const r = canvas.getBoundingClientRect(); setAcross(true); const out = cutAcross(r.left + x0, r.top + y0, r.left + x1, r.top + y1); return out ? { ...out, selected: !!selectedPart(), regions: state.regions.on } : null; }, async movePick(dir, mm) { if (mm) { state.moveBy = mm; const i = $('#moveLineBy'); if (i) i.value = mm; } movePick(dir); await pickSettled(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, flatHere() { flatFromPick(); return { regions: state.regions.on, focus: state.cut.focus ? state.cut.focus.length : 0 }; }, paintMode(mode) { state.paint.mode = mode; renderPaintTools(); updateHint(); return state.paint.mode; }, paintFill(on) { state.paint.fill = !!on; renderPaintTools(); updateHint(); return state.paint.fill; }, regionTriangles(partIndex, point) { const part = state.parts[partIndex], seg = regionsFor(part), g = seg.groupOf[K.nearestTriangle(part.positions, part.indices, point)]; let n = 0; for (const x of seg.groupOf) if (x === g) n++; return n; }, paintIsolate() { paintEdit('paint-isolate'); const p = selectedPart(), v = p && views.get(p.id); return { shown: v && v.isoMap ? v.isoMap.length : 0, isolated: !!state.paint.iso }; }, paintShowAll() { paintEdit('paint-show'); const p = selectedPart(), v = p && views.get(p.id); return { indexed: !!(v && v.geom.index), isolated: !!state.paint.iso }; }, inlayCut() { inlayFromPick(); return true; }, splitPlan() { planSplit(null); const b = modelBounds(); return state.split.planes ? { planes: state.split.planes.map(q => [q.axis, +q.pos.toFixed(2)]), ...K.bedFit(b, state.split.planes, state.bed, SPLIT_MARGIN) } : null; }, seamEdit() { startSeamEdit(); return state.edit ? state.edit.loops.map(l => l.pts.length) : null; }, async seamDrag(li, i, point) { moveHandle(li, i, point); ptr.handle = { li, i }; endHandle(); await pickSettled(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', length: pk.loops.reduce((s, l) => s + l.length, 0), handle: state.edit.loops[li].pts[i] } : null; }, async seamSmooth(passes) { smoothSeam(passes); await pickSettled(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, length: pk.loops.reduce((s, l) => s + l.length, 0) } : null; }, cutHereAt(partIndex, point) { const part = state.parts[partIndex]; const it = K.cutHere(part.positions, part.indices, point, K.diag(part.bbox)); if (!it) return null; addHereSuggestion(part, it); return { width: it.width, freed: it.freed, areas: it.areas.length, normal: it.normal }; }, explodeOffsets() { return state.parts.map(p => { const v = views.get(p.id); return { pull: p.pull, at: v ? [v.mesh.position.x - v.offset.x, v.mesh.position.y - v.offset.y, v.mesh.position.z - v.offset.z] : null }; }); }, async regionClick(partIndex, point, add = false) { regionClick(state.parts[partIndex], point, add); await pickSettled(); const pk = state.regions.pick; return { selected: state.selectedId === state.parts[partIndex].id, picked: !!pk, regions: pk && pk.regions ? pk.regions.length : 0, loose: pk && pk.loose ? pk.loose.length : 0 }; }, sizeByHand(flag) { state.cfg.sizeByHand = !!flag; if (!flag) fitKeySizeToModel(); renderInspector(); return state.cfg.diameter; }, paintAt(partIndex, point, erase = false) { const part = state.parts[partIndex]; if (!state.paint.on) setPainting(true); paintDab(part, point, -1, erase); return paintCount(); }, paintLetGo() { previewPainted(); const pk = state.regions.pick; return pk ? { preview: !!pk.preview, loops: pk.loops.length, error: pk.error || '' } : null; }, async paintDone() { pickPainted(); await pickSettled(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, painted: !!pk.painted, count: paintCount() } : { count: paintCount() }; }, paintEdit(act) { paintEdit(act); return paintCount(); }, drawPoint(partIndex, point) { const part = state.parts[partIndex]; if (!state.draw.on) setDrawing(true); addDrawPoint(part, point); return state.draw.points.length; }, async closeDrawing() { closeDrawing(); await pickSettled(); const pk = state.regions.pick; return pk ? { ok: !!pk.result, error: pk.error || '', loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, drawing: state.draw.on } : { drawing: state.draw.on }; }, async pickCutLineAt(partIndex, point, add = false) { const part = state.parts[partIndex]; if (add && state.regions.last && state.regions.last.partId === part.id) state.regions.last.clicks.push(point); else state.regions.last = { partId: part.id, clicks: [point] }; pickCutLine(part, point, add); await pickSettled(); const pk = state.regions.pick; return pk ? { closed: pk.loop ? pk.loop.closed : false, ok: !!pk.result, error: pk.error || '', region: pk.region, regions: pk.regions ? pk.regions.length : 0, loops: pk.loops.length, pieces: pk.result ? pk.result.parts.length : 0, forced: !!pk.forced } : null; }, keyScreenPoint(i) { const k = state.cut.keys[i]; if (!k) return null; planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(k.x, k.y, 0))); return [s[0] + r.left, s[1] + r.top]; }, keyCount() { return state.cut.keys.length; }, sheetScreenPoint(fx, fy) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(new THREE.Vector3(fx * state.cut.R, fy * state.cut.R, 0))); return [s[0] + r.left, s[1] + r.top]; }, ringScreenPoint(ax, deg) { planeGroup.updateMatrixWorld(true); camera.updateMatrixWorld(); const r = canvas.getBoundingClientRect(), s = toScreen(planeGroup.localToWorld(ringLocal(ax, deg * Math.PI / 180))); return [s[0] + r.left, s[1] + r.top]; } };
   function onSheet(h) { const half = state.cut.R * 1.15; return h && Math.abs(h.x) <= half && Math.abs(h.y) <= half; }
   function startTilt(h, e) {
     const L = Math.hypot(h.x, h.y);
@@ -2455,13 +2455,24 @@
   // The brush shown on the surface: a circle the brush's size, lying on the face under the pointer
   const brushRing = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([...Array(48).keys()].map(i => new THREE.Vector3(Math.cos(i / 48 * 2 * Math.PI), Math.sin(i / 48 * 2 * Math.PI), 0))), new THREE.LineBasicMaterial({ color: 0x2f6fe0, depthTest: false, transparent: true, opacity: 0.9 }));
   brushRing.renderOrder = 10; brushRing.visible = false; scene.add(brushRing);
+  // the Sphere brush shows as a see-through ball of its own size round the point (the owner: "a sphere tool should
+  // visually be a visible sphere so the coverage can be judged"), with the ring as its equator on the surface
+  const brushBall = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 20), new THREE.MeshBasicMaterial({ color: 0x2f6fe0, transparent: true, opacity: 0.18, depthWrite: false }));
+  brushBall.renderOrder = 10; brushBall.visible = false; brushRing.add(brushBall);
   const brushSize = () => (state.tool === 'sculpt' ? state.sculpt.size : state.paint.size);
+  // The brush size slider runs on a log scale from 0.2 mm to two fifths of the part's size, so small and big
+  // brushes are both a short drag away
+  function sliderMax() { const p = selectedPart(); return Math.max(5, p ? K.diag(p.bbox) * 0.4 : 50); }
+  function sliderOf(size) { return Math.round(100 * Math.log(Math.max(0.2, size) / 0.2) / Math.log(sliderMax() / 0.2)); }
+  function sizeOfSlider(v) { return Math.round(0.2 * Math.pow(sliderMax() / 0.2, v / 100) * 10) / 10; }
+  function syncBrushSlider() { for (const [id, size] of [['#brushSlider', state.paint.size], ['#sculptSlider', state.sculpt.size]]) { const el = $(id); if (el) el.value = Math.max(0, Math.min(100, sliderOf(size))); } }
   function moveBrushRing(hit) {
     if (!hit || !(state.paint.on || state.tool === 'sculpt')) { if (brushRing.visible) { brushRing.visible = false; markDirty(); } return; }
     brushRing.position.copy(hit.point);
     const nrm = hit.face && hit.face.normal ? hit.face.normal.clone().normalize() : new THREE.Vector3(0, 0, 1);
     brushRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), nrm);
     brushRing.scale.set(brushSize(), brushSize(), brushSize());
+    brushBall.visible = state.tool !== 'sculpt' && state.paint.on && state.paint.mode === 'sphere';
     brushRing.visible = true;
     markDirty();
   }
@@ -2498,16 +2509,26 @@
     clearPick();
     state.regions.last = null;
     if (!paintCount()) { renderPick(); updateHint(); markDirty(); return; }
+    // holes in the paint fill themselves, as paint fill in Bambu Studio does: every unpainted patch the paint closes
+    // round (smaller than the paint) is painted too
+    try { const fg = K.fillSelectionGaps(p.positions, p.indices, state.paint.sel, { gap: 0 }); if (fg.added) { state.paint.sel = fg.sel; renderPaint(); } } catch (err) { /* left as painted */ }
     let loops = [], error = '';
     try { const seg = K.selectionSeg(p.positions, p.indices, state.paint.sel); loops = K.groupLoops(p.positions, p.indices, seg, [1]); } catch (err) { error = err.message; }
-    state.regions.pick = { partId: p.id, loops, error, painted: true, preview: true, keys: [], plugs: [], perLoop: [] };
-    const v = views.get(p.id);
-    if (v && loops.length) {
-      const g = new THREE.Group();
-      for (const loop of loops) { const pts = loop.verts.map(i => new THREE.Vector3(p.positions[3 * i], p.positions[3 * i + 1], p.positions[3 * i + 2])); const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x2f6fe0, depthTest: false })); line.renderOrder = 9; g.add(line); }
-      v.pickLine = g; v.mesh.add(g);
-    }
+    const pick = { partId: p.id, loops, error, painted: true, preview: true, keys: [], plugs: [], perLoop: [], frames: [], draw: [], selection: state.paint.sel };
+    state.regions.pick = pick;
+    drawPickLines(p, pick);
     renderPick(); updateHint(); markDirty();
+    // the keys or plug drawn on the painted outline as soon as they are planned (the owner: "keys should show
+    // correctly for every mode"); the cut and its checks still wait for Split off painted area
+    if (!loops.length || loops.some(l => !l.closed) || state.cfg.type === 'none') return;
+    const run = ++pickRun, seg = K.selectionSeg(p.positions, p.indices, state.paint.sel);
+    coreTask('planJoints', [p.positions, p.indices, pickReq(loops, { regions: [1], seg, painted: true })]).then((j) => {
+      if (run !== pickRun || state.regions.pick !== pick) return;
+      pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths;
+      pick.keys = j.perLoop.flatMap(per => per.keys); pick.plugs = j.perLoop.flatMap(per => per.plugs);
+      pick.noKeys = noKeysText(j.noKeys, j.loops.length > 1);
+      drawPickLines(p, pick); renderPick(); markDirty();
+    }).catch(() => {});
   }
   // Split off painted area: the full pick (keys, plug, sinking, checks), then the cut if it passed; a refusal shows
   // with Split it off anyway
@@ -2558,7 +2579,7 @@
     if (state.tool === 'sculpt') { setSculptSize(size); return; }
     state.paint.size = Math.max(0.2, Math.round(size * 10) / 10); state.paint.sized = true;
     const inp = $('#brushSize'); if (inp) inp.value = state.paint.size;
-    brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); updateHint(); markDirty();
+    brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); syncBrushSlider(); updateHint(); markDirty();
   }
   /* ---------------- sculpting ----------------
      modelsplitter's Sculpt tool: Smooth, Inflate and Flatten brushes dragged over the chosen part. A stroke works
@@ -2574,14 +2595,14 @@
   function setSculptSize(size) {
     state.sculpt.size = Math.max(0.2, Math.round(size * 10) / 10); state.sculpt.sized = true;
     const inp = $('#sculptSize'); if (inp) inp.value = state.sculpt.size;
-    brushRing.scale.set(state.sculpt.size, state.sculpt.size, state.sculpt.size); updateHint(); markDirty();
+    brushRing.scale.set(state.sculpt.size, state.sculpt.size, state.sculpt.size); syncBrushSlider(); updateHint(); markDirty();
   }
   function sculptPanelHTML() {
     const p = selectedPart(), s = state.sculpt, mask = p && s.mask && s.mask.partId === p.id ? s.mask : null;
     const note = { smooth: 'Each vertex eases towards its neighbours: bumps and noise melt away.', inflate: 'The surface puffs out along itself. Hold Shift to push it in.', flatten: 'The surface is pressed towards a flat plane through the brush.' }[s.mode];
     return `<div class="sculpt-panel">
       <div class="inline"><span class="lbl">Brush</span>${seg('sculpt-mode', s.mode, [['smooth', 'Smooth'], ['inflate', 'Inflate'], ['flatten', 'Flatten']])}</div>
-      <div class="row2"><label class="inline-num" title="Brush size ([ and ] change it)"><span class="lbl">Size</span><input type="number" id="sculptSize" min="0.2" step="0.5" value="${s.size}" aria-label="Brush size in millimetres"><span class="unit">mm</span></label>
+      <div class="row2"><label class="inline-num" title="Brush size ([ and ] change it)"><span class="lbl">Size</span><input type="number" id="sculptSize" min="0.2" step="0.5" value="${s.size}" aria-label="Brush size in millimetres"><span class="unit">mm</span></label><input type="range" id="sculptSlider" class="brush-slider" min="0" max="100" step="1" value="${sliderOf(s.size)}" aria-label="Brush size" title="Brush size: drag to change ([ and ] too)">
         <label class="slider" title="How far each pass moves the surface"><span class="lbl">Strength</span><input type="range" id="sculptStrength" min="5" max="100" step="5" value="${Math.round(s.strength * 100)}" aria-label="Brush strength"><output id="sculptStrengthOut">${Math.round(s.strength * 100)}%</output></label></div>
       <p class="muted small">${note}</p>
       ${mask ? `<label class="check mask" title="The area painted with the Paint tool"><input type="checkbox" data-act-toggle="sculpt-mask" ${s.useMask ? 'checked' : ''}> Keep to the painted area (${fmtInt(mask.count)} faces)</label>` : ''}
@@ -3056,6 +3077,7 @@
     const act = e.target.closest('[data-act]') && e.target.closest('[data-act]').dataset.act;
     if (act === 'inlay-cut') inlayFromPick();
     else if (act === 'fill-gaps') fillPickGaps();
+    else if (act === 'pick-show') { state.pickShow = e.target.closest('[data-act]').dataset.value; for (const x of document.querySelectorAll('[data-act=pick-show]')) x.setAttribute('aria-pressed', x.dataset.value === state.pickShow ? 'true' : 'false'); applyPickShow(); }
     else if (act === 'move-in') movePick(-1);
     else if (act === 'move-out') movePick(1);
     else if (act === 'flat-here') flatFromPick();
@@ -3439,8 +3461,8 @@
       case 'shape-remove': removeShape(); break;
       case 'bool-op': state.bool.op = val; renderInspector(); updateHint(); break;
       case 'auto-split': autoSplit(); break;
-      case 'regions-detail': if (state.regions.detail !== val) { state.regions.detail = val; for (const x of document.querySelectorAll('[data-act=regions-detail]')) x.setAttribute('aria-pressed', x.dataset.value === val ? 'true' : 'false'); if (state.regions.on) { clearPick(); state.regions.last = null; startRegions(); } } break;
-      case 'regions-by': if (state.regions.by !== val) { state.regions.by = val; renderRegionsBy(); if (state.regions.on) { clearPick(); state.regions.last = null; startRegions(); } } break;
+      case 'regions-detail': if (state.regions.detail !== val) { const kept = keepPick(); state.regions.detail = val; for (const x of document.querySelectorAll('[data-act=regions-detail]')) x.setAttribute('aria-pressed', x.dataset.value === val ? 'true' : 'false'); if (state.regions.on) { clearPick(); state.regions.last = null; startRegions(() => restorePick(kept)); } } break;
+      case 'regions-by': if (state.regions.by !== val) { const kept = keepPick(); state.regions.by = val; renderRegionsBy(); if (state.regions.on) { clearPick(); state.regions.last = null; startRegions(() => restorePick(kept)); } } break;
       case 'sculpt-mode': state.sculpt.mode = val; renderInspector(); updateHint(); break;
       case 'boolean': doBoolean(); break;
       case 'export-one': exportParts(state.selectedId); break;
@@ -3468,6 +3490,7 @@
       setKeyOwn(f, f === 'turn' ? normTurn(v) : v);
       return;
     }
+    if (t.id === 'sculptSlider') { setSculptSize(sizeOfSlider(+t.value)); return; }
     if (t.id === 'sculptSize') { const v = parseFloat(t.value); if (isFinite(v)) setSculptSize(v); else renderInspector(); return; }
     if (t.id === 'sculptStrength') { state.sculpt.strength = Math.max(0.05, Math.min(1, parseFloat(t.value) / 100)); const o = $('#sculptStrengthOut'); if (o) o.textContent = `${Math.round(state.sculpt.strength * 100)}%`; return; }
     if (t.dataset.actToggle === 'sculpt-mask') { state.sculpt.useMask = t.checked; updateHint(); return; }
@@ -3557,6 +3580,7 @@
   for (const el of [ins, planeBar]) {
     el.addEventListener('click', onPanelClick);
     el.addEventListener('change', onPanelChange);
+    el.addEventListener('input', (e) => { if (e.target.id === 'sculptSlider') setSculptSize(sizeOfSlider(+e.target.value)); }); // the slider sizes the brush while it is dragged
     el.addEventListener('input', onPanelInput);
   }
 
@@ -3751,6 +3775,7 @@
       return pickLoops(p, loops, { lines: true });
     }
     const g = K.regionAtPoint(p.positions, p.indices, seg, point);
+    if (g >= 0 && prev && (prev.painted || prev.regions) && prev.loops.length) { const r = addToSelectionPick(p, seg, prev, g, point); if (r) return r; }
     if (g < 0) { toast('Click a region to split it off, or a dark border line to cut along it.'); if (prev) pickLoops(p, prev.loops, prev.regions ? { regions: prev.regions, seg } : { lines: true }); else renderPick(); return; }
     if (prev && !prev.regions) { toast('Shift-click adds lines to lines, or regions to regions. Click to start again.', 'warn'); pickLoops(p, prev.loops, { lines: true }); return; }
     if (!prev) { // a click on a piece pushed into another (a kit's head in its body) picks that whole piece, to separate as it is
@@ -3775,9 +3800,85 @@
       regions.push(g);
     }
     if (!regions.length) { renderPick(); return; }
+    if (regions.length > 1) { const enclosed = enclosedRegions(seg, regions); if (enclosed.length) { regions.push(...enclosed); toast(`Filled in ${enclosed.length === 1 ? 'a region' : `${enclosed.length} regions`} the pick surrounds.`); } }
     const loops = K.groupLoops(p.positions, p.indices, seg, regions);
     if (!loops.length) { pickLoose(p, seg, regions); return Promise.resolve(); }
     return pickLoops(p, loops, { regions, seg });
+  }
+  // A pick kept as the triangles it covers, so it outlives the regions it was made from: switching Detail or Find
+  // (the owner: pick parts at Balanced, then fine-tune at Fine) brings it back as a selection the new regions add to
+  // Regions the pick closes round: every neighbour of theirs is picked (or is another such region), and together
+  // they are smaller than the pick (a hole in a selection fills, as paint fill in Bambu Studio does)
+  function enclosedRegions(seg, regions) {
+    const picked = new Set(regions), nb = new Map(), b = seg.borders;
+    for (let i = 0; i < b.length; i += 4) { const x = seg.groupOf[b[i]], y = seg.groupOf[b[i + 1]]; if (x === y) continue; if (!nb.has(x)) nb.set(x, new Set()); if (!nb.has(y)) nb.set(y, new Set()); nb.get(x).add(y); nb.get(y).add(x); }
+    let area = 0; for (const g of regions) area += seg.areas ? seg.areas[g] || 0 : 0;
+    // the unpicked regions, grouped by touching each other; a group touching only the pick is enclosed
+    const seen = new Set(), out = [];
+    for (const [g] of nb) {
+      if (picked.has(g) || seen.has(g)) continue;
+      const grp = [], stack = [g]; let open = false, ga = 0; seen.add(g);
+      while (stack.length) { const x = stack.pop(); grp.push(x); ga += seg.areas ? seg.areas[x] || 0 : 0; for (const y of nb.get(x) || []) { if (picked.has(y)) continue; if (!seen.has(y)) { seen.add(y); stack.push(y); } } }
+      for (const x of grp) for (const y of nb.get(x) || []) if (!picked.has(y) && !grp.includes(y)) open = true;
+      if (!open && seg.areas && ga < area && grp.length < nb.size - regions.length) out.push(...grp);
+    }
+    return out;
+  }
+  function keepPick() {
+    const pk = state.regions.pick, p = pk && state.parts.find(q => q.id === pk.partId);
+    if (!p || !pk.loops || !pk.loops.length || !(pk.regions || pk.painted)) return null;
+    try { return { partId: p.id, sel: (pk.selection || pickSelection(p, pk)).slice() }; } catch (err) { return null; }
+  }
+  function restorePick(kept) {
+    const p = kept && selectedPart();
+    if (!p || p.id !== kept.partId || kept.sel.length !== p.indices.length / 3) return;
+    state.paint.sel = kept.sel; state.paint.partId = p.id;
+    pickPainted();
+    toast('Your pick is kept. Shift-click regions to add to it or take them out.');
+  }
+  // The small patches of surface between creases, much finer than the parts (a spike of a pauldron poking into the
+  // chest, which the parts melt into the chest as too small): one per part, kept with its regions
+  const fineCache = new WeakMap();
+  function fineRegionsFor(p) {
+    let f = fineCache.get(p.indices);
+    if (!f) { f = K.segmentSurface(p.positions, p.indices, { angle: 50, fold: 12, minFrac: 0.0002 }); fineCache.set(p.indices, f); }
+    return f;
+  }
+  // Shift-click with a pick that is a selection (painted, filled, kept from other regions), or on a region much
+  // bigger than the pick (the body round a small piece the parts didn't find): the pick becomes the triangles it
+  // covers, and the click adds the region, or for a big region only the patch between creases under the click, or
+  // takes it out again when it is already in. Returns the pick's promise, or null to pick regions as usual.
+  function addToSelectionPick(p, seg, prev, g, point) {
+    const nt = p.indices.length / 3;
+    let areaPick = 0, big = 0;
+    if (prev.regions && !prev.painted) for (const x of prev.regions) areaPick += seg.areas[x] || 0;
+    for (let k = 0; k < seg.count; k++) if (seg.areas[k] > seg.areas[big]) big = k;
+    const huge = g === big || (areaPick > 0 && seg.areas[g] > 4 * areaPick);
+    if (!prev.painted && !huge) return null; // a region added to regions, as before
+    let sel;
+    try { sel = (prev.selection || pickSelection(p, prev)).slice(); } catch (err) { return null; }
+    const t0 = K.nearestTriangle(p.positions, p.indices, point, K.diag(p.bbox) * 0.05);
+    if (t0 < 0) return null;
+    let tris = [];
+    if (huge) {
+      const f = fineRegionsFor(p), fg = f.groupOf[t0];
+      let area = 0; for (let t = 0; t < nt; t++) if (f.groupOf[t] === fg && seg.groupOf[t] === g) tris.push(t);
+      area = tris.length;
+      let inG = 0; for (let t = 0; t < nt; t++) if (seg.groupOf[t] === g) inG++;
+      let nPick = 0; for (let t = 0; t < nt; t++) nPick += sel[t] ? 1 : 0;
+      if (area > 0.1 * inG || area > nPick) tris = []; // no small patch here (a tenth of the region at most, and smaller than the pick): the whole region
+      if (!tris.length && !prev.painted) return null; // and a region pick goes on adding regions, as before
+    }
+    const small = tris.length > 0;
+    if (!small) for (let t = 0; t < nt; t++) if (seg.groupOf[t] === g) tris.push(t);
+    const out = !!sel[t0];
+    for (const t of tris) sel[t] = out ? 0 : 1;
+    let n = 0; for (let t = 0; t < nt; t++) n += sel[t];
+    if (!n) { toast('That takes out everything picked. Click a region to start again.', 'warn'); return null; }
+    state.paint.sel = sel; state.paint.partId = p.id;
+    pickPainted();
+    toast(`${out ? 'Took out' : 'Added'} ${small ? `a small piece (${fmtInt(tris.length)} faces)` : 'the region'}${out ? '' : ' to the pick'}. Shift-click it again to undo.`);
+    return state.regions.pickPromise || Promise.resolve();
   }
   // A region with no outline is a whole loose piece, or the whole part: nothing joins it to the rest, so there is
   // no line to cut along. A loose piece is separated as it is, with no cut and no keys (the owner's KANDEN, a kit
@@ -3832,8 +3933,9 @@
     if (v.pickLine) { v.mesh.remove(v.pickLine); clearGroup(v.pickLine); v.pickLine = null; }
     if (v.pickKeys) { v.mesh.remove(v.pickKeys); clearGroup(v.pickKeys); v.pickKeys = null; }
     const g = new THREE.Group(), markers = new THREE.Group();
-    pick.loops.forEach((loop, li) => {
-      const pts = loop.verts.map(i => new THREE.Vector3(p.positions[3 * i], p.positions[3 * i + 1], p.positions[3 * i + 2]));
+    (pick.paths || pick.loops).forEach((loop, li) => {
+      const pts = pick.paths ? Array.from({ length: loop.length / 3 }, (_, i) => new THREE.Vector3(loop[3 * i], loop[3 * i + 1], loop[3 * i + 2])) : loop.verts.map(i => new THREE.Vector3(p.positions[3 * i], p.positions[3 * i + 1], p.positions[3 * i + 2]));
+      if (pick.paths) loop = { closed: true };
       const col = pick.error ? 0xe5484d : pick.pending ? 0x8a8f98 : 0x2f6fe0;
       const line = loop.closed ? new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: col, depthTest: false }))
         : new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xe5484d, depthTest: false }));
@@ -3846,20 +3948,44 @@
     v.pickLine = g; v.mesh.add(g);
     if (markers.children.length) { v.pickKeys = markers; v.mesh.add(markers); }
   }
+  // Show both sides of a pick, only the piece being split off, or only the rest (the owner: "show/hide opposing
+  // parts or selected parts/sections to see the key or whole"): the hidden side's triangles are left out of the
+  // view's index, as Isolate does, and the keys are drawn through the model either way
+  function pickShowHTML() {
+    const v = state.pickShow || 'both';
+    return `<div class="btn-row pick-show"><span class="lbl">Show</span><div class="seg" role="group" aria-label="Show">${[['both', 'Both'], ['pick', 'This piece'], ['rest', 'Other piece']].map(([k, l]) => `<button class="btn small" data-act="pick-show" data-value="${k}" aria-pressed="${v === k}">${l}</button>`).join('')}</div></div>`;
+  }
+  function applyPickShow() {
+    const pick = state.regions.pick, p = pick && state.parts.find(q => q.id === pick.partId), v = p && views.get(p.id);
+    if (!v) return;
+    const mode = state.pickShow || 'both';
+    if (mode === 'both' || pick.loose || !pick.loops || !pick.loops.length) { if (v.pickShown) { v.pickShown = false; applyIsolation(p); } return; }
+    let sel = pick.selection || pick.shownSel;
+    if (!sel) { try { sel = pickSelection(p, pick); } catch (err) { return; } pick.shownSel = sel; }
+    const want = mode === 'pick' ? 1 : 0, iso = state.paint.partId === p.id ? state.paint.iso : null;
+    let n = 0; for (let t = 0; t < sel.length; t++) if ((sel[t] ? 1 : 0) === want && (!iso || iso[t])) n++;
+    const idx = new Uint32Array(3 * n), map = new Int32Array(n); let j = 0;
+    for (let t = 0; t < sel.length; t++) if ((sel[t] ? 1 : 0) === want && (!iso || iso[t])) { map[j] = t; idx[3 * j] = 3 * t; idx[3 * j + 1] = 3 * t + 1; idx[3 * j + 2] = 3 * t + 2; j++; }
+    v.geom.setIndex(new THREE.BufferAttribute(idx, 1)); v.isoMap = map; v.pickShown = true;
+    markDirty();
+  }
+  function pickReq(loops, info) {
+    const seg = info.seg ? { groupOf: info.seg.groupOf, count: info.seg.count, borders: info.seg.borders, areas: info.seg.areas } : null;
+    return { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint, smooth: state.cfg.smoothCut !== false };
+  }
   function pickLoops(p, loops, info) {
     if (state.selectedId !== p.id) selectPart(p.id); // the pick's part is the chosen one, so its panel and its cut button show
     const run = ++pickRun;
     const pick = { partId: p.id, loops, loop: loops[0], regions: info.regions, region: info.regions ? info.regions[0] : undefined, painted: !!info.painted, keys: [], plugs: [], perLoop: [], frames: [], draw: [], pending: true };
     state.regions.pick = pick;
     drawPickLines(p, pick); renderPick(); markDirty();
-    const seg = info.seg ? { groupOf: info.seg.groupOf, count: info.seg.count, borders: info.seg.borders, areas: info.seg.areas } : null;
-    const req = { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint, smooth: state.cfg.smoothCut !== false };
+    const req = pickReq(loops, info);
     const live = () => run === pickRun && state.regions.pick === pick;
     // the joints first (quick), drawn while the cut is checked: on a big figure the check takes seconds, and the
     // owner saw no keys at all until it was done
     const done = coreTask('planJoints', [p.positions, p.indices, req]).then((joints) => {
       if (!live()) return null;
-      pick.loops = joints.loops; pick.loop = joints.loops[0];
+      if (joints.paths) pick.paths = joints.paths; else { pick.loops = joints.loops; pick.loop = joints.loops[0]; } // a sliced pick's lines run through new vertices: drawn from their points, and the pick keeps the lines on the part itself
       pick.perLoop = joints.perLoop; pick.frames = joints.frames; pick.draw = joints.draw;
       pick.keys = joints.perLoop.flatMap(per => per.keys); pick.plugs = joints.perLoop.flatMap(per => per.plugs);
       pick.noKeys = noKeysText(joints.noKeys, joints.loops.length > 1);
@@ -3868,7 +3994,7 @@
     }).then((out) => {
       if (!out || !live()) return; // a newer pick took over
       pick.pending = false;
-      pick.loops = out.loops; pick.loop = out.loops[0];
+      if (out.paths) pick.paths = out.paths; else { pick.loops = out.loops; pick.loop = out.loops[0]; }
       pick.perLoop = out.perLoop; pick.frames = out.frames; pick.draw = out.draw;
       pick.keys = out.perLoop.flatMap(per => per.keys); pick.plugs = out.perLoop.flatMap(per => per.plugs);
       pick.noKeys = out.dropped ? droppedText(out.dropped) : noKeysText(out.noKeys, out.loops.length > 1);
@@ -3933,6 +4059,7 @@
     return g;
   }
   function clearPick() {
+    for (const [id, v] of views) if (v.pickShown) { v.pickShown = false; const q = state.parts.find(x => x.id === id); if (q) applyIsolation(q); else { v.geom.setIndex(null); v.isoMap = null; } }
     for (const v of views.values()) {
       if (v.pickLine) { v.mesh.remove(v.pickLine); clearGroup(v.pickLine); v.pickLine = null; }
       if (v.pickKeys) { v.mesh.remove(v.pickKeys); clearGroup(v.pickKeys); v.pickKeys = null; }
@@ -4038,7 +4165,9 @@
       renderAction(); return;
     }
     if (pick.preview) {
-      el.innerHTML = `<p class="status ok">${ICONS.check}<span>Painted area with ${nl === 1 ? 'an outline' : `an outline of ${nl} lines`}, ${len} in all. Keep painting, or split it off: keys and checks run then.</span></p>`;
+      const pk = pick.plugs.length ? ` The plug is drawn in blue.` : pick.keys.length ? ` The keys are drawn in blue.` : '';
+      el.innerHTML = `<p class="status ok">${ICONS.check}<span>Painted area with ${nl === 1 ? 'an outline' : `an outline of ${nl} lines`}, ${len} in all.${pk} Keep painting, or split it off: the cut is checked then.</span></p>${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}${pickShowHTML()}`;
+      applyPickShow();
       renderAction();
       return;
     }
@@ -4053,7 +4182,8 @@
     const drawMore = state.draw.on && !state.draw.points.length ? `<p class="status muted">Drag across the part or click points again to add a line: it will be cut together with the ${nl === 1 ? 'line' : `${nl} lines`} already picked.</p>` : '';
     el.innerHTML = `${drawMore}${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}${sunkLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}${sunkLine}</span></p>`}
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
-      <div class="btn-row move-line">${state.edit ? '' : `<button class="btn small" data-act="edit-seam" title="Turn the line into handles you can drag along the surface">Edit ${nl === 1 ? 'the line' : 'the lines'}</button>`}<span class="lbl">Move</span><button class="btn small" data-act="move-in" title="Move the line into the piece being split off, along the surface">In</button><button class="btn small" data-act="move-out" title="Move the line outward, along the surface">Out</button><label class="inline-num"><span class="lbl">by</span><input type="number" id="moveLineBy" min="0.1" step="0.5" value="${state.moveBy || 1}" aria-label="Move the line by this much"><span class="unit">mm</span></label><button class="btn small" data-act="flat-here" title="A flat cut through the line’s plane instead, cutting only this area">Flat cut here</button></div><div class="btn-row fill-gaps"><button class="btn small" data-act="fill-gaps" title="Complete the pick: fill the narrow gaps between the picked pieces and every patch they surround">Fill gaps</button><label class="inline-num"><span class="lbl">up to</span><input type="number" id="fillGapBy" min="0.1" step="0.5" value="${state.fillGap || fillGapDefault()}" aria-label="Fill gaps up to this wide"><span class="unit">mm</span></label></div>${painted || state.edit ? '' : addHint}`;
+      <div class="btn-row move-line">${state.edit ? '' : `<button class="btn small" data-act="edit-seam" title="Turn the line into handles you can drag along the surface">Edit ${nl === 1 ? 'the line' : 'the lines'}</button>`}<span class="lbl">Move</span><button class="btn small" data-act="move-in" title="Move the line into the piece being split off, along the surface">In</button><button class="btn small" data-act="move-out" title="Move the line outward, along the surface">Out</button><label class="inline-num"><span class="lbl">by</span><input type="number" id="moveLineBy" min="0.1" step="0.5" value="${state.moveBy || 1}" aria-label="Move the line by this much"><span class="unit">mm</span></label><button class="btn small" data-act="flat-here" title="A flat cut through the line’s plane instead, cutting only this area">Flat cut here</button></div><div class="btn-row fill-gaps"><button class="btn small" data-act="fill-gaps" title="Complete the pick: fill the narrow gaps between the picked pieces and every patch they surround">Fill gaps</button><label class="inline-num"><span class="lbl">up to</span><input type="number" id="fillGapBy" min="0.1" step="0.5" value="${state.fillGap || fillGapDefault()}" aria-label="Fill gaps up to this wide"><span class="unit">mm</span></label></div>${pickShowHTML()}${painted || state.edit ? '' : addHint}`;
+    applyPickShow();
     renderAction();
   }
   // Inlay cut: the picked area (painted, a region, or inside a line) becomes a pocket in the body and an inlay to
@@ -4248,7 +4378,8 @@
   $('#seamSmooth').addEventListener('change', (e) => { smoothSeam(+e.target.value); });
   $('#seamSnap').addEventListener('change', (e) => { if (state.edit) state.edit.snap = e.target.checked; });
   $('#explode').addEventListener('input', (e) => { state.explode = parseFloat(e.target.value); $('#explodeOut').textContent = `${Math.round(state.explode * 100)}%`; applyExplode(); });
-  $('#brushSize').addEventListener('change', (e) => { state.paint.size = Math.max(0.2, +e.target.value || 3); e.target.value = state.paint.size; state.paint.sized = true; brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); markDirty(); });
+  $('#brushSize').addEventListener('change', (e) => { state.paint.size = Math.max(0.2, +e.target.value || 3); e.target.value = state.paint.size; state.paint.sized = true; brushRing.scale.set(state.paint.size, state.paint.size, state.paint.size); syncBrushSlider(); markDirty(); });
+  $('#brushSlider').addEventListener('input', (e) => { const tool = state.tool; if (tool === 'sculpt') return; setBrushSize(sizeOfSlider(+e.target.value)); });
   function applyRegions() {
     const on = state.regions.on;
     let count = 0;

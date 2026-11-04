@@ -101,7 +101,7 @@ for (const f of files) {
     }
     console.log(`  ${lines.length} curved cuts along region lines: ${cu} not sealed, ${cr} refused${cr ? ` (${Object.entries(cwhy).map(([k, v]) => `${v} ${k}`).join(', ')})` : ''}; ${keyed} cut with pegs and ${pl} with a plug, ${ku} of those not sealed`);
     const surface = seg.areas.reduce((s, a) => s + a, 0), rwhy = {};
-    let rn = 0, ru = 0, rr = 0, sunk = 0, su = 0;
+    let rn = 0, ru = 0, rr = 0, sunk = 0, su = 0, sliced = 0, slu = 0, slr = 0, slNone = 0;
     for (let g = 0; g < seg.count; g++) {
       if (seg.areas[g] < 0.01 * surface) continue;
       rn++; total++;
@@ -115,8 +115,17 @@ for (const f of files) {
       if (r.sinks.some(s => s > 0.05)) sunk++;
       const vol2 = r.parts.reduce((a, p) => a + p.volume, 0);
       if (!r.parts.every(p => K.edgeReport(p.indices).closed && p.volume > 0) || Math.abs(vol2 - V0) / V0 > 1e-5) { unsealed++; su++; }
+      // and sliced along a smooth curve through the triangles, as the app's region picks are, sunk as well
+      const sl = K.sliceRegionPick(m.positions, m.indices, seg, [g]);
+      if (!sl) { slNone++; continue; }
+      if (!K.edgeReport(sl.I).closed || Math.abs(K.volume(sl.P, sl.I) - V0) / V0 > 1e-5) { unsealed++; slu++; }
+      total++;
+      try { r = K.splitRegions(sl.P, sl.I, sl.seg, [1], { minThickness, sink: Math.max(0.8, minThickness) }); } catch (e) { refused++; slr++; tally(reasons, reasonOf(e)); continue; }
+      sliced++;
+      const vol3 = r.parts.reduce((a, p) => a + p.volume, 0);
+      if (!r.parts.every(p => K.edgeReport(p.indices).closed && p.volume > 0) || Math.abs(vol3 - V0) / V0 > 1e-5) { unsealed++; slu++; }
     }
-    console.log(`  ${rn} regions split off along their outlines: ${ru} not sealed, ${rr} refused${rr ? ` (${Object.entries(rwhy).map(([k, v]) => `${v} ${k}`).join(', ')})` : ''}; with sunk faces ${sunk} sunk, ${su} not sealed`);
+    console.log(`  ${rn} regions split off along their outlines: ${ru} not sealed, ${rr} refused${rr ? ` (${Object.entries(rwhy).map(([k, v]) => `${v} ${k}`).join(', ')})` : ''}; with sunk faces ${sunk} sunk, ${su} not sealed; sliced smooth ${sliced} cut, ${slu} not sealed, ${slr} refused, ${slNone} not sliced`);
   }
 }
 console.log(`\n${total} cuts (${plugged} with plugs), ${unsealed} not sealed, ${refused} refused with a message${refused ? ` (${Object.entries(reasons).map(([k, v]) => `${v} ${k}`).join(', ')})` : ''}, ${retried} needed a nudge, slowest ${slowest} ms`);
