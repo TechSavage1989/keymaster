@@ -34,6 +34,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Clear part boundaries kept at Balanced and Fine (a hand on a book, a book on a robe), the brush shown while it is sized, Ctrl+Z for drawn points, Made in inches? × 25.4 (1.72).
 - Opening 3MF and STEP, files read and repaired in the background, Fill showing the region it will paint, narrow gaps filled as the brush lets go (1.73).
 - Scale % against the original, X/Y/Z sizes linked or free, turns by any angle, Turn freely, Lay flat, Inlay cut explained, hard-surface borders, Section size (1.74).
+- CAD-style parts told from sculpted ones and never melted together, drawn lines sliced through the faces, Section size shown as Large / Medium / Small (1.75).
 - Faster parts and picks, cut while checking, the stroke's line shows (1.66).
 - Split into parts that works on real figures (1.65): tested on the owner's ten reference sculpts; planned candidates, no dips or crumbs, neighbour retries, two to four times faster.
 - A stroke that wraps a cut round a part, a colour per separate picked piece, Shift-click with box select (1.64).

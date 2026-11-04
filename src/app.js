@@ -30,7 +30,7 @@
     flat: true, // show faces: flat shading, so every face of the mesh shows (the owner wants this by default)
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, numberJoints: false, smoothCut: true },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, numberJoints: false, smoothCut: true, sliceDrawn: true },
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, by: 'form', detail: 'balanced', ratio: 1.35, size: 55, ...sectionOpts(55), hover: null }; // by: 'form' (the thickness under the surface) or 'folds' (where it turns inward)
@@ -1193,7 +1193,7 @@
       const p = selectedPart();
       if (!p) return;
       clearShellPick();
-      if (it.fold !== undefined) { state.regions.fold = it.fold; state.regions.angle = it.angle; if (it.minFrac !== undefined) state.regions.minFrac = it.minFrac; const sl = $('#regionsAngle'); if (sl) { sl.value = Math.round((60 - it.fold) / 0.55); $('#regionsAngleOut').textContent = sl.value; } }
+      if (it.fold !== undefined) { state.regions.fold = it.fold; state.regions.angle = it.angle; if (it.minFrac !== undefined) state.regions.minFrac = it.minFrac; const sl = $('#regionsAngle'); if (sl) { sl.value = Math.round((60 - it.fold) / 0.55); $('#regionsAngleOut').textContent = sl.value < 30 ? 'Large' : sl.value < 70 ? 'Medium' : 'Small'; } }
       if (!state.regions.on) { setRegions(true); } else if (state.paint.on) setPainting(false);
       if (state.draw.on) setDrawing(false);
       state.regions.last = { partId: p.id, clicks: [it.point] };
@@ -4195,7 +4195,7 @@
   }
   function pickReq(loops, info) {
     const seg = info.seg ? { groupOf: info.seg.groupOf, count: info.seg.count, borders: info.seg.borders, areas: info.seg.areas } : null;
-    return { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint, smooth: state.cfg.smoothCut !== false };
+    return { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint, smooth: state.cfg.smoothCut !== false, sliceDrawn: state.cfg.sliceDrawn !== false };
   }
   function pickLoops(p, loops, info) {
     if (state.selectedId !== p.id) selectPart(p.id); // the pick's part is the chosen one, so its panel and its cut button show
@@ -4651,7 +4651,12 @@
   // The regions are turned on and off by the Regions tool alone now (the owner found a second button in the view
   // tools confusing); the toggle is kept for the tests and the debug hooks.
   function toggleRegions() { if (!state.regions.on) startRegions(); else setRegions(false); }
-  $('#regionsAngle').addEventListener('input', (e) => { $('#regionsAngleOut').textContent = `${e.target.value}`; });
+  const sizeWord = (v) => (+v < 30 ? 'Large' : +v < 70 ? 'Medium' : 'Small');
+  $('#regionsAngle').addEventListener('input', (e) => { $('#regionsAngleOut').textContent = sizeWord(e.target.value); });
+  $('#sliceDrawn').addEventListener('change', (e) => {
+    state.cfg.sliceDrawn = !!e.target.checked;
+    const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
+  });
   $('#smoothCut').addEventListener('change', (e) => {
     state.cfg.smoothCut = !!e.target.checked;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);

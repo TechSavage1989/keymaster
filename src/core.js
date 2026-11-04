@@ -2098,7 +2098,7 @@ const KMCore = (() => {
   // hard or organic patch under 0.2% of the surface takes the other label. On Father Rhinehardt it finds the books,
   // their clasps, the crucifix and the cuff bands, and leaves the robe and the hands organic. Returns a Uint8Array,
   // 1 for hard.
-  function hardSurface(P, I, N, A, pairs, total) {
+  function hardSurface(P, I, N, A, pairs, total, minPatch = 0.005) {
     const nt = I.length / 3, np = pairs.length / 4;
     const lo = Math.cos(0.5 * Math.PI / 180), hi = Math.cos(30 * Math.PI / 180);
     // flat patches: neighbours within half a degree; each patch scored by how much of its outline is a sharp edge
@@ -2126,6 +2126,18 @@ const KMCore = (() => {
     const fill = deg.slice(0, nt), nb = new Int32Array(deg[nt]);
     for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; nb[fill[a]++] = b; nb[fill[b]++] = a; }
     let h = new Float64Array(nt); for (let t = 0; t < nt; t++) h[t] = cnt[t] ? 1 - soft[t] / cnt[t] : 0;
+    // (1.75) CAD-style triangles: a modelled object exported from CAD or a hard-surface tool is long thin triangles
+    // fanned across flat panels (a corner under 12° and lying flat with a neighbour), where a sculpt's triangles are
+    // even; on Father Rhinehardt this alone outlines the books, the base's rim and the crucifix, and the fan of thin
+    // triangles a boolean leaves on the robe round the book is not flat with its neighbours, so it stays organic
+    { const flatNb = new Uint8Array(nt), thinT = new Uint8Array(nt), lim = Math.cos(12 * Math.PI / 180);
+      for (let i = 0; i < np; i++) if (dots[i] >= lo) { flatNb[pairs[4 * i]] = 1; flatNb[pairs[4 * i + 1]] = 1; }
+      for (let t = 0; t < nt; t++) {
+        const v = [3 * I[3 * t], 3 * I[3 * t + 1], 3 * I[3 * t + 2]];
+        for (let k = 0; k < 3; k++) { const o = v[k], a = v[(k + 1) % 3], b = v[(k + 2) % 3]; const ux = P[a] - P[o], uy = P[a + 1] - P[o + 1], uz = P[a + 2] - P[o + 2], wx = P[b] - P[o], wy = P[b + 1] - P[o + 1], wz = P[b + 2] - P[o + 2]; const L = Math.hypot(ux, uy, uz) * Math.hypot(wx, wy, wz); if (L && (ux * wx + uy * wy + uz * wz) / L > lim) { thinT[t] = 1; break; } }
+        if (thinT[t] && flatNb[t]) h[t] = 1;
+      }
+    }
     for (let it = 0; it < 3; it++) { const g = new Float64Array(nt); for (let t = 0; t < nt; t++) { let sm = h[t], n = 1; for (let j = deg[t]; j < deg[t + 1]; j++) { sm += h[nb[j]]; n++; } g[t] = sm / n; } h = g; }
     const out = new Uint8Array(nt); for (let t = 0; t < nt; t++) out[t] = h[t] > 0.6 ? 1 : 0;
     { // a hard patch must have sharp edges in it (its length of edges turning over 30°, at least the side of a square
@@ -2143,7 +2155,7 @@ const KMCore = (() => {
       const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
       for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (out[a] === out[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
       const area = new Map(); for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
-      let flipped = 0; for (let t = 0; t < nt; t++) if (area.get(find(t)) < 0.002 * total) { out[t] = 1 - out[t]; flipped++; }
+      let flipped = 0; for (let t = 0; t < nt; t++) if (area.get(find(t)) < minPatch * total) { out[t] = 1 - out[t]; flipped++; }
       if (!flipped) break;
     }
     return out;
@@ -2184,6 +2196,8 @@ const KMCore = (() => {
     // melt specks into the neighbour they share the most border with, smallest first, until none are left
     const minA = total * minFrac;
     const sharpTurn = 40 * Math.PI / 180;
+    const hardOfRegion = (r) => { if (!hard) return 0; if (hardArea === null) return 0; return (hardArea.get(find(r)) || 0) * 2 > (areaAll.get(find(r)) || 1) ? 1 : 0; };
+    let hardArea = null, areaAll = null;
     let keepWidth = 0; // a creased region kept must be at least this wide on average (its area over its outline): a median edge, and 0.4% of the model's size
     if (keepCreased) { const L = []; for (let t = 0; t < nt; t += Math.max(1, Math.floor(nt / 3000))) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1]; L.push(Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2])); } L.sort((x, y) => x - y); keepWidth = Math.max(L[L.length >> 1] || 0, 0.004 * diag(bounds(P))); }
     for (let pass = 0; pass < 12; pass++) {
@@ -2201,6 +2215,7 @@ const KMCore = (() => {
       }
       const small = [...area.entries()].filter(([, a]) => a < minA).sort((a, b) => a[1] - b[1]);
       if (!small.length) break;
+      if (hard) { hardArea = new Map(); areaAll = area; for (let t = 0; t < nt; t++) if (hard[t]) { const r = find(t); hardArea.set(r, (hardArea.get(r) || 0) + A[t]); } }
       let merged = 0;
       for (const [g, ga] of small) {
         const r = find(g);
@@ -2208,7 +2223,8 @@ const KMCore = (() => {
         const m = border.get(g);
         if (!m) continue;
         let best = -1, bl = -1;
-        for (const [h, len] of m) { const hr = find(h); if (hr !== g && len > bl) { bl = len; best = hr; } }
+        const gh = hardOfRegion(g);
+        for (const [h, len] of m) { const hr = find(h); if (hr === g) continue; if (hard && ga >= 0.1 * minA && hardOfRegion(hr) !== gh) continue; /* (1.75) never across hard to organic */ if (len > bl) { bl = len; best = hr; } }
         // a region creased all round (the face of a book under a hand) is a part, however small: only a speck
         // under a tenth of the smallest size, or one that meets a neighbour smoothly along a fifth of its border, melts
         if (keepCreased && ga >= 0.1 * minA && bl < 0.2 * (tot.get(g) || 1) && ga >= keepWidth * (tot.get(g) || Infinity) && (turn.get(g) || 0) >= sharpTurn * (tot.get(g) || Infinity)) continue; // (and creased sharply, 40° on average round it, as a part's edge is: the arcs of a wavy ledge, folded gently against each other, still melt) // (and chunky: a thin band between two creases, as a lathe leaves where a bar meets a ball, still melts)
@@ -2526,7 +2542,7 @@ const KMCore = (() => {
           if (find(g) !== g) continue;
           const bs = by.get(g); if (!bs) continue;
           let best = null, bv = -Infinity;
-          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; const sb = pickWeakest ? strength(b, st) : 0; if (pickWeakest && sb >= keepStrong && st.area.get(g) >= 0.25 * keepArea) continue; /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
+          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; const sb = pickWeakest ? strength(b, st) : 0; if (pickWeakest && sb >= keepStrong && st.area.get(g) >= 0.25 * keepArea) continue; if (b.len > 0 && b.hard / b.len >= 0.5 && st.area.get(g) >= 0.0001 * total) continue; /* (1.75) never across hard to organic */ /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
           // (1.72) a small part clearly bounded all round (its weakest border still a crease or a step well past
           // `strong`: a hand lying on a book, a clasp) stays a part: the owner's picks "grabbed too much" when such
           // parts melted into what they touch. Only a speck under a tenth of the limit goes regardless.
@@ -3238,7 +3254,7 @@ const KMCore = (() => {
     for (const v of verts) { if (seen.has(v)) { const at = seen.get(v); for (let k = at; k < ring.length; k++) seen.delete(ring[k]); ring.length = at; } seen.set(v, ring.length); ring.push(v); }
     if (ring.length < 3) return null;
     let length = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; length += Math.hypot(P[3 * p] - P[3 * q], P[3 * p + 1] - P[3 * q + 1], P[3 * p + 2] - P[3 * q + 2]); }
-    return { verts: ring, closed: true, length, drawn: true };
+    return { verts: ring, closed: true, length, drawn: true, anchors: Array.from(vs), points: points.map(p => [p[0], p[1], p[2]]) }; // (the points clicked, which a slice follows)
   }
   // The connected pieces of a pick: triangles that are in (sel[t], or their region in `picked`), joined across shared
   // edges. Returns a label per triangle (-1 when not picked) and the count, so separate pieces of a pick can show in
@@ -4499,6 +4515,95 @@ const KMCore = (() => {
     if (!l2.length || l2.some(l => !l.closed)) return null;
     return { seg: s2, groups: [1], loops: l2 };
   }
+  // The surface sliced along the zero level of a field over its vertices (`f`, never exactly 0): each crossed edge
+  // gets one new vertex, 12% to 88% along it and computed from its lower-numbered end, so the two triangles beside it
+  // share it and the surface stays sealed with the same volume; each crossed triangle becomes three. Returns the new
+  // positions and indices and, per triangle, 1 where f > 0.
+  function sliceByField(P, I, f) {
+    const nt = I.length / 3, nv = P.length / 3;
+    const Pn = []; for (let i = 0; i < P.length; i++) Pn.push(P[i]);
+    const mid = new Map(), In = [], gOf = [];
+    const cross = (a, b) => {
+      const key = a < b ? a * nv + b : b * nv + a; let m = mid.get(key);
+      if (m !== undefined) return m;
+      const lo = a < b ? a : b, hi = a < b ? b : a; // from the lower end, so both triangles get the same point
+      let s = f[lo] / (f[lo] - f[hi]); s = Math.max(0.12, Math.min(0.88, s));
+      m = Pn.length / 3; Pn.push(P[3 * lo] + s * (P[3 * hi] - P[3 * lo]), P[3 * lo + 1] + s * (P[3 * hi + 1] - P[3 * lo + 1]), P[3 * lo + 2] + s * (P[3 * hi + 2] - P[3 * lo + 2]));
+      mid.set(key, m); return m;
+    };
+    const d2 = (x, y) => (Pn[3 * x] - Pn[3 * y]) ** 2 + (Pn[3 * x + 1] - Pn[3 * y + 1]) ** 2 + (Pn[3 * x + 2] - Pn[3 * y + 2]) ** 2;
+    for (let t = 0; t < nt; t++) {
+      let a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
+      const sa = f[a] > 0, sb = f[b] > 0, sc = f[c] > 0;
+      if (sa === sb && sb === sc) { In.push(a, b, c); gOf.push(sa ? 1 : 0); continue; }
+      // turn the triangle so a is the lone vertex
+      if (sb !== sa && sb !== sc) [a, b, c] = [b, c, a]; else if (sc !== sa && sc !== sb) [a, b, c] = [c, a, b];
+      const x = cross(a, b), y = cross(a, c), ga = f[a] > 0 ? 1 : 0;
+      In.push(a, x, y); gOf.push(ga);
+      if (d2(x, c) <= d2(b, y)) { In.push(x, b, c, x, c, y); } else { In.push(x, b, y, y, b, c); }
+      gOf.push(1 - ga, 1 - ga);
+    }
+    const P2 = new (P.constructor === Float64Array ? Float64Array : Float32Array)(Pn), I2 = new Uint32Array(In), G = Int32Array.from(gOf);
+    return { P2, I2, G, added: mid.size };
+  }
+  // A drawn line sliced through the triangles (the owner: "any drawn cuts must actually slice new vertexes into the
+  // model"): a line drawn by hand, or a stroke, runs along the mesh's own edges, so on a coarse mesh it steps from
+  // vertex to vertex. Here the line's points are eased into a smooth curve (three passes of neighbour averaging),
+  // and every vertex within a few rings of it takes its distance to the curve, signed by the side of the curve it
+  // lies on (across the curve's tangent and the surface normal, turned to agree with the side the line bounds);
+  // farther vertices take the side the line bounds, at a fixed distance. The surface is then sliced where that
+  // field is zero (`sliceByField`), so the cut runs along the curve through the faces. Returns
+  // { P, I, seg, groups: [1], loops } on the new mesh, or null when the slice doesn't close or moves the area much.
+  function sliceDrawnLoops(P, I, loops) {
+    const nt = I.length / 3, nv = P.length / 3;
+    let sel; try { sel = loopSelection(P, I, loops); } catch (err) { return null; }
+    let n1 = 0; for (const x of sel) n1 += x; if (!n1 || n1 === nt) return null;
+    const cnt = new Int32Array(nv), cin = new Int32Array(nv), vn = new Float64Array(3 * nv);
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]);
+      for (let k = 0; k < 3; k++) { const v = I[3 * t + k]; cnt[v]++; if (sel[t]) cin[v]++; vn[3 * v] += n[0]; vn[3 * v + 1] += n[1]; vn[3 * v + 2] += n[2]; }
+    }
+    const L = []; for (let t = 0; t < nt; t += Math.max(1, Math.floor(nt / 3000))) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1]; L.push(Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2])); }
+    L.sort((x, y) => x - y); const med = L[L.length >> 1] || 1;
+    const adj = vertexAdjacency(P, I), band = 4 * med, f = new Float64Array(nv);
+    for (let v = 0; v < nv; v++) f[v] = cin[v] * 2 >= cnt[v] ? band : -band;
+    for (const loop of loops) {
+      const vs = loop.verts, m = vs.length; if (m < 3) continue;
+      let pts = vs.map(v => [P[3 * v], P[3 * v + 1], P[3 * v + 2]]);
+      // the points clicked hold the curve where they were put (a drawn line keeps them); the rest is smoothed
+      const fixed = new Uint8Array(m);
+      if (loop.anchors && loop.points) { const at = new Map(); vs.forEach((v, i) => { if (!at.has(v)) at.set(v, i); }); loop.anchors.forEach((v, k) => { const i = at.get(v); if (i !== undefined) { fixed[i] = 1; pts[i] = loop.points[k].slice(); } }); }
+      const passes = fixed.some(x => x) ? 12 : 3;
+      for (let it = 0; it < passes; it++) pts = pts.map((p, i) => { if (fixed[i]) return p; const a = pts[(i + m - 1) % m], b = pts[(i + 1) % m]; return [0.25 * a[0] + 0.5 * p[0] + 0.25 * b[0], 0.25 * a[1] + 0.5 * p[1] + 0.25 * b[1], 0.25 * a[2] + 0.5 * p[2] + 0.25 * b[2]]; });
+      // the vertices near the line: a few rings out from it
+      const near = new Map(); let ring = vs.slice(); for (const v of ring) near.set(v, 0);
+      for (let r = 1; r <= 4; r++) { const nx = []; for (const v of ring) for (let j = adj.start[v]; j < adj.start[v + 1]; j++) { const w = adj.to[j]; if (!near.has(w)) { near.set(w, r); nx.push(w); } } ring = nx; }
+      const sideOf = new Map(); let agree = 0, disagree = 0;
+      for (const [v] of near) {
+        const x = P[3 * v], y = P[3 * v + 1], z = P[3 * v + 2];
+        let bd = Infinity, bi = 0, bt = 0;
+        for (let i = 0; i < m; i++) { const a = pts[i], b = pts[(i + 1) % m], dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], l2 = dx * dx + dy * dy + dz * dz || 1; let tt = ((x - a[0]) * dx + (y - a[1]) * dy + (z - a[2]) * dz) / l2; tt = Math.max(0, Math.min(1, tt)); const qx = a[0] + tt * dx - x, qy = a[1] + tt * dy - y, qz = a[2] + tt * dz - z, d = qx * qx + qy * qy + qz * qz; if (d < bd) { bd = d; bi = i; bt = tt; } }
+        const a = pts[bi], b = pts[(bi + 1) % m], tg = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], c = [a[0] + bt * tg[0], a[1] + bt * tg[1], a[2] + bt * tg[2]];
+        // the signed distance across the curve, square to it along the surface (linear through the curve, so the slice
+        // lands where the curve runs even where the curve cuts a chord inside the surface)
+        const nn = [vn[3 * v], vn[3 * v + 1], vn[3 * v + 2]], sd = cross3(tg, nn), sl = Math.hypot(sd[0], sd[1], sd[2]) || 1, lat = (sd[0] * (x - c[0]) + sd[1] * (y - c[1]) + sd[2] * (z - c[2])) / sl;
+        const side = lat >= 0 ? 1 : -1, d = Math.abs(lat);
+        sideOf.set(v, [side, d]);
+        if (d > 0.5 * med && cnt[v] && (cin[v] === 0 || cin[v] === cnt[v])) { if ((side > 0) === (cin[v] > 0)) agree++; else disagree++; }
+      }
+      const flip = disagree > agree ? -1 : 1;
+      for (const [v, [side, d]] of sideOf) f[v] = flip * side * Math.min(band, Math.max(d, 1e-7 * med));
+    }
+    const { P2, I2, G, added } = sliceByField(P, I, f);
+    let g1 = 0; for (const x of G) g1 += x; if (!g1 || g1 === G.length) return null;
+    const s2 = bordersFromGroups(P2, I2, G), l2 = groupLoops(P2, I2, s2, [1]);
+    if (!l2.length || l2.some(l => !l.closed) || l2.length !== loops.length) return null;
+    const triArea = (Q, J, t) => { const a = 3 * J[3 * t], b = 3 * J[3 * t + 1], c = 3 * J[3 * t + 2]; const n = cross3([Q[b] - Q[a], Q[b + 1] - Q[a + 1], Q[b + 2] - Q[a + 2]], [Q[c] - Q[a], Q[c + 1] - Q[a + 1], Q[c + 2] - Q[a + 2]]); return Math.hypot(n[0], n[1], n[2]) / 2; };
+    let a0 = 0, a1 = 0; for (let t = 0; t < nt; t++) if (sel[t]) a0 += triArea(P, I, t); for (let t = 0; t < G.length; t++) if (G[t]) a1 += triArea(P2, I2, t);
+    if (a1 < 0.75 * a0 || a1 > 1.33 * a0) return null;
+    return { P: P2, I: I2, seg: s2, groups: [1], loops: l2.map(l => ({ ...l, drawn: true })), added };
+  }
   // A region pick sliced along a smooth curve through the triangles (the owner: "the application should be able to
   // slice topology and not just cut along existing topology vertexes"). Any line made of the mesh's own edges steps
   // from vertex to vertex, so on a coarse or uneven mesh the cut's rim and its sunk wall came out in teeth and points
@@ -4574,30 +4679,7 @@ const KMCore = (() => {
     for (let v = 0; v < nv; v++) { const r = find(v); size.set(r, (size.get(r) || 0) + 1); if (f[v] > 0) pos++; }
     const small = Math.max(6, 0.02 * Math.min(pos, nv - pos));
     for (let v = 0; v < nv; v++) if (shellMixed[vShell[v]] && size.get(find(v)) < small) f[v] = -f[v];
-    // the slice: one new vertex per crossed edge
-    const Pn = []; for (let i = 0; i < P.length; i++) Pn.push(P[i]);
-    const mid = new Map(), In = [], gOf = [];
-    const cross = (a, b) => {
-      const key = a < b ? a * nv + b : b * nv + a; let m = mid.get(key);
-      if (m !== undefined) return m;
-      const lo = a < b ? a : b, hi = a < b ? b : a; // from the lower end, so both triangles get the same point
-      let s = f[lo] / (f[lo] - f[hi]); s = Math.max(0.12, Math.min(0.88, s));
-      m = Pn.length / 3; Pn.push(P[3 * lo] + s * (P[3 * hi] - P[3 * lo]), P[3 * lo + 1] + s * (P[3 * hi + 1] - P[3 * lo + 1]), P[3 * lo + 2] + s * (P[3 * hi + 2] - P[3 * lo + 2]));
-      mid.set(key, m); return m;
-    };
-    const d2 = (x, y) => (Pn[3 * x] - Pn[3 * y]) ** 2 + (Pn[3 * x + 1] - Pn[3 * y + 1]) ** 2 + (Pn[3 * x + 2] - Pn[3 * y + 2]) ** 2;
-    for (let t = 0; t < nt; t++) {
-      let a = I[3 * t], b = I[3 * t + 1], c = I[3 * t + 2];
-      const sa = f[a] > 0, sb = f[b] > 0, sc = f[c] > 0;
-      if (sa === sb && sb === sc) { In.push(a, b, c); gOf.push(sa ? 1 : 0); continue; }
-      // turn the triangle so a is the lone vertex
-      if (sb !== sa && sb !== sc) [a, b, c] = [b, c, a]; else if (sc !== sa && sc !== sb) [a, b, c] = [c, a, b];
-      const x = cross(a, b), y = cross(a, c), ga = f[a] > 0 ? 1 : 0;
-      In.push(a, x, y); gOf.push(ga);
-      if (d2(x, c) <= d2(b, y)) { In.push(x, b, c, x, c, y); } else { In.push(x, b, y, y, b, c); }
-      gOf.push(1 - ga, 1 - ga);
-    }
-    const P2 = new (P.constructor === Float64Array ? Float64Array : Float32Array)(Pn), I2 = new Uint32Array(In), G = Int32Array.from(gOf);
+    const { P2, I2, G, added } = sliceByField(P, I, f);
     let n1 = 0; for (const x of G) n1 += x;
     if (!n1 || n1 === G.length) return null;
     const s2 = bordersFromGroups(P2, I2, G), l2 = groupLoops(P2, I2, s2, [1]);
@@ -4607,12 +4689,17 @@ const KMCore = (() => {
     let a0 = 0, a1 = 0; for (let t = 0; t < nt; t++) if (inT[t]) a0 += triArea(P, I, t);
     for (let t = 0; t < G.length; t++) if (G[t]) a1 += triArea(P2, I2, t);
     if (a1 < 0.75 * a0 || a1 > 1.33 * a0) return null;
-    return { P: P2, I: I2, seg: s2, groups: [1], loops: l2, scale, added: mid.size };
+    return { P: P2, I: I2, seg: s2, groups: [1], loops: l2, scale, added };
   }
   // The mesh a pick works on: with `req.smooth`, the picked lines eased along the surface (`smoothLoopVertices`)
   // on a copy, with its own index array so no cache kept for the original's positions is read for it
   function pickMesh(P, I, req) {
-    if (!req.smooth || !req.loops || !req.loops.length || req.sliced) return { P, I, req }; // (a pick already sliced is not sliced again)
+    if (!req.loops || !req.loops.length || req.sliced) return { P, I, req }; // (a pick already sliced is not sliced again)
+    if (!req.regions && req.sliceDrawn && !req.noSlice && req.loops.every(l => l.closed && l.drawn)) { // (1.75) drawn lines and strokes sliced through the faces
+      let sl = null; try { sl = sliceDrawnLoops(P, I, req.loops); } catch (err) { sl = null; }
+      if (sl) return { P: sl.P, I: sl.I, req: { ...req, seg: sl.seg, regions: sl.groups, loops: sl.loops, sliced: true } };
+    }
+    if (!req.smooth) return { P, I, req };
     if (req.regions && req.seg && !req.noReroute && !req.noSlice) { // a region pick sliced along a smooth curve through the triangles
       let sl = null; try { sl = sliceRegionPick(P, I, req.seg, req.regions, typeof req.smooth === 'object' ? req.smooth : {}); } catch (err) { sl = null; }
       if (sl) return { P: sl.P, I: sl.I, req: { ...req, seg: sl.seg, regions: sl.groups, loops: sl.loops, sliced: true } };
@@ -6695,7 +6782,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, cutPrintCheck, unpinchGroups,
+    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
