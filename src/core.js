@@ -1998,6 +1998,28 @@ const KMCore = (() => {
     return uniq.slice(0, limit);
   }
   // Solids that don't touch each other. Shells sitting inside another (eyes, inner parts) stay with it.
+  // Every piece of surface that doesn't share a vertex with another, as a label per triangle, without merging a piece
+  // into one whose bounds hold it (separateShells does that, for eyes and inner voids). A kit's head pushed into its
+  // body is such a piece: the owner's backpack figure refused it as "covers the whole part".
+  function shellComponents(P, I) {
+    const nv = P.length / 3, nt = I.length / 3, par = new Int32Array(nv);
+    for (let i = 0; i < nv; i++) par[i] = i;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let t = 0; t < nt; t++) { const a = find(I[3 * t]), b = find(I[3 * t + 1]), c = find(I[3 * t + 2]); par[a] = b; par[find(c)] = b; }
+    const label = new Int32Array(nt), ids = new Map();
+    for (let t = 0; t < nt; t++) { const r = find(I[3 * t]); if (!ids.has(r)) ids.set(r, ids.size); label[t] = ids.get(r); }
+    return { label, count: ids.size };
+  }
+  // The triangles marked in `mask` as a mesh of their own, vertices renumbered
+  function extractTriangles(P, I, mask) {
+    const map = new Int32Array(P.length / 3).fill(-1), pos = [], idx = [];
+    for (let t = 0; t < I.length / 3; t++) {
+      if (!mask[t]) continue;
+      for (let k = 0; k < 3; k++) { const v = I[3 * t + k]; if (map[v] < 0) { map[v] = pos.length / 3; pos.push(P[3 * v], P[3 * v + 1], P[3 * v + 2]); } idx.push(map[v]); }
+    }
+    const positions = P instanceof Float64Array ? new Float64Array(pos) : new Float32Array(pos), indices = new Uint32Array(idx);
+    return { positions, indices, volume: volume(positions, indices) };
+  }
   function separateShells(P, I) {
     const nv = P.length / 3, nt = I.length / 3, par = new Int32Array(nv);
     for (let i = 0; i < nv; i++) par[i] = i;
@@ -3675,6 +3697,41 @@ const KMCore = (() => {
   function tidySelection(P, I, sel, r) {
     const opened = growSelection(P, I, shrinkSelection(P, I, sel, r), r);
     return shrinkSelection(P, I, growSelection(P, I, opened, r), r);
+  }
+  // Fill the gaps in a selection (the owner's "auto fill gaps between selected parts to complete the selection"):
+  // first a closing (grown by `gap`, then shrunk by it, so channels and notches narrower than 2·gap between picked
+  // pieces fill while the outline elsewhere stays put), then every unpicked patch the selection surrounds (a
+  // component of the rest of the surface that isn't the biggest one, and is smaller than the selection) is filled
+  // too: crevices, eye sockets, the gaps between straps. Returns the new selection and what it added.
+  function fillSelectionGaps(P, I, sel, opts = {}) {
+    const nt = I.length / 3, gap = Math.max(0, opts.gap || 0);
+    const before = sel.reduce((a, v) => a + (v ? 1 : 0), 0);
+    let out = gap > 0 ? shrinkSelection(P, I, growSelection(P, I, sel, gap), gap) : Uint8Array.from(sel);
+    for (let t = 0; t < nt; t++) if (sel[t]) out[t] = 1; // a closing never drops what was picked
+    // the unpicked patches, by connection across shared edges
+    const area = new Float64Array(nt);
+    for (let t = 0; t < nt; t++) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]); area[t] = Math.hypot(n[0], n[1], n[2]) / 2; }
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    const pairs = trianglePairs(I);
+    for (let i = 0; i < pairs.length; i += 4) { const s = pairs[i], q = pairs[i + 1]; if (!out[s] && !out[q]) { const x = find(s), y = find(q); if (x !== y) par[x] = y; } }
+    const comp = new Map(), touches = new Set(); let selArea = 0;
+    for (let t = 0; t < nt; t++) { if (out[t]) { selArea += area[t]; continue; } const r = find(t); comp.set(r, (comp.get(r) || 0) + area[t]); }
+    for (let i = 0; i < pairs.length; i += 4) { const s = pairs[i], q = pairs[i + 1]; if (out[s] !== out[q]) touches.add(find(out[s] ? q : s)); }
+    // the outside is the biggest patch that borders the selection; patches that don't border it at all (another
+    // loose piece, an inner shell) are left alone
+    let biggest = -1, ba = -1; for (const r of touches) { const a = comp.get(r); if (a > ba) { ba = a; biggest = r; } }
+    let holes = 0;
+    const fill = new Set(); for (const r of touches) if (r !== biggest && comp.get(r) < selArea) { fill.add(r); holes++; }
+    if (fill.size) for (let t = 0; t < nt; t++) if (!out[t] && fill.has(find(t))) out[t] = 1;
+    // only what joins up with the picked pieces stays: the closing can leave a stray bit in a crevice nearby
+    { const q = new Int32Array(nt); let h = 0, tl = 0; const keep = new Uint8Array(nt);
+      for (let t = 0; t < nt; t++) if (sel[t]) { keep[t] = 1; q[tl++] = t; }
+      const nbr = triangleAdjacency(P, I).nb;
+      while (h < tl) { const t = q[h++]; for (let k = 0; k < 3; k++) { const u = nbr[3 * t + k]; if (u >= 0 && out[u] && !keep[u]) { keep[u] = 1; q[tl++] = u; } } }
+      for (let t = 0; t < nt; t++) if (out[t] && !keep[t]) out[t] = 0; }
+    const after = out.reduce((a, v) => a + (v ? 1 : 0), 0);
+    return { sel: out, added: after - before, holes };
   }
   // A painted selection as a two-region labelling (1 painted, 0 not), ready for splitRegions(..., [1], opts).
   function selectionSeg(P, I, sel) {
@@ -5966,7 +6023,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs,
+    segmentParts, regionBorderCurves, planPick, plainData, strokeLoop, pickComponents, splitCandidates, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;

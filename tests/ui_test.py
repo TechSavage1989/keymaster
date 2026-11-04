@@ -261,7 +261,18 @@ with sync_playwright() as p:
         return L > 1 and abs(d / L - 1) < 1e-3
     pieces = [o for o in ex if o['pull']]
     check('the pieces of a cut spread apart along the cut, in opposite directions', len(pieces) >= 2 and all(along(o) for o in pieces) and any(abs(sum(a * b for a, b in zip(pieces[0]['pull'], o['pull'])) + 1) < 1e-6 for o in pieces[1:]), ex)
+    # the exploded view holds with a part chosen, in every tool (1.67): the chosen piece stays out, the plane goes with it
+    pg.locator('#partList li[data-id] [data-act=select]').first.click(); pg.wait_for_timeout(500)
+    ex2 = pg.evaluate("KeymasterDebug.explodeOffsets()"); hold = pg.evaluate("KeymasterDebug.planeHolder()")
+    chosen_at = next((o['at'] for o, li in zip(ex2, range(len(ex2))) if li == 0), None)
+    check('choosing a piece keeps the exploded view, and the cut plane moves with the chosen piece', any(sum(a * a for a in o['at']) ** 0.5 > 1 for o in ex2 if o['pull']) and sum(a * a for a in hold) ** 0.5 > 1, (ex2, hold))
+    for tool in ('regions', 'plane'):
+        pg.click(f'[data-tool={tool}]'); pg.wait_for_function('!KeymasterDebug.regionsLoading()', timeout=60000); pg.wait_for_timeout(300)
+    ex3 = pg.evaluate("KeymasterDebug.explodeOffsets()")
+    check('switching tools leaves the pieces where the exploded view put them', [o['at'] for o in ex3] == [o['at'] for o in ex2], (ex2, ex3))
+    pg.evaluate('KeymasterDebug.selectClick(null)'); pg.wait_for_timeout(200)
     pg.evaluate("(() => { const e = document.querySelector('#explode'); e.value = '0'; e.dispatchEvent(new Event('input', { bubbles: true })); })()"); pg.wait_for_timeout(200)
+    check('the exploded view back at 0 puts the plane back on the model', sum(a * a for a in pg.evaluate("KeymasterDebug.planeHolder()")) < 1e-9)
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(600)
 
@@ -764,7 +775,7 @@ with sync_playwright() as p:
     check('the suggestions stay in view while the region is picked', pg.get_attribute('[data-tool=suggest]', 'aria-pressed') == 'true' and pg.is_visible('#suggestPanel'))
     check('the pins stay on the model while regions show', not pg.evaluate("document.querySelector('#suggestPins').hidden"))
     rc = pg.evaluate("KeymasterDebug.regionColours()")
-    check('regions are outlined, not coloured: the part keeps its colour (plus the picked tint) with its border lines', rc['colours'] <= 2 and rc['borders'] and rc['vertexColors'], rc)
+    check('regions show no outlines: the part keeps its colour, plus the picked tint', rc['colours'] <= 2 and not rc['borders'] and rc['vertexColors'], rc)
     check('the regions panel finds parts by default, with a plain Detail choice, and offers folds', pg.get_attribute('[data-act=regions-by][data-value=form]', 'aria-pressed') == 'true' and pg.is_visible('#regionsDetail') and pg.get_attribute('[data-act=regions-detail][data-value=balanced]', 'aria-pressed') == 'true' and not pg.is_visible('#regionsAngle'))
     pg.click('[data-act=regions-detail][data-value=coarse]'); pg.wait_for_function('!KeymasterDebug.regionsLoading()', timeout=60000); pg.wait_for_timeout(300)
     n_coarse = int(pg.inner_text('#regionsCount').split()[0])
@@ -834,9 +845,7 @@ with sync_playwright() as p:
     check('the plane, its arrow and its bar step aside the moment the regions start loading', not mid['plane'] and not mid['gizmo'] and mid['bar'], mid)
     pg.wait_for_function('!KeymasterDebug.regionsLoading()', timeout=60000)
     if not pg.evaluate('KeymasterDebug.regionsOn()'): toggle_regions(pg)
-    bs = pg.evaluate('KeymasterDebug.borderSegments()')
-    print('    border curves:', bs, 'worker:', pg.evaluate('KeymasterDebug.coreWorker()'))
-    check('the border lines are smooth curves, finer than the mesh edges, in a shade of the part', bool(bs) and bs['curve'] > bs['edges'] * 1.5 and bs['opacity'] <= 0.9, bs)
+    check('no outline lines are drawn over the regions', pg.evaluate('KeymasterDebug.borderSegments()') is None)
     pg.wait_for_selector('#regionsPanel:not([hidden])', timeout=15000); pg.wait_for_timeout(300)
     count = pg.inner_text('#regionsCount')
     print('    surface regions:', count)
@@ -1182,6 +1191,12 @@ with sync_playwright() as p:
     info = pg.inner_text('#cutLineInfo')
     print('    sleeve hem:', res, info.replace('\n', ' ')[:160])
     check('the hem line comes with pegs sized to fit', bool(res) and res['ok'] and 'sized to fit' in info and ' peg' in info, info)
+    # Fill gaps (1.67): the pick completed as one area, picked again as a painted area with the checks
+    fg = pg.evaluate("KeymasterDebug.fillGaps(2)")
+    print('    fill gaps:', fg)
+    check('Fill gaps is offered under the pick, and on a clean line with nothing to fill it says so and keeps the pick', pg.locator('[data-act=fill-gaps]').count() == 1 and fg['added'] == 0 and fg['ok'] and 'No gaps' in pg.inner_text('#toast'), (fg, pg.inner_text('#toast')))
+    check('keys and plugs are drawn in a strong blue, not white', pg.evaluate('KeymasterDebug.keyMarkColour()') == 0x2563eb)
+    res = pg.evaluate("KeymasterDebug.pickCutLineAt(0, [8, 0, 40])"); pg.wait_for_timeout(200)
     # pressing the cut while the check runs (1.66): the button stays live, and the cut follows once it passes
     n_parts = pg.locator('#partList li[data-id]').count()
     q = pg.evaluate("(async () => { const pr = KeymasterDebug.pickCutLineAt(0, [8, 0, 40]); const r = KeymasterDebug.pressCut(); await pr; await new Promise(res => setTimeout(res, 300)); return r; })()")

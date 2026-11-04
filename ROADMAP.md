@@ -26,6 +26,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Seam editing (1.34): any picked line becomes handles you drag along the surface, with Smooth and snap to region borders, and the pick follows.
 - Pictures on the assembly sheet (1.48): each part beside its row, and the pieces spread apart along their cuts at the top.
 - The look (1.59): filmic tone mapping, a soft shadow under the model, framing that takes in the exploded pieces.
+- Fill gaps, pieces pushed into another separated whole, the exploded view in every tool, no outlines, a clear hover and key colour (1.67).
 - Faster parts and picks, cut while checking, the stroke's line shows (1.66).
 - Split into parts that works on real figures (1.65): tested on the owner's ten reference sculpts; planned candidates, no dips or crumbs, neighbour retries, two to four times faster.
 - A stroke that wraps a cut round a part, a colour per separate picked piece, Shift-click with box select (1.64).

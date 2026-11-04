@@ -581,6 +581,25 @@ console.log('cut suggestions');
   const sh = K.separateShells(...(() => { const m = K.prepareMesh(K.mergeMeshes([uvSphere(10, 24, 16), uvSphere(10, 24, 16, [40, 0, 0]), uvSphere(3, 12, 8, [40, 0, 0])])); return [m.positions, m.indices]; })());
   check('separate pieces found, an inner ball stays with its host', sh.length === 2 && sh.every(s => K.edgeReport(s.indices).closed), sh.map(s => s.volume));
   check('a single solid has no separate pieces', K.separateShells(uvSphere(10, 24, 16).positions, uvSphere(10, 24, 16).indices).length === 0);
+  { // every piece on its own (1.67): a ball inside another is a piece of its own here, kept sealed when lifted out
+    const mm = K.prepareMesh(K.mergeMeshes([uvSphere(10, 24, 16), uvSphere(10, 24, 16, [40, 0, 0]), uvSphere(3, 12, 8, [40, 0, 0])]));
+    const c = K.shellComponents(mm.positions, mm.indices);
+    const parts = []; for (let k = 0; k < c.count; k++) { const mask = new Uint8Array(c.label.length); for (let q = 0; q < mask.length; q++) mask[q] = c.label[q] === k ? 1 : 0; parts.push(K.extractTriangles(mm.positions, mm.indices, mask)); }
+    const vol = parts.reduce((a, q) => a + q.volume, 0);
+    check('every piece is found, a ball pushed inside another included, and each lifts out sealed with the volumes adding up', c.count === 3 && parts.every(q => K.edgeReport(q.indices).closed) && Math.abs(vol - K.volume(mm.positions, mm.indices)) < 1e-6 * Math.abs(vol), { count: c.count });
+    // fill gaps: the top of the first ball picked with a patch left out near its pole; the second ball untouched
+    const P = mm.positions, I = mm.indices, nt = I.length / 3, cen = (q) => [0, 1, 2].map(k => (P[3 * I[3 * q] + k] + P[3 * I[3 * q + 1] + k] + P[3 * I[3 * q + 2] + k]) / 3);
+    const sel = new Uint8Array(nt), patch = [];
+    for (let q = 0; q < nt; q++) { const x = cen(q); if (Math.hypot(x[0], x[1], x[2]) < 11 && x[2] > -2) { if (Math.hypot(x[0], x[1]) < 3 && x[2] > 8) patch.push(q); else sel[q] = 1; } }
+    const r = K.fillSelectionGaps(P, I, sel, { gap: 0 });
+    const filledPatch = patch.every(q => r.sel[q] === 1);
+    let other = 0, below = 0; for (let q = 0; q < nt; q++) { const x = cen(q); if (r.sel[q] && x[0] > 20) other++; if (r.sel[q] && !sel[q] && x[2] < -4) below++; }
+    check('Fill gaps fills a patch the pick surrounds, leaves the rest of the ball and the other ball alone, and keeps everything picked', filledPatch && r.holes >= 1 && other === 0 && below === 0 && sel.every((v, q) => !v || r.sel[q]), { holes: r.holes, added: r.added, patch: patch.length, other, below });
+    // and a closing bridges a narrow channel: two picked caps of a ball a little apart join up
+    const two = new Uint8Array(nt); for (let q = 0; q < nt; q++) { const x = cen(q); if (Math.hypot(x[0], x[1], x[2]) < 11 && x[2] > 3 && Math.abs(x[0]) > 0.8) two[q] = 1; }
+    const sp = (s) => K.pickComponents(P, I, new Int32Array(nt), null, s).count;
+    const rb = K.fillSelectionGaps(P, I, two, { gap: 1.5 });
+    check('Fill gaps with a width bridges a channel narrower than it between two picked pieces', sp(two) > 1 && sp(rb.sel) === 1, { before: sp(two), after: sp(rb.sel) }); }
   { // each piece lists the triangles of the original it holds (the inner ball's with its host), every triangle once, in order
     const m = K.prepareMesh(K.mergeMeshes([uvSphere(10, 24, 16), uvSphere(10, 24, 16, [40, 0, 0]), uvSphere(3, 12, 8, [40, 0, 0])]));
     const sh = K.separateShells(m.positions, m.indices), nt = m.indices.length / 3, seen = new Uint8Array(nt);
