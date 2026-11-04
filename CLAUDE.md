@@ -199,6 +199,7 @@ From the owner's Aysil arm ("must be smoother and not jagged or have fine, tiny 
 - **Small bumps**: Shift-click on a region much bigger than the pick (the body, or four times the pick) adds only the patch between creases under the click (`fineRegionsFor`: `segmentSurface` at fold 12°, angle 50°, `minFrac` 0.0002, cached per index array) when it is under a tenth of that region and smaller than the pick (a pauldron's spike in the chest); a second Shift-click takes it out (`addToSelectionPick`).
 - **Holes fill themselves**: letting go of the brush fills every unpainted patch the paint closes round (`fillSelectionGaps` with `gap: 0`), and clicked regions that close round other regions take them in (`enclosedRegions`).
 - **Keys while painting**: `previewPainted` runs `planJoints` in the worker and draws the keys or plug on the painted outline; the cut still waits for Split off painted area.
+- **The Sphere brush shows as a ball**: `brushBall`, a see-through sphere of the brush's size, a child of `brushRing`, visible while painting in Sphere mode; Surface keeps the ring.
 - **Show: Both | This piece | Other piece** under every pick (`state.pickShow`, `applyPickShow`): the hidden side's triangles leave the view's index, as Isolate does.
 
 ## Box select
