@@ -1,0 +1,27 @@
+name: Prop boundary review assets
+on:
+  push:
+    branches: [chore/prop-boundary-review-assets]
+permissions:
+  contents: read
+jobs:
+  assets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact renderer version used by the app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/keymaster-review-assets
+          curl --fail --retry 3 -L https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js -o /tmp/keymaster-review-assets/three.min.js
+          curl --fail --retry 3 -L https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js -o /tmp/keymaster-review-assets/OrbitControls.js
+          curl --fail --retry 3 -L https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/TransformControls.js -o /tmp/keymaster-review-assets/TransformControls.js
+          curl --fail --retry 3 -L https://cdn.jsdelivr.net/npm/three@0.147.0/LICENSE -o /tmp/keymaster-review-assets/THREE-LICENSE.txt
+          sha256sum /tmp/keymaster-review-assets/* > /tmp/keymaster-review-assets/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinned-local-renderer
+          path: /tmp/keymaster-review-assets/
+          retention-days: 1
+          if-no-files-found: error
