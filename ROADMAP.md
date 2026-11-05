@@ -36,6 +36,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Scale % against the original, X/Y/Z sizes linked or free, turns by any angle, Turn freely, Lay flat, Inlay cut explained, hard-surface borders, Section size (1.74).
 - CAD-style parts told from sculpted ones and never melted together, drawn lines sliced through the faces, Section size shown as Large / Medium / Small (1.75).
 - Strokes sliced along their plane (the exact ring, no steps), CAD panels labelled whole, Split into parts falling back to flat cuts at narrow points, held pieces allowed out along a joint, small pieces in mm³ (1.76).
+- A made object never joins a sculpted one in Parts, judged region by region: the book face no longer melts into the coat's front strip at any Detail (1.78).
 - A pick's slice pinned to the seam: the smoothed cut line never leaves a sharp crease or a hard-to-organic edge, so a book on a robe comes off without a strip of robe (1.77).
 - Faster parts and picks, cut while checking, the stroke's line shows (1.66).
 - Split into parts that works on real figures (1.65): tested on the owner's ten reference sculpts; planned candidates, no dips or crumbs, neighbour retries, two to four times faster.

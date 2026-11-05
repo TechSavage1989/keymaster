@@ -2505,12 +2505,17 @@ const KMCore = (() => {
     // triangles once per root (each round a merge is the only change; rescanning every triangle and edge each
     // round was most of the time on a big figure).
     const cand = []; for (let e = 0; e < ne; e++) if (find(pairs[4 * e]) !== find(pairs[4 * e + 1])) cand.push(e);
-    const tArea = new Float64Array(nt), tX = new Float64Array(nt);
-    for (let t = 0; t < nt; t++) { const r = find(t); tArea[r] += A[t]; tX[r] += X[t] * A[t]; }
+    const tArea = new Float64Array(nt), tX = new Float64Array(nt), tHard = new Float64Array(nt); // (tHard: the hard surface in each root, so a region's kind is judged whole)
+    for (let t = 0; t < nt; t++) { const r = find(t); tArea[r] += A[t]; tX[r] += X[t] * A[t]; if (creases.hard && creases.hard[t]) tHard[r] += A[t]; }
     const sumsOf = (r) => { // the sums of a root, gathered from the roots merged into it so far
       return { a: tArea[r], x: tX[r] };
     };
-    const join = (from, to) => { from = find(from); to = find(to); if (from === to) return; par[from] = to; tArea[to] += tArea[from]; tX[to] += tX[from]; tArea[from] = 0; tX[from] = 0; };
+    const join = (from, to) => { from = find(from); to = find(to); if (from === to) return; par[from] = to; tArea[to] += tArea[from]; tX[to] += tX[from]; tHard[to] += tHard[from]; tArea[from] = 0; tX[from] = 0; tHard[from] = 0; };
+    // (1.78) a region's kind, judged whole: hard (a made object) when at least half its surface is, else organic. Hard
+    // never joins organic, however they meet: the edge test alone let a book face melt into the coat's front strip
+    // once that strip held a few mm² of hard surface from an earlier melt, since the edges between hard and hard read
+    // as no boundary
+    const kindOf = (r) => (creases.hard ? (tHard[r] >= 0.5 * tArea[r] ? 1 : 0) : 0), kindsDiffer = (a, b) => !!creases.hard && kindOf(find(a)) !== kindOf(find(b));
     const stats = () => {
       const area = new Map(), xsum = new Map(), border = new Map(); // border: "r,s" -> { r, s, len, concave, convex }
       for (let i = 0; i < cand.length; i++) {
@@ -2536,6 +2541,7 @@ const KMCore = (() => {
       // and a hat's brim came out as four rings
       const support = Math.min(1, 0.35 + 1.5 * concave + 1.5 * neckRaw);
       const step = Math.min(1, Math.abs(st.xsum.get(b.r) / ar - st.xsum.get(b.s) / as) / gap) * (1 - convex) * support;
+      if (kindsDiffer(b.r, b.s)) return 1; // (1.78) a made object against a sculpted one is always a part boundary
       return Math.max(concave, step, neck, b.len > 0 ? b.hard / b.len : 0); // (1.74) a border all along where a hard surface meets an organic one is a part boundary
     };
     const melt = (limit, pickWeakest) => { // regions under `limit` of the area go into a neighbour: the one sharing the most border, or the weakest border
@@ -2549,7 +2555,7 @@ const KMCore = (() => {
           if (find(g) !== g) continue;
           const bs = by.get(g); if (!bs) continue;
           let best = null, bv = -Infinity;
-          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; const sb = pickWeakest ? strength(b, st) : 0; if (pickWeakest && sb >= keepStrong && st.area.get(g) >= 0.25 * keepArea) continue; if (b.len > 0 && b.hard / b.len >= 0.5 && st.area.get(g) >= 0.0001 * total) continue; /* (1.75) never across hard to organic */ /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
+          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; const sb = pickWeakest ? strength(b, st) : 0; if (pickWeakest && sb >= keepStrong && st.area.get(g) >= 0.25 * keepArea) continue; if ((kindsDiffer(g, o) || (b.len > 0 && b.hard / b.len >= 0.5)) && st.area.get(g) >= 0.0001 * total) continue; /* (1.75, 1.78) never across hard to organic, by region or by edge */ /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
           // (1.72) a small part clearly bounded all round (its weakest border still a crease or a step well past
           // `strong`: a hand lying on a book, a clasp) stays a part: the owner's picks "grabbed too much" when such
           // parts melted into what they touch. Only a speck under a tenth of the limit goes regardless.

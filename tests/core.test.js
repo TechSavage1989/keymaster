@@ -697,6 +697,10 @@ console.log('cut suggestions');
       const mix = new Map(); for (let t = 0; t < n2; t++) { const g = seg.groupOf[t]; if (!mix.has(g)) mix.set(g, [0, 0]); mix.get(g)[onBox(t) ? 0 : 1]++; }
       const mixed = [...mix.values()].filter(([a, b]) => Math.min(a, b) > 0.1 * Math.max(a, b)).length;
       check('a crisp box pushed into a bumpy ball reads hard, the ball organic, and no region holds much of both', hb > 0.8 * nbx && hballs < 0.05 * nball && mixed === 0, { box: hb / nbx, ball: hballs / nball, mixed });
+      // 1.78: Parts at every Detail keeps the box apart from the ball too: no part holds much of both (a hard region never
+      // joins an organic one, judged whole: Rhinehardt's book face had melted into the coat's front strip)
+      { const mixedParts = []; for (const o of [{ ratio: 1.6, strength: 0.68, minFrac: 0.04, keepFrac: 0.03 }, { ratio: 1.35, strength: 0.5, minFrac: 0.02 }, { ratio: 1.2, strength: 0.36, minFrac: 0.008 }]) { const ps = K.segmentParts(Q, J, o); const m = new Map(); for (let t = 0; t < n2; t++) { const g = ps.groupOf[t]; if (!m.has(g)) m.set(g, [0, 0]); m.get(g)[onBox(t) ? 0 : 1]++; } mixedParts.push([...m.values()].filter(([a, b]) => Math.min(a, b) > 0.1 * Math.max(a, b)).length); }
+        check('Parts at Big, Balanced and Fine keep the crisp box apart from the bumpy ball', mixedParts.every(x => x === 0), { mixedParts }); }
       // 1.77: the box's regions picked and sliced: the slice is pinned to the sharp seam, so nothing of the ball is taken and
       // the box keeps its area (the smoothing had blurred across the seam: the owner's book took a strip of robe)
       { const boxRegions = [...mix.entries()].filter(([g, [a, b]]) => a > b).map(([g]) => g), sl = K.sliceRegionPick(Q, J, seg, boxRegions);
