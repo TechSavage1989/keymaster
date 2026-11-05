@@ -2098,7 +2098,7 @@ const KMCore = (() => {
   // hard or organic patch under 0.2% of the surface takes the other label. On Father Rhinehardt it finds the books,
   // their clasps, the crucifix and the cuff bands, and leaves the robe and the hands organic. Returns a Uint8Array,
   // 1 for hard.
-  function hardSurface(P, I, N, A, pairs, total, minPatch = 0.005) {
+  function hardSurface(P, I, N, A, pairs, total, minPatch = 0.0005) {
     const nt = I.length / 3, np = pairs.length / 4;
     const lo = Math.cos(0.5 * Math.PI / 180), hi = Math.cos(30 * Math.PI / 180);
     // flat patches: neighbours within half a degree; each patch scored by how much of its outline is a sharp edge
@@ -2126,18 +2126,26 @@ const KMCore = (() => {
     const fill = deg.slice(0, nt), nb = new Int32Array(deg[nt]);
     for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; nb[fill[a]++] = b; nb[fill[b]++] = a; }
     let h = new Float64Array(nt); for (let t = 0; t < nt; t++) h[t] = cnt[t] ? 1 - soft[t] / cnt[t] : 0;
-    // (1.75) CAD-style triangles: a modelled object exported from CAD or a hard-surface tool is long thin triangles
-    // fanned across flat panels (a corner under 12° and lying flat with a neighbour), where a sculpt's triangles are
-    // even; on Father Rhinehardt this alone outlines the books, the base's rim and the crucifix, and the fan of thin
-    // triangles a boolean leaves on the robe round the book is not flat with its neighbours, so it stays organic
-    { const flatNb = new Uint8Array(nt), thinT = new Uint8Array(nt), lim = Math.cos(12 * Math.PI / 180);
-      for (let i = 0; i < np; i++) if (dots[i] >= lo) { flatNb[pairs[4 * i]] = 1; flatNb[pairs[4 * i + 1]] = 1; }
+    // (1.75, 1.78) CAD-style triangles: a modelled object exported from CAD or a hard-surface tool is long thin
+    // triangles fanned across flat panels (a corner under 12°), where a sculpt's triangles are even. Rendered on
+    // Father Rhinehardt this alone outlines the books, the crucifix, the glasses, the buckles, the base's rim and the
+    // cuffs' edges, where the gentle-edge score above also took whole patches of robe, trousers and sleeve for made
+    // surface (and the fan of thin triangles a boolean leaves on the robe round the book, whose pairs defeat the
+    // lone-triangle test). So the share of thin triangles over three rings is the first signal; the gentle-edge
+    // score only counts for a large flat face (at least 0.2% of the surface: a CAD box's faces are two big
+    // triangles each, not thin at all), never for the small facet pairs of a sculpt.
+    const thinT = new Uint8Array(nt);
+    { const lim = Math.cos(12 * Math.PI / 180);
       for (let t = 0; t < nt; t++) {
         const v = [3 * I[3 * t], 3 * I[3 * t + 1], 3 * I[3 * t + 2]];
         for (let k = 0; k < 3; k++) { const o = v[k], a = v[(k + 1) % 3], b = v[(k + 2) % 3]; const ux = P[a] - P[o], uy = P[a + 1] - P[o + 1], uz = P[a + 2] - P[o + 2], wx = P[b] - P[o], wy = P[b + 1] - P[o + 1], wz = P[b + 2] - P[o + 2]; const L = Math.hypot(ux, uy, uz) * Math.hypot(wx, wy, wz); if (L && (ux * wx + uy * wy + uz * wz) / L > lim) { thinT[t] = 1; break; } }
-        if (thinT[t] && flatNb[t]) h[t] = 1;
       }
     }
+    // thin and in a flat patch of three or more (the fan of thin triangles a boolean leaves on a robe round a book wraps
+    // the robe, so its triangles lie flat with at most one neighbour: 6% of them pass, against 72% of the book's)
+    let thinScore = new Float64Array(nt); for (let t = 0; t < nt; t++) thinScore[t] = thinT[t] && fn[ff(t)] >= 3 ? 1 : 0;
+    for (let it = 0; it < 3; it++) { const g = new Float64Array(nt); for (let t = 0; t < nt; t++) { let sm = thinScore[t], n = 1; for (let j = deg[t]; j < deg[t + 1]; j++) { sm += thinScore[nb[j]]; n++; } g[t] = sm / n; } thinScore = g; }
+    const patchArea = new Float64Array(nt); for (let t = 0; t < nt; t++) patchArea[ff(t)] += A[t];
     // (1.76) no averaging across a seam: a flat panel (two or more coplanar triangles) takes one label for all of it,
     // from its own triangles; only lone triangles are averaged, and only with lone neighbours. The three rings of
     // averaging this replaced spread the book's label a few triangles out over the robe, so the border sat off the seam
@@ -2146,7 +2154,7 @@ const KMCore = (() => {
     const pSum = new Float64Array(nt), pA = new Float64Array(nt);
     for (let t = 0; t < nt; t++) if (fn[ff(t)] > 1) { const r = ff(t); pSum[r] += h[t] * A[t]; pA[r] += A[t]; }
     for (let it = 0; it < 3; it++) { const g = Float64Array.from(h); for (let t = 0; t < nt; t++) { if (fn[ff(t)] > 1) continue; let sm = h[t], n = 1; for (let j = deg[t]; j < deg[t + 1]; j++) { const q = nb[j]; if (fn[ff(q)] > 1) continue; sm += h[q]; n++; } g[t] = sm / n; } h = g; }
-    const out = new Uint8Array(nt); for (let t = 0; t < nt; t++) { const r = ff(t); out[t] = (fn[r] > 1 ? pSum[r] / (pA[r] || 1) : h[t]) > 0.6 ? 1 : 0; }
+    const out = new Uint8Array(nt); for (let t = 0; t < nt; t++) { const r = ff(t); const gentle = (fn[r] > 1 ? pSum[r] / (pA[r] || 1) : h[t]) > 0.6 && fn[r] > 1 && patchArea[r] >= 0.002 * total; out[t] = thinScore[t] > 0.35 || gentle ? 1 : 0; }
     { // a hard patch must have sharp edges in it (its length of edges turning over 30°, at least the side of a square
       // of its area): flat-paired facets of a low-poly robe, or a knot's even quads, have none and stay organic
       const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
@@ -2166,6 +2174,78 @@ const KMCore = (() => {
       if (!flipped) break;
     }
     return out;
+  }
+  // (1.79) Made props carved out as whole parts. The owner: "selecting the hand should only select the hand, selecting
+  // parts of the book should only select parts of the book, selecting the arm should only select the arm". The
+  // grouping by thickness and creases gives the figure's limbs, head and clothes, but a prop fused into the figure (a
+  // book against a robe, under a hand) came out either in one region with what it touches (1.70) or in dozens of
+  // slivers (1.72 to 1.78, once rules were stacked on to keep every creased piece and every hard-to-organic edge).
+  // Here every connected run of made surface (`made`, from `hardSurface`: long thin coplanar triangles, as CAD and
+  // hard-surface tools export them) at least `minArea` becomes a region of its own, with the sculpted islands it
+  // encloses (a bevel strip between two panels); what is left of the regions it was carved from is split into its
+  // connected runs, and runs under `minArea` go to the neighbour they share the most border with. `groupOf` is
+  // relabelled in place; the count is returned.
+  function propLabels(P, I, made, A, pairs, total, minArea) {
+    const nt = I.length / 3, np = pairs.length / 4;
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    // (two made objects fused together, a block standing on a box, part at the sharp concave seam between them)
+    const N = new Float64Array(3 * nt), C = new Float64Array(3 * nt);
+    for (let t = 0; t < nt; t++) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]), L = Math.hypot(n[0], n[1], n[2]) || 1; for (let k = 0; k < 3; k++) { N[3 * t + k] = n[k] / L; C[3 * t + k] = (P[a + k] + P[b + k] + P[c + k]) / 3; } }
+    const cos60 = Math.cos(Math.PI / 3), seam = (i) => { const s0 = pairs[4 * i], q = pairs[4 * i + 1]; const dot = N[3 * s0] * N[3 * q] + N[3 * s0 + 1] * N[3 * q + 1] + N[3 * s0 + 2] * N[3 * q + 2]; if (dot >= cos60) return false; return (C[3 * q] - C[3 * s0]) * N[3 * s0] + (C[3 * q + 1] - C[3 * s0 + 1]) * N[3 * s0 + 1] + (C[3 * q + 2] - C[3 * s0 + 2]) * N[3 * s0 + 2] > 1e-9; };
+    // runs of made surface, with the seams respected (fine) and ignored (coarse): a coarse run parts at its seams only
+    // where that leaves two pieces each at least minArea (a block standing on a box), never where a groove merely crosses
+    // a face (a book's strap channels across its cover)
+    const parC = new Int32Array(nt); for (let t = 0; t < nt; t++) parC[t] = t;
+    const findC = (x) => { while (parC[x] !== x) { parC[x] = parC[parC[x]]; x = parC[x]; } return x; };
+    for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (made[a] === made[b]) { const x = findC(a), y = findC(b); if (x !== y) parC[x] = y; if (!(made[a] && seam(i))) { const x2 = find(a), y2 = find(b); if (x2 !== y2) par[x2] = y2; } } }
+    const area = new Map(), areaC = new Map(), bigFine = new Map(); // coarse run -> how many fine runs in it reach minArea
+    for (let t = 0; t < nt; t++) { const r = find(t), c = findC(t); area.set(r, (area.get(r) || 0) + A[t]); areaC.set(c, (areaC.get(c) || 0) + A[t]); }
+    for (const [r, a] of area) if (a >= minArea) { const c = findC(r); bigFine.set(c, (bigFine.get(c) || 0) + 1); }
+    for (let t = 0; t < nt; t++) if (made[t] && (bigFine.get(findC(t)) || 0) < 2) par[t] = findC(t) === t ? t : par[t]; // (kept whole: the fine runs fold back into the coarse one)
+    for (let t = 0; t < nt; t++) if (made[t] && (bigFine.get(findC(t)) || 0) < 2) { const x = find(t), y = find(findC(t)); if (x !== y) par[x] = y; }
+    area.clear(); for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
+    // the props: made runs at least minArea and at most 35% of the surface (a figure whose whole body reads as made,
+    // a lathe or a subdivided boolean, is no prop: its parts stay as the grouping found them); sculpted runs enclosed
+    // by one prop and smaller than it join it
+    const prop = new Int32Array(nt).fill(-1); let nProps = 0; const propId = new Map();
+    for (let t = 0; t < nt; t++) if (made[t] && area.get(find(t)) >= minArea && area.get(find(t)) <= 0.35 * total) { const r = find(t); if (!propId.has(r)) propId.set(r, nProps++); prop[t] = propId.get(r); }
+    if (!nProps) return { prop, nProps: 0 };
+    const touches = new Map(); // sculpted run -> set of prop ids it borders, or -2 when it borders something that isn't a prop
+    for (let i = 0; i < np; i++) {
+      const a = pairs[4 * i], b = pairs[4 * i + 1]; if (made[a] === made[b]) continue;
+      const [m, o] = made[a] ? [a, b] : [b, a], r = find(o);
+      let set = touches.get(r); if (!set) { set = new Set(); touches.set(r, set); }
+      set.add(prop[m] >= 0 ? prop[m] : -2);
+    }
+    const propArea = new Float64Array(nProps); for (const [r, id] of propId) propArea[id] = area.get(r);
+    for (let t = 0; t < nt; t++) if (!made[t]) { const r = find(t), set = touches.get(r); if (set && set.size === 1) { const [p] = set; if (p >= 0 && area.get(r) < 0.5 * propArea[p]) prop[t] = p; } }
+    return { prop, nProps };
+  }
+  function carveProps(P, I, groupOf, made, A, pairs, total, minArea, labels) {
+    const nt = I.length / 3, np = pairs.length / 4;
+    const { prop, nProps } = labels || propLabels(P, I, made, A, pairs, total, minArea);
+    if (!nProps) return null;
+    // relabel: props first, then the connected runs of what each old region has left
+    const base = nProps, par2 = new Int32Array(nt); for (let t = 0; t < nt; t++) par2[t] = t;
+    const find2 = (x) => { while (par2[x] !== x) { par2[x] = par2[par2[x]]; x = par2[x]; } return x; };
+    for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (prop[a] < 0 && prop[b] < 0 && groupOf[a] === groupOf[b]) { const x = find2(a), y = find2(b); if (x !== y) par2[x] = y; } }
+    const runArea = new Map(); for (let t = 0; t < nt; t++) if (prop[t] < 0) { const r = find2(t); runArea.set(r, (runArea.get(r) || 0) + A[t]); }
+    // small leftover runs go to the neighbour run (or prop) they share the most border with, smallest first, a few rounds
+    const label = new Int32Array(nt); for (let t = 0; t < nt; t++) label[t] = prop[t] >= 0 ? prop[t] : base + find2(t);
+    for (let round = 0; round < 6; round++) {
+      const la = new Map(); for (let t = 0; t < nt; t++) la.set(label[t], (la.get(label[t]) || 0) + A[t]);
+      const border = new Map();
+      for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (label[a] === label[b]) continue; const ea = 3 * pairs[4 * i + 2], eb = 3 * pairs[4 * i + 3], len = Math.hypot(P[ea] - P[eb], P[ea + 1] - P[eb + 1], P[ea + 2] - P[eb + 2]); for (const [x, y] of [[label[a], label[b]], [label[b], label[a]]]) { let m = border.get(x); if (!m) { m = new Map(); border.set(x, m); } m.set(y, (m.get(y) || 0) + len); } }
+      const small = [...la].filter(([l, a]) => l >= base && a < minArea).sort((x, y) => x[1] - y[1]);
+      if (!small.length) break;
+      const to = new Map();
+      for (const [l] of small) { const m = border.get(l); if (!m) continue; let best = -1, bl = -1; for (const [o, len] of m) if (len > bl && !to.has(o)) { bl = len; best = o; } if (best >= 0) to.set(l, best); }
+      if (!to.size) break;
+      for (let t = 0; t < nt; t++) { let l = label[t]; while (to.has(l)) l = to.get(l); label[t] = l; }
+    }
+    const ids = new Map(); for (let t = 0; t < nt; t++) { if (!ids.has(label[t])) ids.set(label[t], ids.size); groupOf[t] = ids.get(label[t]); }
+    return ids.size;
   }
   function segmentSurface(P, I, opts = {}) {
     const angle = opts.angle === undefined ? 35 : opts.angle, minFrac = opts.minFrac === undefined ? 0.003 : opts.minFrac, fold = opts.fold;
@@ -2470,7 +2550,9 @@ const KMCore = (() => {
     const fold = ((opts.fold === undefined ? 15 : opts.fold) * Math.PI) / 180, strong = opts.strength === undefined ? 0.5 : opts.strength;
     const form = segmentForm(P, I, { ...opts, minFrac: 0.004 });
     const sdf = form.sdf;
-    const creases = segmentSurface(P, I, { angle: opts.angle || 60, fold: opts.fold === undefined ? 15 : opts.fold, minFrac: 0.003 });
+    // (1.79) the crease regions as 1.70 found them: no hard-to-organic borders and no kept creased pieces (from 1.72 to 1.78
+    // those turned 7 parts into 50 on Father Rhinehardt); the made props are carved out whole at the end instead
+    const creases = segmentSurface(P, I, { angle: opts.angle || 60, fold: opts.fold === undefined ? 15 : opts.fold, minFrac: 0.003, hardSurface: false, keepCreased: opts.keepCreased !== false }); // (a small piece creased all round, a block on a box, stays a crease region: that costs one region on Rhinehardt)
     // triangle areas, normals, centroids and log thickness
     const A = new Float64Array(nt), X = new Float64Array(nt), N = new Float64Array(nt * 3), C = new Float64Array(nt * 3);
     let total = 0;
@@ -2495,11 +2577,19 @@ const KMCore = (() => {
       econcave[e] = valley && dot < cosFold ? 1 : 0;
       econvex[e] = !valley && dot < cosFold ? 1 : 0;
     }
+    // (1.79) the made props (a book, a crucifix, a sword: long thin coplanar triangles) are fixed from the start: each is
+    // one region whatever the thickness and the creases say, nothing merges with one or melts into one, and a small
+    // part's contact with the figure is measured against the sculpted surface alone (a hand lying on a book touches
+    // the book all along its underside; what holds it to the figure is a sliver of skirt)
+    const made = opts.props === false ? null : hardSurface(P, I, N, A, pairs, total), minProp = total * Math.min(minFrac / 4, 0.003);
+    const labels = made ? propLabels(P, I, made, A, pairs, total, minProp) : null, prop = labels ? labels.prop : null;
     // both labellings laid over each other: a region is a connected run with one form level and one crease region
     const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
     const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
-    const same = (s, q) => form.groupOf[s] === form.groupOf[q] && creases.groupOf[s] === creases.groupOf[q];
+    const isProp = (t) => prop !== null && prop[t] >= 0;
+    const same = (s, q) => isProp(s) || isProp(q) ? prop[s] === prop[q] : form.groupOf[s] === form.groupOf[q] && creases.groupOf[s] === creases.groupOf[q];
     for (let e = 0; e < ne; e++) if (same(pairs[4 * e], pairs[4 * e + 1])) { const x = find(pairs[4 * e]), y = find(pairs[4 * e + 1]); if (x !== y) par[x] = y; }
+    const propRoot = new Uint8Array(nt); if (prop) for (let t = 0; t < nt; t++) if (prop[t] >= 0) propRoot[find(t)] = 1; // (roots never change for a prop: nothing joins it)
     // region sums and the borders between regions, rebuilt after each round of merging. Merging only ever removes
     // borders, so only the edges that are borders now are looked at again, and the sums are gathered from the
     // triangles once per root (each round a merge is the only change; rescanning every triangle and edge each
@@ -2541,7 +2631,7 @@ const KMCore = (() => {
       // and a hat's brim came out as four rings
       const support = Math.min(1, 0.35 + 1.5 * concave + 1.5 * neckRaw);
       const step = Math.min(1, Math.abs(st.xsum.get(b.r) / ar - st.xsum.get(b.s) / as) / gap) * (1 - convex) * support;
-      if (kindsDiffer(b.r, b.s)) return 1; // (1.78) a made object against a sculpted one is always a part boundary
+      if (propRoot[b.r] || propRoot[b.s] || kindsDiffer(b.r, b.s)) return 1; // (1.78, 1.79) a made object against a sculpted one is always a part boundary
       return Math.max(concave, step, neck, b.len > 0 ? b.hard / b.len : 0); // (1.74) a border all along where a hard surface meets an organic one is a part boundary
     };
     const melt = (limit, pickWeakest) => { // regions under `limit` of the area go into a neighbour: the one sharing the most border, or the weakest border
@@ -2551,25 +2641,37 @@ const KMCore = (() => {
         const small = [...st.area.entries()].filter(([, a]) => a < limit).sort((a, b) => a[1] - b[1]);
         if (!small.length) return;
         let merged = 0;
+        const touched = new Set(); // (1.79) a region whose neighbour already changed this pass waits for the next, so what is judged is what the stats say
         for (const [g] of small) {
-          if (find(g) !== g) continue;
+          if (find(g) !== g || propRoot[g]) continue;
           const bs = by.get(g); if (!bs) continue;
+          if (bs.some(b => touched.has(find(b.r === g ? b.s : b.r)))) continue;
           let best = null, bv = -Infinity;
-          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; const sb = pickWeakest ? strength(b, st) : 0; if (pickWeakest && sb >= keepStrong && st.area.get(g) >= 0.25 * keepArea) continue; if ((kindsDiffer(g, o) || (b.len > 0 && b.hard / b.len >= 0.5)) && st.area.get(g) >= 0.0001 * total) continue; /* (1.75, 1.78) never across hard to organic, by region or by edge */ /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
+          // a small region bordered mostly by a prop is a face of it the labelling missed (a book's bottom face, modelled with even
+          // triangles, had melted onto the robe it lies flush with): it joins the prop it shares the most border with. Otherwise a
+          // sliver beside a prop (the fan a boolean leaves on a robe) stays with the sculpted surface
+          let propLen = 0, allLen = 0, bestProp = null, bpl = -1;
+          for (const b of bs) { const o = find(b.r === g ? b.s : b.r); if (o === g) continue; allLen += b.len; if (propRoot[o]) { propLen += b.len; if (b.len > bpl) { bpl = b.len; bestProp = o; } } }
+          if (bestProp !== null && propLen >= 0.4 * allLen) { join(g, bestProp); touched.add(find(bestProp)); merged++; continue; }
+          const anyPlain = propLen < allLen;
+          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; if (anyPlain && propRoot[find(o)]) continue; const sb = pickWeakest ? strength(b, st) : 0; /* (1.79: a strong border no longer stops a small region melting by itself; a part attached by a narrow contact is kept below) */ if ((kindsDiffer(g, o) || (b.len > 0 && b.hard / b.len >= 0.5)) && st.area.get(g) >= 0.0001 * total) continue; /* (1.75, 1.78) never across hard to organic, by region or by edge */ /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
           // (1.72) a small part clearly bounded all round (its weakest border still a crease or a step well past
           // `strong`: a hand lying on a book, a clasp) stays a part: the owner's picks "grabbed too much" when such
           // parts melted into what they touch. Only a speck under a tenth of the limit goes regardless.
-          if (best !== null && st.area.get(g) >= keepArea) {
-            let weak = Infinity, per = 0; for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; weak = Math.min(weak, strength(b, st)); per += b.len; }
-            if (weak >= keepStrong && st.area.get(g) >= keepWidth * per) continue;
+          if (best !== null && st.area.get(g) >= keepArea) { // (1.79) a small part attached by a narrow contact stays a part: a hand resting on a book touches it
+            // along a sliver of its outline (on Father Rhinehardt 5 mm of a 21 mm girth), a block on a box along its base, where a panel
+            // of robe between two folds is bordered along its whole outline (from 1.72 to 1.78 every small piece creased all
+            // round was kept, which turned 7 parts into 50)
+            let weak = Infinity, per = 0; for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; weak = Math.min(weak, strength(b, st)); if (!propRoot[find(o)]) per += b.len; }
+            if (weak >= keepStrong && per < 0.7 * 2 * Math.sqrt(Math.PI * st.area.get(g))) continue;
           }
-          if (best !== null) { join(g, best); merged++; }
+          if (best !== null) { join(g, best); touched.add(find(best)); merged++; }
         }
         if (!merged) return;
       }
     };
     const keepStrong = opts.keepStrong !== undefined ? opts.keepStrong : Math.min(0.95, Math.max(0.6, strong + 0.15));
-    const keepArea = total * (opts.keepFrac !== undefined ? opts.keepFrac : minFrac / 4); // the smallest part kept for its creases: 1% of the surface at Big, 0.5% at Balanced, 0.2% at Fine
+    const keepArea = total * minFrac / 4; // the smallest part kept for a narrow contact: 1% of the surface at Big, 0.5% at Balanced, 0.2% at Fine
     let keepWidth; { const L = []; for (let t = 0; t < nt; t += Math.max(1, Math.floor(nt / 3000))) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1]; L.push(Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2])); } L.sort((x, y) => x - y); keepWidth = Math.max(L[L.length >> 1] || 0, 0.004 * diag(bounds(P))); } // a kept part is chunky, not a band along a crease
     melt(total * 0.003, true); // slivers the overlay leaves along creases (into the neighbour they are least separated from: by the longest border, a book's face went into the hand lying on it)
     // merge across weak borders, the weakest first, until every border is a part boundary
@@ -2583,10 +2685,12 @@ const KMCore = (() => {
     melt(total * minFrac, true); // what is left small joins the neighbour it is least separated from
     const groupOf = new Int32Array(nt), ids = new Map();
     for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
+    // (1.79) the props' enclosed islands (a bevel strip between two panels) join them, and leftover slivers melt
+    if (made) carveProps(P, I, groupOf, made, A, pairs, total, minProp, labels);
     unpinchGroups(P, I, groupOf);
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
-    seg.levels = form.levels; seg.sdf = sdf; seg.hard = creases.hard || null; // (1.77) so a pick's slice can pin the seam where hard meets organic
+    seg.levels = form.levels; seg.sdf = sdf; seg.hard = made; // (1.77) so a pick's slice can pin the seam where hard meets organic
     return seg;
   }
   // Every edge longer than maxEdge split at its middle, the triangles beside it with it (one split edge gives two
