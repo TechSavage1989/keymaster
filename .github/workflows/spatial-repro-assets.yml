@@ -1,0 +1,30 @@
+name: Spatial selection reproduction assets
+on:
+  push:
+    branches: [fix/prop-spatial-boundary]
+    paths: [.github/workflows/spatial-repro-assets.yml]
+permissions:
+  contents: read
+jobs:
+  assets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Package the exact source and pinned real renderer for local reproduction
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/spatial-repro"
+          git archive --format=tar.gz --output="$RUNNER_TEMP/spatial-repro/source.tar.gz" HEAD
+          cd "$RUNNER_TEMP/spatial-repro"
+          npm pack three@0.147.0 --ignore-scripts
+          sha256sum source.tar.gz three-0.147.0.tgz > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spatial-repro-assets
+          path: ${{ runner.temp }}/spatial-repro/
+          retention-days: 3
+          if-no-files-found: error
