@@ -2682,7 +2682,9 @@ const KMCore = (() => {
     // pieces: connected made triangles of one region, in a region that isn't an object's, not in any object
     const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
     const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
-    const cand = (t) => made[t] && prop[t] < 0 && !isObjRegion.has(groupOf[t]);
+    // (1.82) every triangle outside the objects is a candidate, even ones too: a book's lower edge strips between its clasps are
+    // part even, part CAD triangles; a run moves only if it holds made surface (below)
+    const cand = (t) => prop[t] < 0 && !isObjRegion.has(groupOf[t]);
     for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (cand(a) && cand(b) && groupOf[a] === groupOf[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
     const pieces = new Map(); for (let t = 0; t < nt; t++) if (cand(t)) { const r = find(t); let L = pieces.get(r); if (!L) { L = []; pieces.set(r, L); } L.push(t); }
     if (!pieces.size) return 0;
@@ -2696,14 +2698,26 @@ const KMCore = (() => {
       const x = C[3 * t], y = C[3 * t + 1], z = C[3 * t + 2];
       for (let o = 0; o < nObj; o++) { const H = hulls[o]; if (!H || objRegion[o] < 0) continue; if (x < H.mn[0] || y < H.mn[1] || z < H.mn[2] || x > H.mx[0] || y > H.mx[1] || z > H.mx[2]) continue;
         let worst = -Infinity, wp = null; for (const pl of H.planes) { const d = pl[0] * x + pl[1] * y + pl[2] * z - pl[3]; if (d > worst) { worst = d; wp = pl; } if (d > H.tol) break; }
-        if (worst < -H.tol || (worst <= H.tol && N[3 * t] * wp[0] + N[3 * t + 1] * wp[1] + N[3 * t + 2] * wp[2] >= 0)) { pass[t] = o; break; } }
+        if (worst < -H.tol || (worst <= H.tol && N[3 * t] * wp[0] + N[3 * t + 1] * wp[1] + N[3 * t + 2] * wp[2] >= 0.2)) { pass[t] = o; break; } } // (1.82: facing along the outline's nearest face, 0.2: the robe's fan of thin triangles under the book faces across it (90% of it under 0.12) and had been handed to the book; the lip's edge triangles align from 0.25)
     }
     const rp = new Int32Array(nt); for (let t = 0; t < nt; t++) rp[t] = t;
     const rf = (x) => { while (rp[x] !== x) { rp[x] = rp[rp[x]]; x = rp[x]; } return x; };
     for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (pass[a] >= 0 && pass[a] === pass[b] && groupOf[a] === groupOf[b]) { const x = rf(a), y = rf(b); if (x !== y) rp[x] = y; } }
-    const runA = new Map(); for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); runA.set(r, (runA.get(r) || 0) + A[t]); }
-    let moved = 0;
-    for (let t = 0; t < nt; t++) if (pass[t] >= 0 && runA.get(rf(t)) >= 1e-4 * total) { groupOf[t] = objRegion[pass[t]]; prop[t] = pass[t]; moved++; }
+    const runA = new Map(), runM = new Map(); for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); runA.set(r, (runA.get(r) || 0) + A[t]); if (made[t]) runM.set(r, (runM.get(r) || 0) + A[t]); }
+    const lost = new Set(), src = groupOf.slice ? groupOf.slice() : Array.from(groupOf);
+    let moved = 0; // (1.82: runs of at least 0.003% of the surface, a fifth of them made: the strips between the clasps are each a few tenths of a mm²)
+    for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); if (runA.get(r) >= 3e-5 * total && (runM.get(r) || 0) >= 0.2 * runA.get(r)) { groupOf[t] = objRegion[pass[t]]; prop[t] = pass[t]; moved++; lost.add(src[t]); lost.add(groupOf[t]); } }
+    if (moved) { // (1.82) a region the move cut in two keeps its main piece; the scraps it left go to the neighbour they share most border with (on a boolean figure the shoulder's fillet went to the torso and left islands of the arm's region behind, which a pick cut as crumbs)
+      const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+      const fd = (x) => { while (par[x] !== x) x = par[x] = par[par[x]]; return x; };
+      const np = pairs.length / 4;
+      for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (groupOf[a] === groupOf[b] && lost.has(groupOf[a])) par[fd(a)] = fd(b); }
+      const pa = new Map(), big = new Map(); for (let t = 0; t < nt; t++) if (lost.has(groupOf[t])) { const r = fd(t); pa.set(r, (pa.get(r) || 0) + A[t]); }
+      for (const [r, a] of pa) { const g = groupOf[r]; if (!big.has(g) || a > pa.get(big.get(g))) big.set(g, r); }
+      const nbr = new Map(); for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (groupOf[a] === groupOf[b]) continue; for (const [x, y] of [[a, b], [b, a]]) { if (!lost.has(groupOf[x])) continue; const r = fd(x); if (big.get(groupOf[x]) === r) continue; let m = nbr.get(r); if (!m) nbr.set(r, m = new Map()); m.set(groupOf[y], (m.get(groupOf[y]) || 0) + 1); } }
+      const to = new Map(); for (const [r, m] of nbr) { if (pa.get(r) >= 0.25 * pa.get(big.get(groupOf[r]))) continue; let bg = -1, bc = 0; for (const [g, c] of m) if (c > bc) { bc = c; bg = g; } if (bg >= 0) to.set(r, bg); }
+      for (let t = 0; t < nt; t++) if (lost.has(groupOf[t])) { const g = to.get(fd(t)); if (g !== undefined) groupOf[t] = g; }
+    }
     return moved;
   }
   function segmentParts(P, I, opts = {}) {

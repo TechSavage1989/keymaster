@@ -1551,7 +1551,12 @@ with sync_playwright() as p:
     # scaling makes a new mesh for the background worker too (1.69: the owner's figure scaled ×10 was still cut,
     # and its plug drawn, at the old size)
     wv0 = pg.evaluate('KeymasterDebug.workerVolume(0)')
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(200); lab0 = pg.evaluate('KeymasterDebug.regionLabels()')
     pg.evaluate('KeymasterDebug.scaleAll(10)'); wv1 = pg.evaluate('KeymasterDebug.workerVolume(0)')
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(200); lab1 = pg.evaluate('KeymasterDebug.regionLabels()')
+    # 1.82: the parts are found from the shape, not the size: scaled ×10 they are the very same, triangle for triangle
+    check('scaling the model evenly leaves its regions exactly as they were', bool(lab0) and lab0 == lab1, {'n': len(lab0 or []), 'same': sum(1 for a, b in zip(lab0 or [], lab1 or []) if a == b)})
+    pg.keyboard.press('Escape')
     check('after scaling, the background worker works on the scaled part, not the copy it kept', abs(wv1['worker'] - wv1['here']) <= 1e-6 * abs(wv1['here']) and abs(wv1['here'] / wv0['here'] - 1000) < 1, {'before': wv0, 'after': wv1})
     # 1.74: the model's scale and size: the % is against how it opened and follows undo; sizes typed with the lock
     # linked scale evenly, with it free stretch one axis; a turn by any angle keeps the bottom on the bed; lay flat
