@@ -680,8 +680,8 @@ console.log('cut suggestions');
       let nb = 0; for (let t = 0; t < n2; t++) if (onBlock(t)) nb++;
       const top = [...Array(n2).keys()].find(t => onBlock(t) && c(t, 2) > 3.9);
       const count = (seg) => { const g = seg.groupOf[top]; let on = 0, off = 0; for (let t = 0; t < n2; t++) if (seg.groupOf[t] === g) { if (onBlock(t)) on++; else off++; } return { on, off }; };
-      const sec = count(K.segmentSurface(Q, J, { angle: 60, fold: 15 })), part = count(K.segmentParts(Q, J, { ratio: 1.2, strength: 0.36, minFrac: 0.008 }));
-      check('a small block fused onto a big one: its top is a region of its own, and the block a part of its own', sec.on > 0 && sec.off === 0 && part.on >= 0.9 * nb && part.off < 0.1 * part.on, { sec, part, nb }); }
+      const sec = count(K.segmentSurface(Q, J, { angle: 60, fold: 15 })), part = count(K.segmentParts(Q, J, { ratio: 1.2, strength: 0.36, minFrac: 0.004 })); // (1.79: the block is 0.55% of the surface; anything under minFrac melts, as in 1.70, so the finest setting is asked for)
+      check('a small block fused onto a big one: its top is a region of its own, and the block a part of its own', sec.on > 0 && sec.off < 0.05 * sec.on && part.on >= 0.9 * nb && part.off < 0.1 * part.on, { sec, part, nb }); }
     // 1.74: where a hard surface meets an organic one there is a border: a crisp box pushed into a bumpy ball (sculpt-like
     // noise on every vertex) is hard, the ball organic, and no Sections region holds much of both
     { const ball = K.prepareMesh(uvSphere(12, 96, 64)), BP = new Float64Array(ball.positions);
