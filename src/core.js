@@ -2185,48 +2185,27 @@ const KMCore = (() => {
   // encloses (a bevel strip between two panels); what is left of the regions it was carved from is split into its
   // connected runs, and runs under `minArea` go to the neighbour they share the most border with. `groupOf` is
   // relabelled in place; the count is returned.
-  // The convex hull of points [[x, y, z], ...] (quickhull): { faces: [[a, b, c], ...], planes: [[nx, ny, nz, d], ...] } with
-  // outward unit normals (n·p <= d inside), or null for fewer than four points off one plane. A point within `tol`
-  // (1e-4 of the points' extent by default) of a face counts as inside, which keeps the many coplanar points of a flat
-  // panel from raising sliver faces; a face is visible from a point strictly beyond its plane (not beyond by `tol`:
-  // that let a coplanar neighbour stay while the face beside it went, and the cone over the leftover edge was a fold).
-  function convexHull3(pts, eps = 1e-4) {
-    const n = pts.length; if (n < 4) return null;
-    const mnB = [Infinity, Infinity, Infinity], mxB = [-Infinity, -Infinity, -Infinity]; for (const q of pts) for (let k = 0; k < 3; k++) { if (q[k] < mnB[k]) mnB[k] = q[k]; if (q[k] > mxB[k]) mxB[k] = q[k]; }
-    const tol = eps * (Math.hypot(mxB[0] - mnB[0], mxB[1] - mnB[1], mxB[2] - mnB[2]) || 1);
-    const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    let lo = 0, hi = 0; for (let i = 1; i < n; i++) { if (pts[i][0] < pts[lo][0]) lo = i; if (pts[i][0] > pts[hi][0]) hi = i; }
-    if (lo === hi) return null;
-    const ab = sub(pts[hi], pts[lo]); let far = -1, fd = tol;
-    for (let i = 0; i < n; i++) { const c = cross3(ab, sub(pts[i], pts[lo])), d = Math.hypot(c[0], c[1], c[2]); if (d > fd) { fd = d; far = i; } }
-    if (far < 0) return null;
-    const nrm = cross3(ab, sub(pts[far], pts[lo])); let top = -1, td = tol * Math.hypot(nrm[0], nrm[1], nrm[2]);
-    for (let i = 0; i < n; i++) { const d = Math.abs(dot(nrm, sub(pts[i], pts[lo]))); if (d > td) { td = d; top = i; } }
-    if (top < 0) return null;
-    const faces = []; // { v: [a, b, c], n, d, out: [], dead }
-    const mk = (a, b, c) => { const nn = cross3(sub(pts[b], pts[a]), sub(pts[c], pts[a])), L = Math.hypot(nn[0], nn[1], nn[2]) || 1; const f = { v: [a, b, c], n: [nn[0] / L, nn[1] / L, nn[2] / L], d: 0, out: [], dead: false }; f.d = dot(f.n, pts[a]); return f; };
-    const centre = [0, 1, 2].map(k => (pts[lo][k] + pts[hi][k] + pts[far][k] + pts[top][k]) / 4);
-    const addFace = (a, b, c) => { let f = mk(a, b, c); if (dot(f.n, centre) - f.d > 0) f = mk(a, c, b); faces.push(f); };
-    addFace(lo, hi, far); addFace(lo, hi, top); addFace(lo, far, top); addFace(hi, far, top);
-    const assign = (idx, fs) => { for (const i of idx) { let best = null, bd = tol; for (const f of fs) { if (f.dead) continue; const d = dot(f.n, pts[i]) - f.d; if (d > bd) { bd = d; best = f; } } if (best) best.out.push(i); } };
-    const rest = []; for (let i = 0; i < n; i++) if (i !== lo && i !== hi && i !== far && i !== top) rest.push(i);
-    assign(rest, faces);
-    const queue = faces.slice(), key = (a, b) => a < b ? a * n + b : b * n + a;
-    while (queue.length) {
-      const f = queue.pop(); if (f.dead || !f.out.length) continue;
-      let far2 = -1, fd2 = -1; for (const i of f.out) { const d = dot(f.n, pts[i]) - f.d; if (d > fd2) { fd2 = d; far2 = i; } }
-      const p = pts[far2], vis = []; for (const g of faces) if (!g.dead && dot(g.n, p) - g.d > 0) vis.push(g);
-      const edgeCount = new Map();
-      for (const g of vis) for (let k = 0; k < 3; k++) { const kk = key(g.v[k], g.v[(k + 1) % 3]); edgeCount.set(kk, (edgeCount.get(kk) || 0) + 1); }
-      const orphans = []; for (const g of vis) { g.dead = true; for (const i of g.out) if (i !== far2) orphans.push(i); }
-      const fresh = [];
-      for (const g of vis) for (let k = 0; k < 3; k++) { const a = g.v[k], b = g.v[(k + 1) % 3]; if (edgeCount.get(key(a, b)) === 1) { const nf = mk(a, b, far2); faces.push(nf); fresh.push(nf); } }
-      assign(orphans, fresh);
-      for (const nf of fresh) if (nf.out.length) queue.push(nf);
-    }
-    const live = faces.filter(f => !f.dead);
-    return { faces: live.map(f => f.v), planes: live.map(f => [f.n[0], f.n[1], f.n[2], f.d]) };
+  // (1.81) A convex outline of points [[x, y, z], ...]: for each of 162 fixed directions (a Fibonacci sphere), the plane
+  // through the farthest point that way. { planes: [[nx, ny, nz, d], ...] (outward unit normals, n·p <= d inside),
+  // points: the extreme points }, or null for no points. It holds the convex hull and lies within about 1% of its extent
+  // of it; `extra` directions (an object's own face normals, from faceDirections) make a box's faces exact, where the fixed
+  // directions alone overshoot its corners by up to 9%. It replaced a quickhull (1.80), which on a book's thousands of nearly coplanar float32 points built a broken
+  // horizon and grew without end until the page ran out of memory; this is linear and cannot fail.
+  const OUTLINE_DIRS = (() => { const n = 162, out = [], g = Math.PI * (3 - Math.sqrt(5)); for (let i = 0; i < n; i++) { const z = 1 - (2 * i + 1) / n, r = Math.sqrt(1 - z * z), a = g * i; out.push([r * Math.cos(a), r * Math.sin(a), z]); } return out; })();
+  // The main face directions of a set of triangles: their normals binned to about 3°, the 24 biggest bins by area.
+  function faceDirections(N, A, tris) {
+    const bins = new Map();
+    for (const t of tris) { const x = N[3 * t], y = N[3 * t + 1], z = N[3 * t + 2]; const k = Math.round(x * 20) * 1681 + Math.round(y * 20) * 41 + Math.round(z * 20); let b = bins.get(k); if (!b) { b = [0, 0, 0, 0]; bins.set(k, b); } b[0] += x * A[t]; b[1] += y * A[t]; b[2] += z * A[t]; b[3] += A[t]; }
+    return [...bins.values()].sort((a, b) => b[3] - a[3]).slice(0, 24).map(b => { const L = Math.hypot(b[0], b[1], b[2]) || 1; return [b[0] / L, b[1] / L, b[2] / L]; });
   }
+  function convexOutline(pts, extra) {
+    if (!pts.length) return null;
+    const planes = [], ext = new Set();
+    for (const d of extra ? OUTLINE_DIRS.concat(extra) : OUTLINE_DIRS) { let m = -Infinity, at = -1; for (let i = 0; i < pts.length; i++) { const q = pts[i], v = d[0] * q[0] + d[1] * q[1] + d[2] * q[2]; if (v > m) { m = v; at = i; } } planes.push([d[0], d[1], d[2], m]); ext.add(at); }
+    const points = []; for (const i of ext) points.push(pts[i]);
+    return { planes, points };
+  }
+
   // (1.80) Made objects and the surface they own. The owner's book: its covers, straps and page block are five runs of made
   // surface a millimetre or two apart (fillets and strap channels between them are even triangles), and its bottom face,
   // a page block recessed behind the cover lips, runs on without a crease into the skirt it lies flush against, so every
@@ -2266,14 +2245,17 @@ const KMCore = (() => {
     // between them, so the cover under the hand and the cuff's inner side lie well under it)
     const byProp = []; for (let p = 0; p < nProps; p++) byProp.push([]); for (let t = 0; t < nt; t++) if (prop[t] >= 0) byProp[prop[t]].push(t);
     const riseMax = opts.rise === undefined ? 0.06 : opts.rise;
-    const rigid = (x, y) => {
+    const rigidSeen = new Map(); // (1.81) a pair's verdict, asked again at every edge where their fronts meet: kept until either joins something
+    const rigid = (x, y) => { const key = Math.min(x, y) * nProps + Math.max(x, y); let v = rigidSeen.get(key); if (v === undefined) { v = rigidNow(x, y); rigidSeen.set(key, v); } return v; };
+    const rigidNow = (x, y) => {
       const tris = []; for (let p = 0; p < nProps; p++) if (gf(p) === x || gf(p) === y) for (const t of byProp[p]) tris.push(t);
       const vs = new Set(); for (const t of tris) { vs.add(I[3 * t]); vs.add(I[3 * t + 1]); vs.add(I[3 * t + 2]); }
       const pts = []; for (const v of vs) pts.push([P[3 * v], P[3 * v + 1], P[3 * v + 2]]);
-      const h = convexHull3(pts); if (!h) return true;
+      const h = convexOutline(pts, faceDirections(N, A, tris)); if (!h) return true;
       const bmn = [Infinity, Infinity, Infinity], bmx = [-Infinity, -Infinity, -Infinity]; for (const q of pts) for (let k = 0; k < 3; k++) { if (q[k] < bmn[k]) bmn[k] = q[k]; if (q[k] > bmx[k]) bmx[k] = q[k]; }
       const dg = Math.hypot(bmx[0] - bmn[0], bmx[1] - bmn[1], bmx[2] - bmn[2]); let sum = 0, all = 0;
-      for (const t of tris) { const nx = N[3 * t], ny = N[3 * t + 1], nz = N[3 * t + 2], cx = C[3 * t], cy = C[3 * t + 1], cz = C[3 * t + 2]; let rise = Infinity;
+      const step = Math.max(1, Math.floor(tris.length / 4000)); // (the mean rise from at most 4,000 triangles)
+      for (let i = 0; i < tris.length; i += step) { const t = tris[i], nx = N[3 * t], ny = N[3 * t + 1], nz = N[3 * t + 2], cx = C[3 * t], cy = C[3 * t + 1], cz = C[3 * t + 2]; let rise = Infinity;
         for (const pl of h.planes) { const den = pl[0] * nx + pl[1] * ny + pl[2] * nz; if (den > 1e-9) { const s = (pl[3] - (pl[0] * cx + pl[1] * cy + pl[2] * cz)) / den; if (s < rise) rise = s; } }
         if (rise < Infinity) { sum += Math.max(0, rise) * A[t]; all += A[t]; } }
       return (all ? sum / all : 0) <= riseMax * dg;
@@ -2295,8 +2277,8 @@ const KMCore = (() => {
       const pts = []; let area = 0; for (const v of vs) pts.push([P[3 * v], P[3 * v + 1], P[3 * v + 2]]); for (const t of tris) area += A[t];
       const bmn = [Infinity, Infinity, Infinity], bmx = [-Infinity, -Infinity, -Infinity]; for (const q of pts) for (let k = 0; k < 3; k++) { if (q[k] < bmn[k]) bmn[k] = q[k]; if (q[k] > bmx[k]) bmx[k] = q[k]; }
       const dg = Math.hypot(bmx[0] - bmn[0], bmx[1] - bmn[1], bmx[2] - bmn[2]);
-      const h = convexHull3(pts); if (!h) continue;
-      const hv = new Set(); for (const f of h.faces) for (const v of f) hv.add(v); const hpts = []; for (const i of hv) hpts.push(pts[i]); const planes = h.planes;
+      const h = convexOutline(pts, faceDirections(N, A, tris)); if (!h) continue;
+      const hpts = h.points, planes = h.planes;
       const test = (t, sup, deep) => { // the plane holds the hull behind it within sup × dg; the line along -n from the centroid enters the hull within deep × dg
         const nx = N[3 * t], ny = N[3 * t + 1], nz = N[3 * t + 2], cx = C[3 * t], cy = C[3 * t + 1], cz = C[3 * t + 2], d0 = nx * cx + ny * cy + nz * cz;
         for (const q of hpts) if (nx * q[0] + ny * q[1] + nz * q[2] - d0 > sup * dg) return false;
@@ -2309,8 +2291,9 @@ const KMCore = (() => {
       // for a crease to stop the flood
       // an object claims at most its own area, and all or nothing: a flood that would take more (a flange's thin rim
       // reaching both faces of the flange) claims none, rather than an arbitrary ring of it
+      const onOutline = (t) => { const x = C[3 * t], y = C[3 * t + 1], z = C[3 * t + 2]; let worst = -Infinity, wp = null; for (const pl of planes) { const d = pl[0] * x + pl[1] * y + pl[2] * z - pl[3]; if (d > worst) { worst = d; wp = pl; } } return worst <= 0.04 * dg && N[3 * t] * wp[0] + N[3 * t + 1] * wp[1] + N[3 * t + 2] * wp[2] >= 0; };
       const stack = tris.slice(), seen = new Uint8Array(nt), far = new Float64Array(nt), took = []; for (const t of tris) seen[t] = 1; let claimed = 0;
-      while (stack.length) { const t = stack.pop(); for (let j = deg[t]; j < deg[t + 1]; j++) { const q = nb[j]; if (seen[q] || out[q] >= 0 || (concave[ne[j]] && !made[q])) continue; const rigid = made[q] || flat[q], dq = rigid ? 0 : far[t] + Math.hypot(C[3 * q] - C[3 * t], C[3 * q + 1] - C[3 * t + 1], C[3 * q + 2] - C[3 * t + 2]); if (!rigid && dq > band * dg) continue; seen[q] = 1; if (!(rigid ? test(q, supMade, deepMade) : test(q, supPlain, deepPlain))) continue; if (claimed + A[q] > area) { for (const x of took) out[x] = -1; stack.length = 0; break; } out[q] = g; far[q] = dq; claimed += A[q]; took.push(q); stack.push(q); } }
+      while (stack.length) { const t = stack.pop(); for (let j = deg[t]; j < deg[t + 1]; j++) { const q = nb[j]; if (seen[q] || out[q] >= 0 || (concave[ne[j]] && !(made[q] && onOutline(q)))) continue; /* (1.81: across a concave seam only into made surface on the object's outline, facing out: a strap wrapping the book, not a cuff ring resting on the cover, which came in that way in 1.80) */ const rigid = made[q] || flat[q], dq = rigid ? 0 : far[t] + Math.hypot(C[3 * q] - C[3 * t], C[3 * q + 1] - C[3 * t + 1], C[3 * q + 2] - C[3 * t + 2]); if (!rigid && dq > band * dg) continue; seen[q] = 1; if (!(rigid ? test(q, supMade, deepMade) : test(q, supPlain, deepPlain))) continue; if (claimed + A[q] > area) { for (const x of took) out[x] = -1; stack.length = 0; break; } out[q] = g; far[q] = dq; claimed += A[q]; took.push(q); stack.push(q); } }
     }
     for (let t = 0; t < nt; t++) prop[t] = out[t];
     return nObj;
@@ -2685,6 +2668,44 @@ const KMCore = (() => {
      a step in thickness (an arm against a torso, a sword against a hand), or a neck (a border short against the
      smaller region's size: a head on a neck, a base under a foot). A convex ridge or a thickness wobble in the
      middle of a smooth body is not a part boundary, so those borders go. */
+  // (1.81) A made object's pieces, wherever the grouping put them. The owner's book at Fine: a lip of the lower cover (5 mm²
+  // of CAD triangles, too small to be a prop, cut off from the cover by inside corners and by cloth showing between the
+  // clasps) runs on into the skirt with no crease, so it ended in the skirt's region and lit up with it. After the grouping,
+  // the made surface in regions that aren't an object's is tested against every object's convex outline (tolerance 2.5% of
+  // the object's diagonal), triangle by triangle, and what passes moves to the region holding most of that object.   // Only made triangles move, so the grouping of everything else is as it was.
+  function ownObjectPieces(P, I, groupOf, made, prop, A, C, N, pairs) {
+    const nt = I.length / 3, np = pairs.length / 4; let total = 0; for (let t = 0; t < nt; t++) total += A[t]; let nObj = 0; for (let t = 0; t < nt; t++) if (prop[t] + 1 > nObj) nObj = prop[t] + 1;
+    if (!nObj) return 0;
+    // the region each object lives in (the one holding most of its area), and which regions those are
+    const objRegion = new Int32Array(nObj).fill(-1); { const tally = new Map(); for (let t = 0; t < nt; t++) if (prop[t] >= 0) { const k = prop[t] * 1e6 + groupOf[t]; tally.set(k, (tally.get(k) || 0) + A[t]); } const best = new Float64Array(nObj); for (const [k, a] of tally) { const o = Math.floor(k / 1e6), g = k - o * 1e6; if (a > best[o]) { best[o] = a; objRegion[o] = g; } } }
+    const isObjRegion = new Set(objRegion);
+    // pieces: connected made triangles of one region, in a region that isn't an object's, not in any object
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    const cand = (t) => made[t] && prop[t] < 0 && !isObjRegion.has(groupOf[t]);
+    for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (cand(a) && cand(b) && groupOf[a] === groupOf[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
+    const pieces = new Map(); for (let t = 0; t < nt; t++) if (cand(t)) { const r = find(t); let L = pieces.get(r); if (!L) { L = []; pieces.set(r, L); } L.push(t); }
+    if (!pieces.size) return 0;
+    const hulls = []; for (let o = 0; o < nObj; o++) { const vs = new Set(), tris = []; for (let t = 0; t < nt; t++) if (prop[t] === o) { tris.push(t); vs.add(I[3 * t]); vs.add(I[3 * t + 1]); vs.add(I[3 * t + 2]); } const pts = []; for (const v of vs) pts.push([P[3 * v], P[3 * v + 1], P[3 * v + 2]]); const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity]; for (const q of pts) for (let k = 0; k < 3; k++) { if (q[k] < mn[k]) mn[k] = q[k]; if (q[k] > mx[k]) mx[k] = q[k]; } const h = convexOutline(pts, faceDirections(N, A, tris)); const tol = 0.025 * Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]); hulls.push(h ? { planes: h.planes, tol, mn: mn.map(x => x - tol), mx: mx.map(x => x + tol) } : null); }
+    // each made triangle in such a piece is tested on its own: inside an object's outline within the tolerance and, near its
+    // boundary, not facing into it (a recessed page block lies deep inside; a fingertip or a cuff resting on the cover, and the
+    // fan of thin robe triangles round the book, face into it). Connected runs of passing triangles of at least 0.01% of the
+    // surface move to the object's region
+    const pass = new Int32Array(nt).fill(-1);
+    for (const L of pieces.values()) for (const t of L) {
+      const x = C[3 * t], y = C[3 * t + 1], z = C[3 * t + 2];
+      for (let o = 0; o < nObj; o++) { const H = hulls[o]; if (!H || objRegion[o] < 0) continue; if (x < H.mn[0] || y < H.mn[1] || z < H.mn[2] || x > H.mx[0] || y > H.mx[1] || z > H.mx[2]) continue;
+        let worst = -Infinity, wp = null; for (const pl of H.planes) { const d = pl[0] * x + pl[1] * y + pl[2] * z - pl[3]; if (d > worst) { worst = d; wp = pl; } if (d > H.tol) break; }
+        if (worst < -H.tol || (worst <= H.tol && N[3 * t] * wp[0] + N[3 * t + 1] * wp[1] + N[3 * t + 2] * wp[2] >= 0)) { pass[t] = o; break; } }
+    }
+    const rp = new Int32Array(nt); for (let t = 0; t < nt; t++) rp[t] = t;
+    const rf = (x) => { while (rp[x] !== x) { rp[x] = rp[rp[x]]; x = rp[x]; } return x; };
+    for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (pass[a] >= 0 && pass[a] === pass[b] && groupOf[a] === groupOf[b]) { const x = rf(a), y = rf(b); if (x !== y) rp[x] = y; } }
+    const runA = new Map(); for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); runA.set(r, (runA.get(r) || 0) + A[t]); }
+    let moved = 0;
+    for (let t = 0; t < nt; t++) if (pass[t] >= 0 && runA.get(rf(t)) >= 1e-4 * total) { groupOf[t] = objRegion[pass[t]]; prop[t] = pass[t]; moved++; }
+    return moved;
+  }
   function segmentParts(P, I, opts = {}) {
     const nt = I.length / 3, nv = P.length / 3, ratio = opts.ratio || 1.35, minFrac = opts.minFrac === undefined ? 0.02 : opts.minFrac;
     const fold = ((opts.fold === undefined ? 15 : opts.fold) * Math.PI) / 180, strong = opts.strength === undefined ? 0.5 : opts.strength;
@@ -2827,6 +2848,7 @@ const KMCore = (() => {
     for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
     // (1.79) the props' enclosed islands (a bevel strip between two panels) join them, and leftover slivers melt
     if (made) carveProps(P, I, groupOf, made, A, pairs, total, minProp, labels);
+    if (made && prop) ownObjectPieces(P, I, groupOf, made, prop, A, C, N, pairs); // (1.81)
     unpinchGroups(P, I, groupOf);
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
@@ -7187,7 +7209,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, convexHull3, propObjects, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups,
+    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
