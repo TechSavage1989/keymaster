@@ -1,0 +1,25 @@
+name: Selection validation assets
+on:
+  push:
+    branches: [fix/spatial-prop-selection]
+    paths: [.github/workflows/selection-validation-assets.yml]
+permissions:
+  contents: read
+jobs:
+  assets:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch the exact renderer used by the published app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p renderer
+          curl --fail --retry 3 -L https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js -o renderer/three.min.js
+          curl --fail --retry 3 -L https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js -o renderer/OrbitControls.js
+          curl --fail --retry 3 -L https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/TransformControls.js -o renderer/TransformControls.js
+          sha256sum renderer/*.js > renderer/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinned-three-r147-renderer
+          path: renderer/
+          retention-days: 7
