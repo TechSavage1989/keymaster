@@ -736,14 +736,30 @@ console.log('cut suggestions');
 
 console.log('made objects and the surface they own (1.80)');
 {
-  // the convex hull: a cube's corners with points inside give its twelve facets; many coplanar, noisy points on a box's faces
-  // (a flat panel as float32 stores it) give a hull every point lies in (the first quickhull folded on such input)
+  // the convex outline (1.81, replacing a quickhull that grew without end on a book's nearly coplanar float32 points): every
+  // point lies inside it, a cube's corners lie on it, it hugs the cube within 1% of its size, and thousands of noisy coplanar
+  // float32 points on a box's faces (the input that broke the quickhull) take milliseconds; given an object's own face
+  // directions it is exact for a box
   { let sd = 5; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
     const pts = []; for (let i = 0; i < 8; i++) pts.push([i & 1, (i >> 1) & 1, (i >> 2) & 1]); for (let i = 0; i < 200; i++) pts.push([rnd(), rnd(), rnd()]);
-    const h = K.convexHull3(pts), inside = (h, pts, tol) => pts.every(p => h.planes.every(pl => pl[0] * p[0] + pl[1] * p[1] + pl[2] * p[2] - pl[3] <= tol));
-    const faces = []; for (let i = 0; i < 400; i++) { const f = i % 6, u = rnd(), v = rnd(), p = [u, v, 0]; if (f === 1) p[2] = 1; if (f === 2) { p[0] = 0; p[2] = u; } if (f === 3) { p[0] = 1; p[2] = u; } if (f === 4) { p[1] = 0; p[2] = v; } if (f === 5) { p[1] = 1; p[2] = v; } faces.push(p.map(x => Math.fround(x * 5.123 + 3 + (rnd() - 0.5) * 1e-6))); }
-    const h2 = K.convexHull3(faces); const ec = new Map(); for (const f of h2.faces) for (let k = 0; k < 3; k++) { const a = f[k], b = f[(k + 1) % 3], key = a < b ? a + ',' + b : b + ',' + a; ec.set(key, (ec.get(key) || 0) + 1); }
-    check('the convex hull of a cube with points inside is its twelve facets, and of noisy coplanar box faces a sealed hull round every point', h.faces.length === 12 && inside(h, pts, 1e-9) && inside(h2, faces, 1e-3) && [...ec.values()].every(v => v === 2), { facets: h.faces.length, facets2: h2.faces.length }); }
+    const o = K.convexOutline(pts, [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]), o0 = K.convexOutline(pts), inside = (h, ps, tol) => ps.every(p => h.planes.every(pl => pl[0] * p[0] + pl[1] * p[1] + pl[2] * p[2] - pl[3] <= tol));
+    const onCorner = inside(o0, pts, 1e-9) && pts.slice(0, 8).every(p => Math.max(...o.planes.map(pl => pl[0] * p[0] + pl[1] * p[1] + pl[2] * p[2] - pl[3])) > -1e-9);
+    let hug = 0; for (let i = 0; i < 2000; i++) { const p = [rnd() * 1.2 - 0.1, rnd() * 1.2 - 0.1, rnd() * 1.2 - 0.1]; const inO = o.planes.every(pl => pl[0] * p[0] + pl[1] * p[1] + pl[2] * p[2] - pl[3] <= 0); const out = Math.max(-p[0], -p[1], -p[2], p[0] - 1, p[1] - 1, p[2] - 1); if (inO && out > hug) hug = out; }
+    const faces = []; for (let i = 0; i < 6000; i++) { const f = i % 6, u = rnd(), v = rnd(), p = [u, v, 0]; if (f === 1) p[2] = 1; if (f === 2) { p[0] = 0; p[2] = u; } if (f === 3) { p[0] = 1; p[2] = u; } if (f === 4) { p[1] = 0; p[2] = v; } if (f === 5) { p[1] = 1; p[2] = v; } faces.push(p.map(x => Math.fround(x * 5.123 + 3 + (rnd() - 0.5) * 1e-6))); }
+    const t0 = Date.now(), o2 = K.convexOutline(faces), ms = Date.now() - t0;
+    check('the convex outline holds every point, touches a cube\'s corners, hugs it exactly given the cube\'s face directions, and takes noisy coplanar float32 box faces in milliseconds', inside(o, pts, 1e-9) && onCorner && hug < 1e-9 && inside(o2, faces, 1e-6) && ms < 200, { hug, ms }); }
+  // (1.81) the made surface a made object owns, wherever the grouping put it: a box is the object (region 0); in another
+  // region lie a lip on its underside facing out (Father Rhinehardt's book: a lip of the lower cover in the skirt's region),
+  // a patch lying on its top facing into it (a fingertip resting on the cover) and a patch beside it. Only the lip moves
+  { const pos = [], idx = []; const quad = (o, u, v, n) => { const nu = n, base = pos.length / 3; for (let i = 0; i <= nu; i++) for (let j = 0; j <= nu; j++) pos.push(o[0] + u[0] * i / nu + v[0] * j / nu, o[1] + u[1] * i / nu + v[1] * j / nu, o[2] + u[2] * i / nu + v[2] * j / nu); const first = idx.length / 3; for (let i = 0; i < nu; i++) for (let j = 0; j < nu; j++) { const a = base + i * (nu + 1) + j, b = a + nu + 1; idx.push(a, b, b + 1, a, b + 1, a + 1); } return [first, idx.length / 3]; };
+    const bx = K.shapeMesh({ kind: 'cube', w: 10, d: 10, h: 10 }); for (const v of bx.positions) pos.push(v); for (const v of bx.indices) idx.push(v); const nBox = bx.indices.length / 3;
+    const lip = quad([-2, -2, -5], [0, 4, 0], [4, 0, 0], 4), tip = quad([-2, -2, 5.01], [0, 4, 0], [4, 0, 0], 4), far = quad([12, -2, 0], [0, 4, 0], [0, 0, 4], 4); // lip faces -z (out of the box's bottom), tip faces -z (into the top), far beside it
+    const P = new Float32Array(pos), I = new Uint32Array(idx), nt = I.length / 3, A = new Float64Array(nt), N = new Float64Array(3 * nt), C = new Float64Array(3 * nt);
+    for (let t = 0; t < nt; t++) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; const u = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], w = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]; const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]], L = Math.hypot(...n); A[t] = L / 2; for (let k = 0; k < 3; k++) { N[3 * t + k] = n[k] / L; C[3 * t + k] = (P[a + k] + P[b + k] + P[c + k]) / 3; } }
+    const groupOf = new Int32Array(nt), made = new Uint8Array(nt).fill(1), prop = new Int32Array(nt).fill(-1); for (let t = 0; t < nt; t++) { if (t < nBox) prop[t] = 0; else groupOf[t] = 1; }
+    const moved = K.ownObjectPieces(P, I, groupOf, made, prop, A, C, N, K.trianglePairs(I));
+    const all = (r, g) => { for (let t = r[0]; t < r[1]; t++) if (groupOf[t] !== g) return false; return true; };
+    check('a made object owns the made surface on its outline facing out (a lip under a book), not a patch resting on it facing in (a fingertip) nor one beside it', moved === lip[1] - lip[0] && all(lip, 0) && all(tip, 1) && all(far, 1), { moved, lip: lip[1] - lip[0] }); }
   // a made plank fused into a body's corner, its recessed front face flush with the body's front and running on into it
   // without a crease (Father Rhinehardt's book against the skirt: every pick of the book's underside took a strip of
   // robe): built directly, since a boolean would offset the coplanar faces by microns and leave a sliver crease; every
