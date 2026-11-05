@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.81, build 981e40. After an update, refresh the page and check this changes.">v1.81 · 981e40</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.82, build 2471a1. After an update, refresh the page and check this changes.">v1.82 · 2471a1</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -3407,7 +3407,9 @@ const KMCore = (() => {
     // pieces: connected made triangles of one region, in a region that isn't an object's, not in any object
     const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
     const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
-    const cand = (t) => made[t] && prop[t] < 0 && !isObjRegion.has(groupOf[t]);
+    // (1.82) every triangle outside the objects is a candidate, even ones too: a book's lower edge strips between its clasps are
+    // part even, part CAD triangles; a run moves only if it holds made surface (below)
+    const cand = (t) => prop[t] < 0 && !isObjRegion.has(groupOf[t]);
     for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (cand(a) && cand(b) && groupOf[a] === groupOf[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
     const pieces = new Map(); for (let t = 0; t < nt; t++) if (cand(t)) { const r = find(t); let L = pieces.get(r); if (!L) { L = []; pieces.set(r, L); } L.push(t); }
     if (!pieces.size) return 0;
@@ -3421,14 +3423,26 @@ const KMCore = (() => {
       const x = C[3 * t], y = C[3 * t + 1], z = C[3 * t + 2];
       for (let o = 0; o < nObj; o++) { const H = hulls[o]; if (!H || objRegion[o] < 0) continue; if (x < H.mn[0] || y < H.mn[1] || z < H.mn[2] || x > H.mx[0] || y > H.mx[1] || z > H.mx[2]) continue;
         let worst = -Infinity, wp = null; for (const pl of H.planes) { const d = pl[0] * x + pl[1] * y + pl[2] * z - pl[3]; if (d > worst) { worst = d; wp = pl; } if (d > H.tol) break; }
-        if (worst < -H.tol || (worst <= H.tol && N[3 * t] * wp[0] + N[3 * t + 1] * wp[1] + N[3 * t + 2] * wp[2] >= 0)) { pass[t] = o; break; } }
+        if (worst < -H.tol || (worst <= H.tol && N[3 * t] * wp[0] + N[3 * t + 1] * wp[1] + N[3 * t + 2] * wp[2] >= 0.2)) { pass[t] = o; break; } } // (1.82: facing along the outline's nearest face, 0.2: the robe's fan of thin triangles under the book faces across it (90% of it under 0.12) and had been handed to the book; the lip's edge triangles align from 0.25)
     }
     const rp = new Int32Array(nt); for (let t = 0; t < nt; t++) rp[t] = t;
     const rf = (x) => { while (rp[x] !== x) { rp[x] = rp[rp[x]]; x = rp[x]; } return x; };
     for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (pass[a] >= 0 && pass[a] === pass[b] && groupOf[a] === groupOf[b]) { const x = rf(a), y = rf(b); if (x !== y) rp[x] = y; } }
-    const runA = new Map(); for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); runA.set(r, (runA.get(r) || 0) + A[t]); }
-    let moved = 0;
-    for (let t = 0; t < nt; t++) if (pass[t] >= 0 && runA.get(rf(t)) >= 1e-4 * total) { groupOf[t] = objRegion[pass[t]]; prop[t] = pass[t]; moved++; }
+    const runA = new Map(), runM = new Map(); for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); runA.set(r, (runA.get(r) || 0) + A[t]); if (made[t]) runM.set(r, (runM.get(r) || 0) + A[t]); }
+    const lost = new Set(), src = groupOf.slice ? groupOf.slice() : Array.from(groupOf);
+    let moved = 0; // (1.82: runs of at least 0.003% of the surface, a fifth of them made: the strips between the clasps are each a few tenths of a mm²)
+    for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); if (runA.get(r) >= 3e-5 * total && (runM.get(r) || 0) >= 0.2 * runA.get(r)) { groupOf[t] = objRegion[pass[t]]; prop[t] = pass[t]; moved++; lost.add(src[t]); lost.add(groupOf[t]); } }
+    if (moved) { // (1.82) a region the move cut in two keeps its main piece; the scraps it left go to the neighbour they share most border with (on a boolean figure the shoulder's fillet went to the torso and left islands of the arm's region behind, which a pick cut as crumbs)
+      const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+      const fd = (x) => { while (par[x] !== x) x = par[x] = par[par[x]]; return x; };
+      const np = pairs.length / 4;
+      for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (groupOf[a] === groupOf[b] && lost.has(groupOf[a])) par[fd(a)] = fd(b); }
+      const pa = new Map(), big = new Map(); for (let t = 0; t < nt; t++) if (lost.has(groupOf[t])) { const r = fd(t); pa.set(r, (pa.get(r) || 0) + A[t]); }
+      for (const [r, a] of pa) { const g = groupOf[r]; if (!big.has(g) || a > pa.get(big.get(g))) big.set(g, r); }
+      const nbr = new Map(); for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (groupOf[a] === groupOf[b]) continue; for (const [x, y] of [[a, b], [b, a]]) { if (!lost.has(groupOf[x])) continue; const r = fd(x); if (big.get(groupOf[x]) === r) continue; let m = nbr.get(r); if (!m) nbr.set(r, m = new Map()); m.set(groupOf[y], (m.get(groupOf[y]) || 0) + 1); } }
+      const to = new Map(); for (const [r, m] of nbr) { if (pa.get(r) >= 0.25 * pa.get(big.get(groupOf[r]))) continue; let bg = -1, bc = 0; for (const [g, c] of m) if (c > bc) { bc = c; bg = g; } if (bg >= 0) to.set(r, bg); }
+      for (let t = 0; t < nt; t++) if (lost.has(groupOf[t])) { const g = to.get(fd(t)); if (g !== undefined) groupOf[t] = g; }
+    }
     return moved;
   }
   function segmentParts(P, I, opts = {}) {
@@ -8038,8 +8052,16 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     window.claude.use('downloads').then(d => { downloads = d; }).catch(() => { downloads = null; });
   }
 
-  function makePart({ name, color, positions, indices, kind, pull, joints, shape }) {
-    return { id: uid++, name, color, positions, indices, bbox: K.bounds(positions), tris: indices.length / 3, volume: K.volume(positions, indices), kind: kind || 'part', pull: pull || null, joints: joints || [], shape: shape || null };
+  function makePart({ name, color, positions, indices, kind, pull, joints, shape, analysis }) {
+    return { id: uid++, name, color, positions, indices, bbox: K.bounds(positions), tris: indices.length / 3, volume: K.volume(positions, indices), kind: kind || 'part', pull: pull || null, joints: joints || [], shape: shape || null, analysis: analysis || null };
+  }
+  // (1.82) The parts of a part are found on the surface as it was before any even scaling or moving (`p.analysis`:
+  // { P, f }, the positions and the factor from them to the part's own), so the same shape gives the same regions at
+  // any size: only the keys go by real millimetres. A turn, a stretch, sculpting or a cut starts afresh from the part.
+  function analysisOf(p) { return p.analysis && p.analysis.P.length === p.positions.length ? p.analysis : { P: p.positions, f: 1 }; }
+  function scaledSeg(seg, f) { // areas back in the part's own square millimetres
+    if (f === 1 || !seg || !seg.areas) return seg;
+    return { ...seg, areas: Array.from(seg.areas, a => a * f * f) };
   }
   // The joints a cut made, kept on each piece for the assembly sheet: { id, type, keys, number }
   function jointOf(p, extra) { return [...(p.joints || []), { id: ++state.cutId, ...extra }]; }
@@ -9607,8 +9629,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   }
 
   /* ---------------- model operations ---------------- */
-  function transformAll(fn, label, factor = 1) {
-    const parts = state.parts.map(p => makePart({ ...p, positions: K.transformPositions(p.positions, fn), indices: p.indices.slice() })); // new indices too: core keeps what it learns of a mesh (centroids, edge lengths) by its index array
+  function transformAll(fn, label, factor = 1, even = 0) { // even: the factor of an even scaling (or 1 for a move), which keeps the parts' analysis
+    const parts = state.parts.map(p => { const a = analysisOf(p); return makePart({ ...p, positions: K.transformPositions(p.positions, fn), indices: p.indices.slice(), analysis: even ? { P: a.P, f: a.f * even } : null }); }); // new indices too: core keeps what it learns of a mesh (centroids, edge lengths) by its index array
     parts.scale = modelScale() * factor;
     commit(parts, label);
     state.selectedId = null;
@@ -9618,7 +9640,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   function rotateAll(axis) { turnAll(axis, 90); }
   function scaleAll(f) {
     if (!(f > 0) || !isFinite(f)) return;
-    transformAll((x, y, z) => [x * f, y * f, z * f], 'the scale change', f);
+    transformAll((x, y, z) => [x * f, y * f, z * f], 'the scale change', f, f);
     fitKeySizeToModel();
     renderInspector(); syncScaleBoxes();
   }
@@ -9663,7 +9685,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const dz = z0 - modelBounds().min[2];
     if (Math.abs(dz) < 1e-9) return;
     const sc = modelScale();
-    state.parts = state.parts.map(p => makePart({ ...p, positions: K.transformPositions(p.positions, (x, y, z) => [x, y, z + dz]), indices: p.indices.slice() }));
+    state.parts = state.parts.map(p => makePart({ ...p, positions: K.transformPositions(p.positions, (x, y, z) => [x, y, z + dz]), indices: p.indices.slice(), analysis: p.analysis }));
     state.parts.scale = sc;
     syncScene(); frameAll();
   }
@@ -9693,7 +9715,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
         const r = await coreTask('repairMesh', [p.positions, p.indices]);
         for (const k of Object.keys(sum)) sum[k] += r[k] || 0;
         open += r.report.openEdges; bad += r.report.badEdges;
-        parts.push(makePart({ ...p, positions: r.positions, indices: r.indices }));
+        parts.push(makePart({ ...p, positions: r.positions, indices: r.indices, analysis: null }));
       }
     } catch (err) { busy(null); toast(`The surface couldn’t be repaired: ${err.message}`, 'error'); return false; }
     busy(null);
@@ -9726,7 +9748,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     for (const p of state.parts) {
       if (p.kind === 'pin') { parts.push(p); continue; }
       const r = K.reduceMesh(p.positions, p.indices, { tolerance: tol });
-      parts.push(r.removed ? makePart({ ...p, positions: r.positions, indices: r.indices }) : p);
+      parts.push(r.removed ? makePart({ ...p, positions: r.positions, indices: r.indices, analysis: null }) : p);
       await nextFrame();
     }
     const after = parts.reduce((s, p) => s + p.tris, 0);
@@ -10802,7 +10824,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const st = stroke; stroke = null;
     if (!st || !st.moved) return;
     const p = state.parts.find(q => q.id === st.partId); if (!p) return;
-    const q = { ...p, positions: st.P, indices: p.indices.slice(), bbox: K.bounds(st.P), volume: K.volume(st.P, p.indices), joints: p.joints }; // new indices: core's caches by index array hold the old surface's centroids and edge lengths
+    const q = { ...p, positions: st.P, indices: p.indices.slice(), bbox: K.bounds(st.P), volume: K.volume(st.P, p.indices), joints: p.joints, analysis: null }; // new indices: core's caches by index array hold the old surface's centroids and edge lengths
     const idx = state.parts.indexOf(p);
     commit(state.parts.slice(0, idx).concat([q], state.parts.slice(idx + 1)), 'the sculpting');
     regionCache.clear(); lineCache.clear(); suggestCache.delete(p.id); sdfCache.delete(p.id);
@@ -11893,21 +11915,24 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const key = regionsKey(p);
     if (regionCache.has(key)) return regionCache.get(key);
     let seg;
+    const a = analysisOf(p);
     if (state.regions.by === 'form') {
-      seg = await coreTask('segmentParts', [p.positions, p.indices, { ...regionOpts(), sdf: sdfCache.get(p.id) || null }]);
+      seg = await coreTask('segmentParts', [a.P, p.indices, { ...regionOpts(), sdf: sdfCache.get(p.id) || null }]);
       if (seg.sdf && !sdfCache.has(p.id)) sdfCache.set(p.id, seg.sdf);
-    } else seg = await coreTask('segmentSurface', [p.positions, p.indices, regionOpts()]);
+    } else seg = await coreTask('segmentSurface', [a.P, p.indices, regionOpts()]);
+    seg = scaledSeg(seg, a.f);
     regionCache.set(key, seg);
     return seg;
   }
   function regionsFor(p) { // the cached regions; found on the main thread when nothing prepared them (the suggestions' search, the debug hooks)
     const key = regionsKey(p);
     if (!regionCache.has(key)) {
+      const a = analysisOf(p);
       if (state.regions.by === 'form') {
-        const seg = K.segmentParts(p.positions, p.indices, { ...regionOpts(), sdf: sdfCache.get(p.id) || null });
+        const seg = K.segmentParts(a.P, p.indices, { ...regionOpts(), sdf: sdfCache.get(p.id) || null });
         if (seg.sdf && !sdfCache.has(p.id)) sdfCache.set(p.id, seg.sdf);
-        regionCache.set(key, seg);
-      } else regionCache.set(key, K.segmentSurface(p.positions, p.indices, regionOpts()));
+        regionCache.set(key, scaledSeg(seg, a.f));
+      } else regionCache.set(key, scaledSeg(K.segmentSurface(a.P, p.indices, regionOpts()), a.f));
     }
     return regionCache.get(key);
   }
@@ -12026,7 +12051,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   const fineCache = new WeakMap();
   function fineRegionsFor(p) {
     let f = fineCache.get(p.indices);
-    if (!f) { f = K.segmentSurface(p.positions, p.indices, { angle: 50, fold: 12, minFrac: 0.0002 }); fineCache.set(p.indices, f); }
+    if (!f) { const a = analysisOf(p); f = scaledSeg(K.segmentSurface(a.P, p.indices, { angle: 50, fold: 12, minFrac: 0.0002 }), a.f); fineCache.set(p.indices, f); }
     return f;
   }
   // Shift-click with a pick that is a selection (painted, filled, kept from other regions), or on a region much
