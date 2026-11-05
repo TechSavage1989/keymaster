@@ -36,6 +36,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Scale % against the original, X/Y/Z sizes linked or free, turns by any angle, Turn freely, Lay flat, Inlay cut explained, hard-surface borders, Section size (1.74).
 - CAD-style parts told from sculpted ones and never melted together, drawn lines sliced through the faces, Section size shown as Large / Medium / Small (1.75).
 - Strokes sliced along their plane (the exact ring, no steps), CAD panels labelled whole, Split into parts falling back to flat cuts at narrow points, held pieces allowed out along a joint, small pieces in mm³ (1.76).
+- Made objects worked out as one shape with the surface they lie flush with (a book's page block against the skirt), so a pick of the book never takes the robe, in Parts, Sections and Paint with Fill; Fill paints exactly the region shown (1.80).
 - Parts rebuilt on 1.70's grouping with the made props (book, crucifix, sword) carved out whole and a hand on a book kept by its narrow contact: Rhinehardt 50 → 26 parts, Aysil 79 → 23, and the hand, the cuff and each face of the book pick alone (1.79).
 - A made object never joins a sculpted one in Parts, judged region by region: the book face no longer melts into the coat's front strip at any Detail (1.78).
 - A pick's slice pinned to the seam: the smoothed cut line never leaves a sharp crease or a hard-to-organic edge, so a book on a robe comes off without a strip of robe (1.77).

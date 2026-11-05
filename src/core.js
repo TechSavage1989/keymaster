@@ -2185,7 +2185,137 @@ const KMCore = (() => {
   // encloses (a bevel strip between two panels); what is left of the regions it was carved from is split into its
   // connected runs, and runs under `minArea` go to the neighbour they share the most border with. `groupOf` is
   // relabelled in place; the count is returned.
-  function propLabels(P, I, made, A, pairs, total, minArea) {
+  // The convex hull of points [[x, y, z], ...] (quickhull): { faces: [[a, b, c], ...], planes: [[nx, ny, nz, d], ...] } with
+  // outward unit normals (n·p <= d inside), or null for fewer than four points off one plane. A point within `tol`
+  // (1e-4 of the points' extent by default) of a face counts as inside, which keeps the many coplanar points of a flat
+  // panel from raising sliver faces; a face is visible from a point strictly beyond its plane (not beyond by `tol`:
+  // that let a coplanar neighbour stay while the face beside it went, and the cone over the leftover edge was a fold).
+  function convexHull3(pts, eps = 1e-4) {
+    const n = pts.length; if (n < 4) return null;
+    const mnB = [Infinity, Infinity, Infinity], mxB = [-Infinity, -Infinity, -Infinity]; for (const q of pts) for (let k = 0; k < 3; k++) { if (q[k] < mnB[k]) mnB[k] = q[k]; if (q[k] > mxB[k]) mxB[k] = q[k]; }
+    const tol = eps * (Math.hypot(mxB[0] - mnB[0], mxB[1] - mnB[1], mxB[2] - mnB[2]) || 1);
+    const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let lo = 0, hi = 0; for (let i = 1; i < n; i++) { if (pts[i][0] < pts[lo][0]) lo = i; if (pts[i][0] > pts[hi][0]) hi = i; }
+    if (lo === hi) return null;
+    const ab = sub(pts[hi], pts[lo]); let far = -1, fd = tol;
+    for (let i = 0; i < n; i++) { const c = cross3(ab, sub(pts[i], pts[lo])), d = Math.hypot(c[0], c[1], c[2]); if (d > fd) { fd = d; far = i; } }
+    if (far < 0) return null;
+    const nrm = cross3(ab, sub(pts[far], pts[lo])); let top = -1, td = tol * Math.hypot(nrm[0], nrm[1], nrm[2]);
+    for (let i = 0; i < n; i++) { const d = Math.abs(dot(nrm, sub(pts[i], pts[lo]))); if (d > td) { td = d; top = i; } }
+    if (top < 0) return null;
+    const faces = []; // { v: [a, b, c], n, d, out: [], dead }
+    const mk = (a, b, c) => { const nn = cross3(sub(pts[b], pts[a]), sub(pts[c], pts[a])), L = Math.hypot(nn[0], nn[1], nn[2]) || 1; const f = { v: [a, b, c], n: [nn[0] / L, nn[1] / L, nn[2] / L], d: 0, out: [], dead: false }; f.d = dot(f.n, pts[a]); return f; };
+    const centre = [0, 1, 2].map(k => (pts[lo][k] + pts[hi][k] + pts[far][k] + pts[top][k]) / 4);
+    const addFace = (a, b, c) => { let f = mk(a, b, c); if (dot(f.n, centre) - f.d > 0) f = mk(a, c, b); faces.push(f); };
+    addFace(lo, hi, far); addFace(lo, hi, top); addFace(lo, far, top); addFace(hi, far, top);
+    const assign = (idx, fs) => { for (const i of idx) { let best = null, bd = tol; for (const f of fs) { if (f.dead) continue; const d = dot(f.n, pts[i]) - f.d; if (d > bd) { bd = d; best = f; } } if (best) best.out.push(i); } };
+    const rest = []; for (let i = 0; i < n; i++) if (i !== lo && i !== hi && i !== far && i !== top) rest.push(i);
+    assign(rest, faces);
+    const queue = faces.slice(), key = (a, b) => a < b ? a * n + b : b * n + a;
+    while (queue.length) {
+      const f = queue.pop(); if (f.dead || !f.out.length) continue;
+      let far2 = -1, fd2 = -1; for (const i of f.out) { const d = dot(f.n, pts[i]) - f.d; if (d > fd2) { fd2 = d; far2 = i; } }
+      const p = pts[far2], vis = []; for (const g of faces) if (!g.dead && dot(g.n, p) - g.d > 0) vis.push(g);
+      const edgeCount = new Map();
+      for (const g of vis) for (let k = 0; k < 3; k++) { const kk = key(g.v[k], g.v[(k + 1) % 3]); edgeCount.set(kk, (edgeCount.get(kk) || 0) + 1); }
+      const orphans = []; for (const g of vis) { g.dead = true; for (const i of g.out) if (i !== far2) orphans.push(i); }
+      const fresh = [];
+      for (const g of vis) for (let k = 0; k < 3; k++) { const a = g.v[k], b = g.v[(k + 1) % 3]; if (edgeCount.get(key(a, b)) === 1) { const nf = mk(a, b, far2); faces.push(nf); fresh.push(nf); } }
+      assign(orphans, fresh);
+      for (const nf of fresh) if (nf.out.length) queue.push(nf);
+    }
+    const live = faces.filter(f => !f.dead);
+    return { faces: live.map(f => f.v), planes: live.map(f => [f.n[0], f.n[1], f.n[2], f.d]) };
+  }
+  // (1.80) Made objects and the surface they own. The owner's book: its covers, straps and page block are five runs of made
+  // surface a millimetre or two apart (fillets and strap channels between them are even triangles), and its bottom face,
+  // a page block recessed behind the cover lips, runs on without a crease into the skirt it lies flush against, so every
+  // pick of the book's underside took a strip of robe, in Parts, Sections and Fill alike. Here the made runs (`prop`,
+  // from the runs in propLabels) are grouped into objects: two runs join when the way between them over the surface is
+  // under a quarter of the larger run's diagonal (a book's parts; never a button three diameters from the next). Each
+  // object's convex hull is its outline in space, and the object claims the surface round it that lies on that hull: a
+  // triangle reached from the object over the surface whose plane holds the whole hull behind it (within `supMade` or
+  // `supPlain` of the diagonal: the straps hang a little below the page block) and whose inward line enters the hull
+  // within `deepMade` or `deepPlain` of the diagonal (the page block sits behind the strap bottoms; a thin fan of made
+  // triangles that runs on across the robe, and the skirt beyond the book's footprint, miss the hull). Made surface is
+  // reached across any edge, sculpted surface never across a concave crease of 30° or more (a finger lying on the cover
+  // meets it in a valley) and under stricter limits, so the cover's fillets come in and the hand stays out. An object
+  // claims at most its own area. The labels are rewritten in place; the new count is returned.
+  function propObjects(P, I, prop, nProps, made, N, C, A, pairs, opts = {}) {
+    const nt = I.length / 3, np = pairs.length / 4; if (nProps < 1) return nProps;
+    const join = opts.join === undefined ? 0.25 : opts.join, cosC = Math.cos((opts.crease === undefined ? 30 : opts.crease) * Math.PI / 180);
+    const supMade = opts.supMade === undefined ? 0.3 : opts.supMade, supPlain = opts.supPlain === undefined ? 0.02 : opts.supPlain, deepMade = opts.deepMade === undefined ? 0.3 : opts.deepMade, deepPlain = opts.deepPlain === undefined ? 0.02 : opts.deepPlain, band = opts.band === undefined ? 0.05 : opts.band;
+    const deg = new Int32Array(nt + 1); for (let i = 0; i < np; i++) { deg[pairs[4 * i] + 1]++; deg[pairs[4 * i + 1] + 1]++; } for (let t = 0; t < nt; t++) deg[t + 1] += deg[t];
+    const fill = deg.slice(0, nt), nb = new Int32Array(deg[nt]), ne = new Int32Array(deg[nt]); for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; ne[fill[a]] = i; nb[fill[a]++] = b; ne[fill[b]] = i; nb[fill[b]++] = a; }
+    const concave = new Uint8Array(np), fp = new Int32Array(nt), cosFlat = Math.cos(Math.PI / 180); for (let t = 0; t < nt; t++) fp[t] = t;
+    const ff = (x) => { while (fp[x] !== x) { fp[x] = fp[fp[x]]; x = fp[x]; } return x; };
+    for (let i = 0; i < np; i++) { const s = pairs[4 * i], q = pairs[4 * i + 1]; const dot = N[3 * s] * N[3 * q] + N[3 * s + 1] * N[3 * q + 1] + N[3 * s + 2] * N[3 * q + 2]; const valley = (C[3 * q] - C[3 * s]) * N[3 * s] + (C[3 * q + 1] - C[3 * s + 1]) * N[3 * s + 1] + (C[3 * q + 2] - C[3 * s + 2]) * N[3 * s + 2] > 1e-9; concave[i] = valley && dot < cosC ? 1 : 0; if (dot >= cosFlat) { const x = ff(s), y = ff(q); if (x !== y) fp[x] = y; } }
+    // a flat panel (three or more triangles within a degree of one plane) is a face of a made thing however even its
+    // triangles: a book's side between the straps; it is claimed on the same terms as made surface, where a curved
+    // sculpted surface (a fillet, a finger) gets the strict terms and the band
+    const fn = new Int32Array(nt); for (let t = 0; t < nt; t++) fn[ff(t)]++; const flat = new Uint8Array(nt); for (let t = 0; t < nt; t++) if (fn[ff(t)] >= 3) flat[t] = 1;
+    // each run's diagonal
+    const mn = [], mx = []; for (let p = 0; p < nProps; p++) { mn.push([Infinity, Infinity, Infinity]); mx.push([-Infinity, -Infinity, -Infinity]); }
+    for (let t = 0; t < nt; t++) if (prop[t] >= 0) for (const v of [I[3 * t], I[3 * t + 1], I[3 * t + 2]]) for (let k = 0; k < 3; k++) { const x = P[3 * v + k]; if (x < mn[prop[t]][k]) mn[prop[t]][k] = x; if (x > mx[prop[t]][k]) mx[prop[t]][k] = x; }
+    const pdg = new Float64Array(nProps); for (let p = 0; p < nProps; p++) pdg[p] = Math.hypot(mx[p][0] - mn[p][0], mx[p][1] - mn[p][1], mx[p][2] - mn[p][2]);
+    // group: Dijkstra over centroid distances from every run at once, each front reaching join × its own diagonal; where two
+    // fronts meet within reach of the larger, the runs join
+    const gp = new Int32Array(nProps); for (let p = 0; p < nProps; p++) gp[p] = p; const gf = (x) => { while (gp[x] !== x) { gp[x] = gp[gp[x]]; x = gp[x]; } return x; };
+    // two groups join only if together they are still one rigid shape: the surface of both lies on the hull of their union
+    // (a box's covers and straps), not deep under it (a cuff and the book beside it: their hull bridges over the hand
+    // between them, so the cover under the hand and the cuff's inner side lie well under it)
+    const byProp = []; for (let p = 0; p < nProps; p++) byProp.push([]); for (let t = 0; t < nt; t++) if (prop[t] >= 0) byProp[prop[t]].push(t);
+    const riseMax = opts.rise === undefined ? 0.06 : opts.rise;
+    const rigid = (x, y) => {
+      const tris = []; for (let p = 0; p < nProps; p++) if (gf(p) === x || gf(p) === y) for (const t of byProp[p]) tris.push(t);
+      const vs = new Set(); for (const t of tris) { vs.add(I[3 * t]); vs.add(I[3 * t + 1]); vs.add(I[3 * t + 2]); }
+      const pts = []; for (const v of vs) pts.push([P[3 * v], P[3 * v + 1], P[3 * v + 2]]);
+      const h = convexHull3(pts); if (!h) return true;
+      const bmn = [Infinity, Infinity, Infinity], bmx = [-Infinity, -Infinity, -Infinity]; for (const q of pts) for (let k = 0; k < 3; k++) { if (q[k] < bmn[k]) bmn[k] = q[k]; if (q[k] > bmx[k]) bmx[k] = q[k]; }
+      const dg = Math.hypot(bmx[0] - bmn[0], bmx[1] - bmn[1], bmx[2] - bmn[2]); let sum = 0, all = 0;
+      for (const t of tris) { const nx = N[3 * t], ny = N[3 * t + 1], nz = N[3 * t + 2], cx = C[3 * t], cy = C[3 * t + 1], cz = C[3 * t + 2]; let rise = Infinity;
+        for (const pl of h.planes) { const den = pl[0] * nx + pl[1] * ny + pl[2] * nz; if (den > 1e-9) { const s = (pl[3] - (pl[0] * cx + pl[1] * cy + pl[2] * cz)) / den; if (s < rise) rise = s; } }
+        if (rise < Infinity) { sum += Math.max(0, rise) * A[t]; all += A[t]; } }
+      return (all ? sum / all : 0) <= riseMax * dg;
+    };
+    { const dist = new Float64Array(nt).fill(Infinity), from = new Int32Array(nt).fill(-1), heap = [];
+      const push = (x) => { heap.push(x); let i = heap.length - 1; while (i > 0) { const j = (i - 1) >> 1; if (heap[j][0] <= heap[i][0]) break; const tmp = heap[i]; heap[i] = heap[j]; heap[j] = tmp; i = j; } };
+      const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; const tmp = heap[i]; heap[i] = heap[m]; heap[m] = tmp; i = m; } } return top; };
+      for (let t = 0; t < nt; t++) if (prop[t] >= 0) { dist[t] = 0; from[t] = prop[t]; push([0, t]); }
+      while (heap.length) { const [dd, t] = pop(); if (dd > dist[t]) continue; const p = from[t];
+        for (let j = deg[t]; j < deg[t + 1]; j++) { const q = nb[j]; if (concave[ne[j]] && !(made[q] && made[t])) continue; /* (the way between two runs crosses a valley only from made surface to made surface: a cuff is not part of the book under the hand it meets, which the way over the hand's fingers would have joined) */ const L = Math.hypot(C[3 * q] - C[3 * t], C[3 * q + 1] - C[3 * t + 1], C[3 * q + 2] - C[3 * t + 2]), nd = dd + L;
+          if (from[q] >= 0 && from[q] !== p && nd + dist[q] <= join * Math.max(pdg[p], pdg[from[q]])) { const x = gf(p), y = gf(from[q]); if (x !== y && rigid(x, y)) gp[x] = y; }
+          if (prop[q] < 0 && nd < dist[q] && nd <= join * pdg[p]) { dist[q] = nd; from[q] = p; push([nd, q]); } } }
+    }
+    const gid = new Map(), groupOf = new Int32Array(nProps); for (let p = 0; p < nProps; p++) { const g = gf(p); if (!gid.has(g)) gid.set(g, gid.size); groupOf[p] = gid.get(g); }
+    const nObj = gid.size, out = new Int32Array(nt).fill(-1); for (let t = 0; t < nt; t++) if (prop[t] >= 0) out[t] = groupOf[prop[t]];
+    const byObj = []; for (let g = 0; g < nObj; g++) byObj.push([]); for (let t = 0; t < nt; t++) if (out[t] >= 0) byObj[out[t]].push(t);
+    for (let g = 0; g < nObj; g++) {
+      const tris = byObj[g], vs = new Set(); for (const t of tris) { vs.add(I[3 * t]); vs.add(I[3 * t + 1]); vs.add(I[3 * t + 2]); }
+      const pts = []; let area = 0; for (const v of vs) pts.push([P[3 * v], P[3 * v + 1], P[3 * v + 2]]); for (const t of tris) area += A[t];
+      const bmn = [Infinity, Infinity, Infinity], bmx = [-Infinity, -Infinity, -Infinity]; for (const q of pts) for (let k = 0; k < 3; k++) { if (q[k] < bmn[k]) bmn[k] = q[k]; if (q[k] > bmx[k]) bmx[k] = q[k]; }
+      const dg = Math.hypot(bmx[0] - bmn[0], bmx[1] - bmn[1], bmx[2] - bmn[2]);
+      const h = convexHull3(pts); if (!h) continue;
+      const hv = new Set(); for (const f of h.faces) for (const v of f) hv.add(v); const hpts = []; for (const i of hv) hpts.push(pts[i]); const planes = h.planes;
+      const test = (t, sup, deep) => { // the plane holds the hull behind it within sup × dg; the line along -n from the centroid enters the hull within deep × dg
+        const nx = N[3 * t], ny = N[3 * t + 1], nz = N[3 * t + 2], cx = C[3 * t], cy = C[3 * t + 1], cz = C[3 * t + 2], d0 = nx * cx + ny * cy + nz * cz;
+        for (const q of hpts) if (nx * q[0] + ny * q[1] + nz * q[2] - d0 > sup * dg) return false;
+        let lo = 0, hi = Infinity;
+        for (const pl of planes) { const den = -(pl[0] * nx + pl[1] * ny + pl[2] * nz), num = pl[3] - (pl[0] * cx + pl[1] * cy + pl[2] * cz); if (Math.abs(den) < 1e-12) { if (num < -1e-9 * dg) return false; continue; } if (den > 0) { if (num / den < hi) hi = num / den; } else if (num / den > lo) lo = num / den; }
+        return lo <= hi + 1e-9 * dg && lo <= deep * dg;
+      };
+      // sculpted surface is claimed only within a band of `band` × dg from the object's made surface (the way measured over
+      // the surface): a fillet along the cover's edge, never a hand lying on the cover, whose pads meet it too gently
+      // for a crease to stop the flood
+      // an object claims at most its own area, and all or nothing: a flood that would take more (a flange's thin rim
+      // reaching both faces of the flange) claims none, rather than an arbitrary ring of it
+      const stack = tris.slice(), seen = new Uint8Array(nt), far = new Float64Array(nt), took = []; for (const t of tris) seen[t] = 1; let claimed = 0;
+      while (stack.length) { const t = stack.pop(); for (let j = deg[t]; j < deg[t + 1]; j++) { const q = nb[j]; if (seen[q] || out[q] >= 0 || (concave[ne[j]] && !made[q])) continue; const rigid = made[q] || flat[q], dq = rigid ? 0 : far[t] + Math.hypot(C[3 * q] - C[3 * t], C[3 * q + 1] - C[3 * t + 1], C[3 * q + 2] - C[3 * t + 2]); if (!rigid && dq > band * dg) continue; seen[q] = 1; if (!(rigid ? test(q, supMade, deepMade) : test(q, supPlain, deepPlain))) continue; if (claimed + A[q] > area) { for (const x of took) out[x] = -1; stack.length = 0; break; } out[q] = g; far[q] = dq; claimed += A[q]; took.push(q); stack.push(q); } }
+    }
+    for (let t = 0; t < nt; t++) prop[t] = out[t];
+    return nObj;
+  }
+  function propLabels(P, I, made, A, pairs, total, minArea, opts = {}) {
     const nt = I.length / 3, np = pairs.length / 4;
     const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
     const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
@@ -2211,15 +2341,21 @@ const KMCore = (() => {
     const prop = new Int32Array(nt).fill(-1); let nProps = 0; const propId = new Map();
     for (let t = 0; t < nt; t++) if (made[t] && area.get(find(t)) >= minArea && area.get(find(t)) <= 0.35 * total) { const r = find(t); if (!propId.has(r)) propId.set(r, nProps++); prop[t] = propId.get(r); }
     if (!nProps) return { prop, nProps: 0 };
-    const touches = new Map(); // sculpted run -> set of prop ids it borders, or -2 when it borders something that isn't a prop
+    nProps = propObjects(P, I, prop, nProps, made, N, C, A, pairs, opts); // (1.80) runs grouped into objects, each with the surface it owns
+    // sculpted runs (connected, outside every object) that border one object only and are smaller than it join it
+    const par2 = new Int32Array(nt); for (let t = 0; t < nt; t++) par2[t] = t;
+    const find2 = (x) => { while (par2[x] !== x) { par2[x] = par2[par2[x]]; x = par2[x]; } return x; };
+    for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (prop[a] < 0 && prop[b] < 0) { const x = find2(a), y = find2(b); if (x !== y) par2[x] = y; } }
+    const area2 = new Map(), touches = new Map(); // sculpted run -> set of object ids it borders, or -2 when it borders something that isn't one
+    for (let t = 0; t < nt; t++) if (prop[t] < 0) { const r = find2(t); area2.set(r, (area2.get(r) || 0) + A[t]); }
     for (let i = 0; i < np; i++) {
-      const a = pairs[4 * i], b = pairs[4 * i + 1]; if (made[a] === made[b]) continue;
-      const [m, o] = made[a] ? [a, b] : [b, a], r = find(o);
+      const a = pairs[4 * i], b = pairs[4 * i + 1]; if ((prop[a] >= 0) === (prop[b] >= 0)) continue;
+      const [m, o] = prop[a] >= 0 ? [a, b] : [b, a], r = find2(o);
       let set = touches.get(r); if (!set) { set = new Set(); touches.set(r, set); }
-      set.add(prop[m] >= 0 ? prop[m] : -2);
+      set.add(prop[m]);
     }
-    const propArea = new Float64Array(nProps); for (const [r, id] of propId) propArea[id] = area.get(r);
-    for (let t = 0; t < nt; t++) if (!made[t]) { const r = find(t), set = touches.get(r); if (set && set.size === 1) { const [p] = set; if (p >= 0 && area.get(r) < 0.5 * propArea[p]) prop[t] = p; } }
+    const propArea = new Float64Array(nProps); for (let t = 0; t < nt; t++) if (prop[t] >= 0) propArea[prop[t]] += A[t];
+    for (let t = 0; t < nt; t++) if (prop[t] < 0) { const r = find2(t), set = touches.get(r); if (set && set.size === 1) { const [p] = set; if (area2.get(r) < 0.2 * propArea[p]) prop[t] = p; } } // (a fifth: a hand on a book, enclosed between the book and the cuff, is no island of it)
     return { prop, nProps };
   }
   function carveProps(P, I, groupOf, made, A, pairs, total, minArea, labels) {
@@ -2278,6 +2414,10 @@ const KMCore = (() => {
     // (1.74) where a hard surface meets an organic one there is a border, whatever the angle (the owner: "make sure the
     // application can determine when a hard surface meets a more organic surface and splits accordingly")
     const hard = (opts.hardSurface !== undefined ? opts.hardSurface : fold !== undefined) ? hardSurface(P, I, N, A, pairs, total) : null;
+    if (hard && opts.props !== false) { // (1.80) a made object's whole surface counts as hard, the contact surface it owns included (a book's recessed page block, flush with the skirt)
+      const { prop } = propLabels(P, I, hard, A, pairs, total, total * 0.002);
+      for (let t = 0; t < nt; t++) if (prop[t] >= 0) hard[t] = 1;
+    }
     if (hard) for (let i = 0; i < np; i++) if (hard[pairs[4 * i]] !== hard[pairs[4 * i + 1]]) smooth[i] = 0;
     for (let i = 0; i < np; i++) if (smooth[i]) { const x = find(pairs[4 * i]), y = find(pairs[4 * i + 1]); if (x !== y) par[x] = y; }
     // melt specks into the neighbour they share the most border with, smallest first, until none are left
@@ -2581,7 +2721,7 @@ const KMCore = (() => {
     // one region whatever the thickness and the creases say, nothing merges with one or melts into one, and a small
     // part's contact with the figure is measured against the sculpted surface alone (a hand lying on a book touches
     // the book all along its underside; what holds it to the figure is a sliver of skirt)
-    const made = opts.props === false ? null : hardSurface(P, I, N, A, pairs, total), minProp = total * Math.min(minFrac / 4, 0.003);
+    const made = opts.props === false ? null : hardSurface(P, I, N, A, pairs, total), minProp = total * Math.min(minFrac / 4, 0.002);
     const labels = made ? propLabels(P, I, made, A, pairs, total, minProp) : null, prop = labels ? labels.prop : null;
     // both labellings laid over each other: a region is a connected run with one form level and one crease region
     const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
@@ -2690,6 +2830,7 @@ const KMCore = (() => {
     unpinchGroups(P, I, groupOf);
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
+    if (made && prop) for (let t = 0; t < nt; t++) if (prop[t] >= 0) made[t] = 1; // (1.80) the objects' claimed surface is hard too, so the seam is pinned round it
     seg.levels = form.levels; seg.sdf = sdf; seg.hard = made; // (1.77) so a pick's slice can pin the seam where hard meets organic
     return seg;
   }
@@ -7046,7 +7187,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups,
+    segmentParts, convexHull3, propObjects, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
