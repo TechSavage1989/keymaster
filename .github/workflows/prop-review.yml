@@ -1,0 +1,26 @@
+name: Spatial selection review support
+on:
+  push:
+    branches: [fix/spatial-prop-ownership]
+    paths: [.github/workflows/prop-review.yml, tools/apply-prop-fix.py, tools/prop-ownership.js]
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect the exact pinned renderer used by the app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p renderer-deps
+          curl --fail --retry 3 -L 'https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js' -o renderer-deps/three.min.js
+          curl --fail --retry 3 -L 'https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js' -o renderer-deps/OrbitControls.js
+          curl --fail --retry 3 -L 'https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/TransformControls.js' -o renderer-deps/TransformControls.js
+          test -s renderer-deps/three.min.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinned-renderer-review
+          path: renderer-deps/
+          retention-days: 1
