@@ -734,6 +734,63 @@ console.log('cut suggestions');
   }
 }
 
+console.log('made objects and the surface they own (1.80)');
+{
+  // the convex hull: a cube's corners with points inside give its twelve facets; many coplanar, noisy points on a box's faces
+  // (a flat panel as float32 stores it) give a hull every point lies in (the first quickhull folded on such input)
+  { let sd = 5; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+    const pts = []; for (let i = 0; i < 8; i++) pts.push([i & 1, (i >> 1) & 1, (i >> 2) & 1]); for (let i = 0; i < 200; i++) pts.push([rnd(), rnd(), rnd()]);
+    const h = K.convexHull3(pts), inside = (h, pts, tol) => pts.every(p => h.planes.every(pl => pl[0] * p[0] + pl[1] * p[1] + pl[2] * p[2] - pl[3] <= tol));
+    const faces = []; for (let i = 0; i < 400; i++) { const f = i % 6, u = rnd(), v = rnd(), p = [u, v, 0]; if (f === 1) p[2] = 1; if (f === 2) { p[0] = 0; p[2] = u; } if (f === 3) { p[0] = 1; p[2] = u; } if (f === 4) { p[1] = 0; p[2] = v; } if (f === 5) { p[1] = 1; p[2] = v; } faces.push(p.map(x => Math.fround(x * 5.123 + 3 + (rnd() - 0.5) * 1e-6))); }
+    const h2 = K.convexHull3(faces); const ec = new Map(); for (const f of h2.faces) for (let k = 0; k < 3; k++) { const a = f[k], b = f[(k + 1) % 3], key = a < b ? a + ',' + b : b + ',' + a; ec.set(key, (ec.get(key) || 0) + 1); }
+    check('the convex hull of a cube with points inside is its twelve facets, and of noisy coplanar box faces a sealed hull round every point', h.faces.length === 12 && inside(h, pts, 1e-9) && inside(h2, faces, 1e-3) && [...ec.values()].every(v => v === 2), { facets: h.faces.length, facets2: h2.faces.length }); }
+  // a made plank fused into a body's corner, its recessed front face flush with the body's front and running on into it
+  // without a crease (Father Rhinehardt's book against the skirt: every pick of the book's underside took a strip of
+  // robe): built directly, since a boolean would offset the coplanar faces by microns and leave a sliver crease; every
+  // edge a multiple of the step, so neighbouring faces share their points and the solid is sealed
+  const plankBody = (opts = {}) => {
+    const S = 0.5, pos = [], idx = [], at = (x, y, z) => { pos.push(x, y, z); return pos.length / 3 - 1; };
+    const steps = (a, b) => Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / S));
+    const grid = (o, u, v) => { const nu = Math.max(1, Math.round(Math.hypot(...u) / S)), nv = Math.max(1, Math.round(Math.hypot(...v) / S)), ids = []; // a quad grid S apart, outward normal u × v
+      for (let i = 0; i <= nu; i++) { ids.push([]); for (let j = 0; j <= nv; j++) ids[i].push(at(o[0] + u[0] * i / nu + v[0] * j / nv, o[1] + u[1] * i / nu + v[1] * j / nv, o[2] + u[2] * i / nu + v[2] * j / nv)); }
+      for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) { const a = ids[i][j], b = ids[i + 1][j], c = ids[i + 1][j + 1], d = ids[i][j + 1]; idx.push(a, b, c, a, c, d); } };
+    const fan = (corners) => { const ring = []; for (let k = 0; k < corners.length; k++) { const a = corners[k], b = corners[(k + 1) % corners.length], n = steps(a, b); for (let i = 0; i < n; i++) ring.push(at(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n, a[2] + (b[2] - a[2]) * i / n)); } // a face fanned from its first corner: long thin triangles, as CAD exports them
+      for (let k = 1; k + 1 < ring.length; k++) idx.push(ring[0], ring[k], ring[k + 1]); };
+    const B = 20, D = 4, L = 5, T = 3.5, H = 3, R = 0.5, I2 = 0.5; // body x, z in [-B, B], y in [0, D], its front y = 0; plank x in [B, B + L], y in [-R, T], z in [-H, H], its front recessed to y = 0 for |z| < I2 between two lips
+    grid([-B, 0, -B], [2 * B, 0, 0], [0, 0, 2 * B]); grid([-B, D, -B], [0, 0, 2 * B], [2 * B, 0, 0]); grid([-B, 0, B], [2 * B, 0, 0], [0, D, 0]); grid([-B, 0, -B], [0, D, 0], [2 * B, 0, 0]); grid([-B, 0, -B], [0, 0, 2 * B], [0, D, 0]);
+    grid([B, 0, -B], [0, D, 0], [0, 0, B - H]); grid([B, 0, H], [0, D, 0], [0, 0, B - H]); grid([B, T, -H], [0, D - T, 0], [0, 0, 2 * H]); // the body's right side round the plank
+    fan([[B, T, -H], [B, T, H], [B + L, T, H], [B + L, T, -H]]); fan([[B, -R, H], [B + L, -R, H], [B + L, T, H], [B, T, H]]); fan([[B, -R, -H], [B, T, -H], [B + L, T, -H], [B + L, -R, -H]]); // the plank's back, top and bottom
+    fan([[B, 0, -I2], [B + L, 0, -I2], [B + L, 0, I2], [B, 0, I2]]); // the recessed front, flush with the body's front
+    grid([B, -R, I2], [L, 0, 0], [0, 0, H - I2]); grid([B, -R, -H], [L, 0, 0], [0, 0, H - I2]); grid([B, -R, I2], [0, R, 0], [L, 0, 0]); grid([B, 0, -I2], [0, -R, 0], [L, 0, 0]); // the lips' fronts and inner walls
+    grid([B + L, 0, -H], [0, T, 0], [0, 0, 2 * H]); grid([B + L, -R, I2], [0, R, 0], [0, 0, H - I2]); grid([B + L, -R, -H], [0, R, 0], [0, 0, H - I2]); grid([B, -R, I2], [0, 0, H - I2], [0, R, 0]); grid([B, -R, -H], [0, 0, H - I2], [0, R, 0]); // the end and the lips' ends
+    const m = K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) }), P = new Float64Array(m.positions), I = m.indices, nt = I.length / 3;
+    const tag = new Uint8Array(nt); // 1 the recessed front, 2 the rest of the plank, 0 the body
+    for (let t = 0; t < nt; t++) { const cx = (P[3 * I[3 * t]] + P[3 * I[3 * t + 1]] + P[3 * I[3 * t + 2]]) / 3, cy = (P[3 * I[3 * t] + 1] + P[3 * I[3 * t + 1] + 1] + P[3 * I[3 * t + 2] + 1]) / 3, cz = (P[3 * I[3 * t] + 2] + P[3 * I[3 * t + 1] + 2] + P[3 * I[3 * t + 2] + 2]) / 3; if (cx > B + 1e-3) tag[t] = Math.abs(cy) < 1e-3 && Math.abs(cz) < I2 ? 1 : 2; }
+    let sd = 11; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647); // sculpt-like noise on the body, never on the plank or the seam
+    for (let i = 0; i < P.length; i += 3) if (P[i] < B - 1e-3 || (P[i] < B + 1e-3 && !(P[i + 1] <= T + 1e-3 && Math.abs(P[i + 2]) <= H + 1e-3))) { P[i] += 0.03 * (rnd() - 0.5); P[i + 1] += 0.03 * (rnd() - 0.5); P[i + 2] += 0.03 * (rnd() - 0.5); }
+    if (opts.turn) { const [ax, ang] = opts.turn, c = Math.cos(ang), s = Math.sin(ang), n = Math.hypot(...ax), u = ax.map(v => v / n); for (let i = 0; i < P.length; i += 3) { const x = P[i], y = P[i + 1], z = P[i + 2], d = u[0] * x + u[1] * y + u[2] * z; const cx = u[1] * z - u[2] * y, cy = u[2] * x - u[0] * z, cz = u[0] * y - u[1] * x; P[i] = x * c + cx * s + u[0] * d * (1 - c); P[i + 1] = y * c + cy * s + u[1] * d * (1 - c); P[i + 2] = z * c + cz * s + u[2] * d * (1 - c); } }
+    if (opts.scale) for (let i = 0; i < P.length; i++) P[i] *= opts.scale;
+    return { P: new Float32Array(P), I, tag, nt };
+  };
+  for (const [name, o] of [['as built', {}], ['turned and scaled down', { turn: [[1, 2, 3], 0.7], scale: 0.4 }], ['turned and scaled up', { turn: [[-2, 1, 1], 2.1], scale: 6 }]]) {
+    const { P, I, tag, nt } = plankBody(o), front = [...Array(nt).keys()].find(t => tag[t] === 1), bodyFront = K.nearestTriangle(P, I, o.scale ? [0, 0, 0] : [0, 0, 0]);
+    let nFront = 0, nPlank = 0; for (let t = 0; t < nt; t++) { if (tag[t] === 1) nFront++; else if (tag[t] === 2) nPlank++; }
+    const comp = (seg) => { const g = seg.groupOf[front]; let f = 0, pk = 0, body = 0; for (let t = 0; t < nt; t++) if (seg.groupOf[t] === g) { if (tag[t] === 1) f++; else if (tag[t] === 2) pk++; else body++; } return { f, pk, body }; };
+    const results = {}; let ok = K.edgeReport(I).closed;
+    for (const [d, oo] of [['Big', { ratio: 1.6, strength: 0.68, minFrac: 0.04, keepFrac: 0.03 }], ['Balanced', { ratio: 1.35, strength: 0.5, minFrac: 0.02 }], ['Fine', { ratio: 1.2, strength: 0.36, minFrac: 0.008 }]]) {
+      const seg = K.segmentParts(P, I, oo), c = comp(seg); results[d] = c; let bodyRegionPlank = 0, hardFront = 0, hardPlank = 0, hardBody = 0; for (let t = 0; t < nt; t++) { if (seg.groupOf[t] === seg.groupOf[bodyFront] && tag[t]) bodyRegionPlank++; if (seg.hard[t]) { if (tag[t] === 1) hardFront++; else if (tag[t] === 2) hardPlank++; else hardBody++; } }
+      // the whole plank is the made object's surface (its even-triangled lips, walls and end owned by it; before 1.80 only the thin fans were), so the seam is pinned all round it
+      ok = ok && c.f === nFront && c.pk >= 0.95 * nPlank && c.body < 0.005 * nt && bodyRegionPlank === 0 && hardFront === nFront && hardPlank >= 0.95 * nPlank && hardBody < 0.002 * nt; Object.assign(results[d], { bodyRegionPlank, hardFront, hardPlank, hardBody });
+      if (d === 'Balanced') { // Fill picks the region as it is: holes closing adds nothing of the body; and the pick sliced through the triangles keeps off the body (the seam is pinned where the made object meets the sculpted surface)
+        const sel = new Uint8Array(nt); for (let t = 0; t < nt; t++) if (seg.groupOf[t] === seg.groupOf[front]) sel[t] = 1; const fg = K.fillSelectionGaps(P, I, sel, { gap: 0 }); let addedBody = 0; for (let t = 0; t < nt; t++) if (fg.sel[t] && !sel[t] && !tag[t]) addedBody++;
+        const sl = K.sliceRegionPick(P, I, seg, [seg.groupOf[front]]); let off = 0, kept = 0; if (sl) for (let t = 0; t < sl.I.length / 3; t++) if (sl.seg.groupOf[t] === 1) { kept++; const a = 3 * sl.I[3 * t], b = 3 * sl.I[3 * t + 1], c2 = 3 * sl.I[3 * t + 2]; const cx = (sl.P[a] + sl.P[b] + sl.P[c2]) / 3, cy = (sl.P[a + 1] + sl.P[b + 1] + sl.P[c2 + 1]) / 3, cz = (sl.P[a + 2] + sl.P[b + 2] + sl.P[c2 + 2]) / 3; if (!o.turn && cx < 20 - 0.3) off++; }
+        results.fill = { addedBody, sliced: !!sl, off, kept }; ok = ok && addedBody === 0 && (!!sl ? off <= 0.01 * kept : true); }
+    }
+    const v = 55, sec = K.segmentSurface(P, I, { fold: 60 - 0.55 * v, angle: 80 - 0.5 * v, minFrac: 0.03 * Math.pow(0.02, v / 100) }), cs = comp(sec); results.Sections = cs; let secBody = 0; for (let t = 0; t < nt; t++) if (sec.groupOf[t] === sec.groupOf[bodyFront] && tag[t]) secBody++;
+    ok = ok && cs.f === nFront && cs.body < 0.001 * nt && secBody === 0; results.Sections.bodyRegionPlank = secBody;
+    check('a made plank whose recessed front runs flush into a sculpted body (' + name + '): in Parts the plank is one region with its front and none of the body, the body\'s front holds none of the plank, Fill and the sliced pick stay off the body, and in Sections too', ok, results);
+  }
+}
 console.log('engraved joint numbers');
 {
   const lathe = (radius, len, axis, seg = 48, rings = 120) => {
