@@ -2757,7 +2757,7 @@
     const run = ++pickRun, seg = K.selectionSeg(p.positions, p.indices, state.paint.sel);
     coreTask('planJoints', [p.positions, p.indices, pickReq(loops, { regions: [1], seg, painted: true })]).then((j) => {
       if (run !== pickRun || state.regions.pick !== pick) return;
-      pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths;
+      pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths; pick.cover = j.cover || null;
       pick.keys = j.perLoop.flatMap(per => per.keys); pick.plugs = j.perLoop.flatMap(per => per.plugs);
       pick.noKeys = noKeysText(j.noKeys, j.loops.length > 1);
       drawPickLines(p, pick); renderPick(); markDirty();
@@ -4241,6 +4241,7 @@
     // owner saw no keys at all until it was done
     const done = coreTask('planJoints', [p.positions, p.indices, req]).then((joints) => {
       if (!live()) return null;
+      pick.cover = joints.cover || null; if (pick.comp) pick.comp = null;
       if (joints.paths) pick.paths = joints.paths; else { pick.loops = joints.loops; pick.loop = joints.loops[0]; } // a sliced pick's lines run through new vertices: drawn from their points, and the pick keeps the lines on the part itself
       pick.perLoop = joints.perLoop; pick.frames = joints.frames; pick.draw = joints.draw;
       pick.keys = joints.perLoop.flatMap(per => per.keys); pick.plugs = joints.perLoop.flatMap(per => per.plugs);
@@ -4333,7 +4334,8 @@
     const picked = new Set(pick && pick.partId === p.id && pick.regions && !pick.painted ? pick.regions : []); // a painted pick's [1] names its own two-region labelling, not the part's regions
     // lines picked by hand: the piece they would split off (side 1, the smaller side) is tinted, kept on the pick
     let lineSel = null;
-    if (pick && pick.partId === p.id && pick.painted && pick.selection && !state.paint.on) lineSel = pick.selection; // a filled pick: its own selection, not the part's regions
+    if (pick && pick.partId === p.id && pick.cover && !state.paint.on) lineSel = pick.cover; // (1.83) a limb's flat end: what the cut will take, past the regions picked
+    else if (pick && pick.partId === p.id && pick.painted && pick.selection && !state.paint.on) lineSel = pick.selection; // a filled pick: its own selection, not the part's regions
     else if (pick && pick.partId === p.id && !pick.regions && !pick.painted && pick.loops && pick.loops.length && pick.loops.every(l => l.closed)) {
       if (pick.tintSel === undefined) { try { pick.tintSel = K.loopSelection(p.positions, p.indices, pick.loops); } catch (err) { pick.tintSel = null; } }
       lineSel = pick.tintSel;
@@ -4350,7 +4352,7 @@
     const anyPick = picked.size > 0 || lineSel !== null, dim = anyPick ? 0.78 : 1;
     let comp = null;
     if (anyPick) {
-      const key = lineSel ? 'lines' : [...picked].sort((x, y) => x - y).join(',');
+      const key = lineSel ? (pick.cover ? 'cover' : 'lines') : [...picked].sort((x, y) => x - y).join(',');
       if (!pick.comp || pick.comp.key !== key) { try { pick.comp = { key, ...K.pickComponents(p.positions, p.indices, seg.groupOf, picked, lineSel) }; } catch (err) { pick.comp = { key, label: null, count: 1 }; } }
       comp = pick.comp;
     }
