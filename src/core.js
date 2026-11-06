@@ -5500,7 +5500,11 @@ const KMCore = (() => {
           an = side === cfg.pegSide ? an0 : analyzeLoop(P, I, loop, lcfg, D);
           per.pegSide = side; per.cfg = lcfg;
           out.frames.push(an.frame);
-          if (cfg.type === 'plug') {
+          if (cfg.type === 'plug' && an.curved && an.curved.sunk && an.curved.sunk.column) {
+            // (1.89) the cut is already extruded into a plug: a second plug on its floor added nothing and, on a steeply
+            // tapered floor, came away as a slab of its own; the extruded plug is this line's plug
+            per.plugs = []; per.extruded = true;
+          } else if (cfg.type === 'plug') {
             const pl = planPlugs(an, lcfg);
             per.plugs = pl.filter(q => q.ok);
             if (!per.plugs.length && !out.noKeys) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
@@ -5658,7 +5662,10 @@ const KMCore = (() => {
     try { first = run(true, true); } catch (err) { first = null; }
     // joints must never make pieces of their own: a pocket that breaks through a thin wall nicks off a crumb
     // (a plug on one of the owner's Aysil limbs left a 0.01 cm³ scrap); then the joints go and the cut stands alone
-    const crumbs = (r) => { const v = r.parts.map(q => Math.abs(q.volume)), tot = v.reduce((a, b) => a + b, 0); return v.some(x => x < 0.01 * tot && x < 0.2 * Math.min(...v.filter(y => y >= 0.01 * tot))); };
+    // (1.89) nor a piece of their own: a plug on a tapered plug's floor came away whole as a 29 cm³ slab, all of it new
+    // faces, joined to neither piece; such a piece has no point of the model's surface
+    let orig = null; const onlyNew = (q) => { if (!orig) { orig = new Set(); for (let i = 0; i < P.length; i += 3) orig.add(Math.fround(P[i]) + ',' + Math.fround(P[i + 1]) + ',' + Math.fround(P[i + 2])); } const Q = q.positions; for (let i = 0; i < Q.length; i += 3) if (orig.has(Math.fround(Q[i]) + ',' + Math.fround(Q[i + 1]) + ',' + Math.fround(Q[i + 2]))) return false; return true; };
+    const crumbs = (r) => { const v = r.parts.map(q => Math.abs(q.volume)), tot = v.reduce((a, b) => a + b, 0); return v.some(x => x < 0.01 * tot && x < 0.2 * Math.min(...v.filter(y => y >= 0.01 * tot))) || r.parts.some(onlyNew); };
     if (first && (out.keys || out.plugs) && crumbs(first)) {
       let plain = null; try { plain = run(false, true); } catch (err) { plain = null; }
       if (plain && !crumbs(plain)) { first = plain; dropJoints('crumb'); }

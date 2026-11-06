@@ -4188,7 +4188,8 @@
   function noKeysText(nk, many, perLoop) {
     if (!nk) return null;
     // (1.85) how many lines have no joint: "one of its lines" read as if the others had one when none did
-    const n = perLoop ? perLoop.length : 0, bare = perLoop ? perLoop.filter(per => !(per.keys && per.keys.length) && !(per.plugs && per.plugs.length)).length : 0;
+    const n = perLoop ? perLoop.length : 0, bare = perLoop ? perLoop.filter(per => !(per.keys && per.keys.length) && !(per.plugs && per.plugs.length) && !per.extruded).length : 0;
+    if (!bare && n) return null; // (1.89) every line has its joint (a line extruded into a plug counts as one)
     const where = !many ? 'this line' : n && bare === n ? (n === 2 ? 'either of its lines' : `any of its ${n} lines`) : bare > 1 ? `${bare} of its ${n} lines` : 'one of its lines';
     const those = !many ? 'that line' : bare > 1 ? 'those lines' : 'that line';
     const p = selectedPart(), size = p ? Math.max(...p.bbox.size) : 0;
@@ -4451,7 +4452,7 @@
     const vols = pick.result.parts.map(q => fmtVol(q.volume)); // (1.76) a miniature's hand is mm³, not "0.0 cm³"
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
     const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
-    const sinks = (pick.result.sinks || []).filter(s => s > 0.05), sunkLine = sinks.length ? ` The face is sunk ${fmt(Math.max(...sinks))} mm into the other piece${sinks.length < nl ? ' on ' + (sinks.length === 1 ? 'one line' : `${sinks.length} lines`) : ''}, so this piece keeps its thickness to the edge.` : state.cfg.sink > 0 ? ' There’s no room to sink the face here.' : '';
+    const sinks = (pick.result.sinks || []).filter(s => s > 0.05), sunkLine = sinks.length ? ` The cut is extruded up to ${fmt(Math.max(...sinks))} mm into the other piece${state.cfg.sinkTaper > 0 ? `, tapered ${fmt(state.cfg.sinkTaper)}°` : ''}${sinks.length < nl ? ' on ' + (sinks.length === 1 ? 'one line' : `${sinks.length} lines`) : ''}, so this piece ends in a plug that seats in a socket.` : state.cfg.sink > 0 ? ' There’s no room to extrude the cut here.' : '';
     const what = region ? `${painted ? 'The painted area’s' : nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${painted || nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} and leaves ${vols.length === 2 ? vols[1] : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')}`}.`
       : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]}.`
       : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')}.`;
