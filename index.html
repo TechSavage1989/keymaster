@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.83, build 3c9e07. After an update, refresh the page and check this changes.">v1.83 · 3c9e07</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.83, build e5568d. After an update, refresh the page and check this changes.">v1.83 · e5568d</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -6019,7 +6019,8 @@ const KMCore = (() => {
     if (!l2.length || l2.some(l => !l.closed) || l2.length !== loops.length) return null;
     if (seg.hard) { const h = new Uint8Array(nt2); for (let t = 0; t < nt2; t++) h[t] = seg.hard[parent[t]]; s2.hard = h; }
     const pin = new Set(); for (let t = 0; t < nt2; t++) if (chain[parent[t]]) for (let k = 0; k < 3; k++) { const v = I2[3 * t + k]; if (v >= nv) pin.add(v); }
-    return { P: P2, I: I2, seg: s2, groups: [1], loops: l2, pin, ends: ends.length, planes: ends.map(e => ({ o: e.o, n: e.n })) };
+    const cover = new Uint8Array(nt); for (let t = 0; t < nt2; t++) if (sel[t]) cover[parent[t]] = 1; // the part's own triangles the pick now covers, for the app to tint
+    return { P: P2, I: I2, seg: s2, groups: [1], loops: l2, pin, ends: ends.length, planes: ends.map(e => ({ o: e.o, n: e.n })), cover };
   }
   // The mesh a pick works on: with `req.smooth`, the picked lines eased along the surface (`smoothLoopVertices`)
   // on a copy, with its own index array so no cache kept for the original's positions is read for it
@@ -6036,7 +6037,7 @@ const KMCore = (() => {
         let sl = null; try { sl = sliceRegionPick(le.P, le.I, le.seg, [1], { ...(typeof req.smooth === 'object' ? req.smooth : {}), pin: le.pin }); } catch (err) { sl = null; }
         const r = sl || le;
         const flatEnds = le.ends >= le.loops.length; // (every outline a flat limb end: it meets the surface squarely, so the face isn't sunk; sunk, it left a thin collar round the recess)
-        return { P: r.P, I: r.I, req: { ...req, seg: r.seg, regions: r.groups, loops: r.loops, sliced: true, limbEnds: le.ends, sink: flatEnds ? 0 : req.sink } };
+        return { P: r.P, I: r.I, req: { ...req, seg: r.seg, regions: r.groups, loops: r.loops, sliced: true, limbEnds: le.ends, cover: le.cover, sink: flatEnds ? 0 : req.sink } };
       }
     }
     if (req.regions && req.seg && !req.noReroute && !req.noSlice) { // a region pick sliced along a smooth curve through the triangles
@@ -6056,6 +6057,7 @@ const KMCore = (() => {
     let loops = req.loops;
     if (!req.regions && loops.length && loops.every(l => l.closed)) { try { loops = orientLoops(P, I, loops, { what: 'lines' }).loops; } catch (err) { /* the cut will say why */ } }
     const out = { loops, perLoop: [], frames: [], draw: [], keys: 0, plugs: 0, noKeys: null, result: null, error: null, errorCode: null, forced: null, dropped: null };
+    if (req.cover) out.cover = req.cover; // (1.83) what a limb's flat end makes the pick cover, on the part itself
     if (req.sliced) out.paths = loops.map(l => { const a = new Float32Array(3 * l.verts.length); l.verts.forEach((v, i) => { a[3 * i] = P[3 * v]; a[3 * i + 1] = P[3 * v + 1]; a[3 * i + 2] = P[3 * v + 2]; }); return a; }); // the sliced lines' points: their vertices are new, so the app draws them from these
     const closed = loops.length > 0 && loops.every(l => l.closed);
     if (closed && cfg.type !== 'none') {
@@ -10937,7 +10939,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const run = ++pickRun, seg = K.selectionSeg(p.positions, p.indices, state.paint.sel);
     coreTask('planJoints', [p.positions, p.indices, pickReq(loops, { regions: [1], seg, painted: true })]).then((j) => {
       if (run !== pickRun || state.regions.pick !== pick) return;
-      pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths;
+      pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths; pick.cover = j.cover || null;
       pick.keys = j.perLoop.flatMap(per => per.keys); pick.plugs = j.perLoop.flatMap(per => per.plugs);
       pick.noKeys = noKeysText(j.noKeys, j.loops.length > 1);
       drawPickLines(p, pick); renderPick(); markDirty();
@@ -12421,6 +12423,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     // owner saw no keys at all until it was done
     const done = coreTask('planJoints', [p.positions, p.indices, req]).then((joints) => {
       if (!live()) return null;
+      pick.cover = joints.cover || null; if (pick.comp) pick.comp = null;
       if (joints.paths) pick.paths = joints.paths; else { pick.loops = joints.loops; pick.loop = joints.loops[0]; } // a sliced pick's lines run through new vertices: drawn from their points, and the pick keeps the lines on the part itself
       pick.perLoop = joints.perLoop; pick.frames = joints.frames; pick.draw = joints.draw;
       pick.keys = joints.perLoop.flatMap(per => per.keys); pick.plugs = joints.perLoop.flatMap(per => per.plugs);
@@ -12513,7 +12516,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const picked = new Set(pick && pick.partId === p.id && pick.regions && !pick.painted ? pick.regions : []); // a painted pick's [1] names its own two-region labelling, not the part's regions
     // lines picked by hand: the piece they would split off (side 1, the smaller side) is tinted, kept on the pick
     let lineSel = null;
-    if (pick && pick.partId === p.id && pick.painted && pick.selection && !state.paint.on) lineSel = pick.selection; // a filled pick: its own selection, not the part's regions
+    if (pick && pick.partId === p.id && pick.cover && !state.paint.on) lineSel = pick.cover; // (1.83) a limb's flat end: what the cut will take, past the regions picked
+    else if (pick && pick.partId === p.id && pick.painted && pick.selection && !state.paint.on) lineSel = pick.selection; // a filled pick: its own selection, not the part's regions
     else if (pick && pick.partId === p.id && !pick.regions && !pick.painted && pick.loops && pick.loops.length && pick.loops.every(l => l.closed)) {
       if (pick.tintSel === undefined) { try { pick.tintSel = K.loopSelection(p.positions, p.indices, pick.loops); } catch (err) { pick.tintSel = null; } }
       lineSel = pick.tintSel;
@@ -12530,7 +12534,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const anyPick = picked.size > 0 || lineSel !== null, dim = anyPick ? 0.78 : 1;
     let comp = null;
     if (anyPick) {
-      const key = lineSel ? 'lines' : [...picked].sort((x, y) => x - y).join(',');
+      const key = lineSel ? (pick.cover ? 'cover' : 'lines') : [...picked].sort((x, y) => x - y).join(',');
       if (!pick.comp || pick.comp.key !== key) { try { pick.comp = { key, ...K.pickComponents(p.positions, p.indices, seg.groupOf, picked, lineSel) }; } catch (err) { pick.comp = { key, label: null, count: 1 }; } }
       comp = pick.comp;
     }
