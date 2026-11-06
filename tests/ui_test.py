@@ -446,6 +446,13 @@ with sync_playwright() as p:
     pg.click('[data-act=done]'); pg.click('[data-act=printer][data-value=fdm]'); pg.wait_for_timeout(200)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(500)
     check('filament: back to 2.5 mm, 0.2 mm gap, 1.2 mm walls', pg.input_value('input[data-cfg=sizeMin]') == '2.5' and pg.input_value('input[data-cfg=margin]') == '1.2')
+    # 1.83: Thinnest piece follows the printer until set by hand; choosing a printer puts it back
+    check('Thinnest piece follows the printer: 1.2 mm for filament', pg.input_value('#minPiece') == '1.2', pg.input_value('#minPiece'))
+    pg.evaluate("(() => { const e = document.querySelector('#minPiece'); e.value = '2'; e.dispatchEvent(new Event('change')); })()")
+    check('Thinnest piece set by hand is the thinnest a piece may be', pg.evaluate("KeymasterDebug.cfg().minPiece") == 2 and pg.input_value('#minPiece') == '2')
+    pg.click('[data-act=done]'); pg.click('[data-act=printer][data-value=fdm]'); pg.wait_for_timeout(200)
+    check('choosing a printer puts Thinnest piece back to the printer\'s wall', pg.evaluate("KeymasterDebug.cfg().minPiece") == 0 and pg.input_value('#minPiece') == '1.2', pg.input_value('#minPiece'))
+    pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(300)
     pg.screenshot(path=str(OUT / 'shot_shapes.png'))
     pg.click('[data-act=shape][data-value=round]')
     pg.wait_for_timeout(400)

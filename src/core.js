@@ -1613,6 +1613,37 @@ const KMCore = (() => {
     for (const a of principalAxes(P)) if (dirs.every(d => Math.abs(d[0] * a[0] + d[1] * a[1] + d[2] * a[2]) < 0.97)) dirs.push(a);
     return dirs;
   }
+  // (1.83) eigenvalues and vectors of a symmetric 3×3 [xx, xy, xz, yy, yz, zz] (Jacobi), largest first
+  function symEig3(c) {
+    const a = [[c[0], c[1], c[2]], [c[1], c[3], c[4]], [c[2], c[4], c[5]]], V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    for (let it = 0; it < 60; it++) {
+      let p = 0, q = 1; for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) if (Math.abs(a[i][j]) > Math.abs(a[p][q])) { p = i; q = j; }
+      if (Math.abs(a[p][q]) < 1e-18) break;
+      const th = 0.5 * Math.atan2(2 * a[p][q], a[q][q] - a[p][p]), cs = Math.cos(th), sn = Math.sin(th);
+      for (let k = 0; k < 3; k++) { const x = a[k][p], y = a[k][q]; a[k][p] = cs * x - sn * y; a[k][q] = sn * x + cs * y; }
+      for (let k = 0; k < 3; k++) { const x = a[p][k], y = a[q][k]; a[p][k] = cs * x - sn * y; a[q][k] = sn * x + cs * y; }
+      for (let k = 0; k < 3; k++) { const x = V[k][p], y = V[k][q]; V[k][p] = cs * x - sn * y; V[k][q] = sn * x + cs * y; }
+    }
+    return [0, 1, 2].map(i => ({ l: a[i][i], v: [V[0][i], V[1][i], V[2][i]] })).sort((x, y) => y.l - x.l);
+  }
+  // (1.83) A surface patch shaped like a tube (a sleeve, a leg, a forearm): longer than it is wide, and its faces
+  // turning all the way round its long axis (the normals' spread has almost nothing along that axis and plenty in both
+  // directions across it). A cape over the shoulders, a belt round the waist or a panel of a coat is not: a cape's
+  // normals point up as much as round, a belt is longest across its own axis, a panel faces one way.
+  // `s` holds the area-weighted sums [A, Σx(3), Σxxᵀ(6), Σnnᵀ(6)].
+  function tubeLike(s, short) { return !!tubeAxis(s, short); }
+  // the tube's axis (the direction its normals lack), or null; `short`: a stub of a tube, so no length is asked for
+  function tubeAxis(s, short) {
+    const A = s[0]; if (!(A > 0)) return null;
+    const m = [s[1] / A, s[2] / A, s[3] / A];
+    const c = [s[4] / A - m[0] * m[0], s[5] / A - m[0] * m[1], s[6] / A - m[0] * m[2], s[7] / A - m[1] * m[1], s[8] / A - m[1] * m[2], s[9] / A - m[2] * m[2]];
+    const e = symEig3(c), en = symEig3([s[10] / A, s[11] / A, s[12] / A, s[13] / A, s[14] / A, s[15] / A]);
+    if (!(en[2].l <= 0.13 && en[1].l >= 0.3)) return null;
+    if (short) return en[2].v;
+    if (!(e[1].l > 0) || e[0].l < 1.8 * e[1].l) return null;
+    const ax = e[0].v, nn = en[2].v, align = Math.abs(ax[0] * nn[0] + ax[1] * nn[1] + ax[2] * nn[2]);
+    return align >= 0.85 ? nn : null;
+  }
   function principalAxes(P) { // eigenvectors of the vertex covariance, by power iteration with deflation
     const n = P.length / 3, step = Math.max(1, Math.floor(n / 20000));
     let mx = 0, my = 0, mz = 0, c = 0;
@@ -2809,7 +2840,7 @@ const KMCore = (() => {
       if (propRoot[b.r] || propRoot[b.s] || kindsDiffer(b.r, b.s)) return 1; // (1.78, 1.79) a made object against a sculpted one is always a part boundary
       return Math.max(concave, step, neck, b.len > 0 ? b.hard / b.len : 0); // (1.74) a border all along where a hard surface meets an organic one is a part boundary
     };
-    const melt = (limit, pickWeakest) => { // regions under `limit` of the area go into a neighbour: the one sharing the most border, or the weakest border
+    const melt = (limit, pickWeakest, keep) => { // regions under `limit` of the area go into a neighbour: the one sharing the most border, or the weakest border
       for (let pass = 0; pass < 30; pass++) {
         const st = stats(), by = new Map();
         for (const b of st.border.values()) { if (!by.has(b.r)) by.set(b.r, []); if (!by.has(b.s)) by.set(b.s, []); by.get(b.r).push(b); by.get(b.s).push(b); }
@@ -2829,7 +2860,7 @@ const KMCore = (() => {
           for (const b of bs) { const o = find(b.r === g ? b.s : b.r); if (o === g) continue; allLen += b.len; if (propRoot[o]) { propLen += b.len; if (b.len > bpl) { bpl = b.len; bestProp = o; } } }
           if (bestProp !== null && propLen >= 0.4 * allLen) { join(g, bestProp); touched.add(find(bestProp)); merged++; continue; }
           const anyPlain = propLen < allLen;
-          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; if (anyPlain && propRoot[find(o)]) continue; const sb = pickWeakest ? strength(b, st) : 0; /* (1.79: a strong border no longer stops a small region melting by itself; a part attached by a narrow contact is kept below) */ if ((kindsDiffer(g, o) || (b.len > 0 && b.hard / b.len >= 0.5)) && st.area.get(g) >= 0.0001 * total) continue; /* (1.75, 1.78) never across hard to organic, by region or by edge */ /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
+          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; if (anyPlain && propRoot[find(o)]) continue; if (keep && (keep.has(g) || keep.has(find(o))) && !keep.tubeWith(g, find(o))) continue; /* (1.83) a limb only joins, or takes in, more of itself */ const sb = pickWeakest ? strength(b, st) : 0; /* (1.79: a strong border no longer stops a small region melting by itself; a part attached by a narrow contact is kept below) */ if ((kindsDiffer(g, o) || (b.len > 0 && b.hard / b.len >= 0.5)) && st.area.get(g) >= 0.0001 * total) continue; /* (1.75, 1.78) never across hard to organic, by region or by edge */ /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
           // (1.72) a small part clearly bounded all round (its weakest border still a crease or a step well past
           // `strong`: a hand lying on a book, a clasp) stays a part: the owner's picks "grabbed too much" when such
           // parts melted into what they touch. Only a speck under a tenth of the limit goes regardless.
@@ -2840,7 +2871,7 @@ const KMCore = (() => {
             let weak = Infinity, per = 0; for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; weak = Math.min(weak, strength(b, st)); if (!propRoot[find(o)]) per += b.len; }
             if (weak >= keepStrong && per < 0.7 * 2 * Math.sqrt(Math.PI * st.area.get(g))) continue;
           }
-          if (best !== null) { join(g, best); touched.add(find(best)); merged++; }
+          if (best !== null) { if (keep) keep.joined(g, find(best)); join(g, best); touched.add(find(best)); merged++; }
         }
         if (!merged) return;
       }
@@ -2857,7 +2888,23 @@ const KMCore = (() => {
       if (!weakest) break;
       join(weakest.s, weakest.r);
     }
-    melt(total * minFrac, true); // what is left small joins the neighbour it is least separated from
+    // (1.83) a limb stays a part: a tube-shaped region (a sleeve, a leg) at least `keepArea` is never melted for being small.
+    // At Balanced the owner's sleeves (1.3% and 1.5% of the surface) went into the capelet and the coat's back
+    const tubes = new Set();
+    if (opts.tubes !== false) {
+      const acc = new Map();
+      for (let t = 0; t < nt; t++) {
+        const r = find(t); let s = acc.get(r); if (!s) acc.set(r, s = new Float64Array(16));
+        const a = A[t], x = C[3 * t], y = C[3 * t + 1], z = C[3 * t + 2], u = N[3 * t], v = N[3 * t + 1], w = N[3 * t + 2];
+        s[0] += a; s[1] += a * x; s[2] += a * y; s[3] += a * z; s[4] += a * x * x; s[5] += a * x * y; s[6] += a * x * z; s[7] += a * y * y; s[8] += a * y * z; s[9] += a * z * z;
+        s[10] += a * u * u; s[11] += a * u * v; s[12] += a * u * w; s[13] += a * v * v; s[14] += a * v * w; s[15] += a * w * w;
+      }
+      for (const [r, s] of acc) if (!propRoot[r] && s[0] >= keepArea && s[0] < total * minFrac && tubeLike(s)) tubes.add(r);
+      const both = (a, b) => { const x = acc.get(a), y = acc.get(b), z = new Float64Array(16); for (let k = 0; k < 16; k++) z[k] = (x ? x[k] : 0) + (y ? y[k] : 0); return z; };
+      tubes.tubeWith = (g, o) => tubeLike(both(g, o)); // a sleeve's piece joins the rest of the sleeve, not the cape it meets
+      tubes.joined = (g, o) => { const z = both(g, o); acc.set(o, z); const was = tubes.has(g) || tubes.has(o); tubes.delete(g); if (was && tubeLike(z)) tubes.add(o); else tubes.delete(o); };
+    }
+    melt(total * minFrac, true, tubes); // what is left small joins the neighbour it is least separated from
     const groupOf = new Int32Array(nt), ids = new Map();
     for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
     // (1.79) the props' enclosed islands (a bevel strip between two panels) join them, and leftover slivers melt
@@ -5068,6 +5115,7 @@ const KMCore = (() => {
     // (1.77) the outline's vertices on a sharp edge (a crease of 25° or more, or hard meeting organic) are pinned: the
     // field is held at zero there through the smoothing, so the slice runs through them and never drifts off the seam
     const pinned = sharpEdgeVertices(P, I, seg.borders, (t1, t2) => inT[t1] !== inT[t2], opts.pinDeg || 25, seg.hard || null);
+    if (opts.pin) for (const v of opts.pin) if (cin[v] && cin[v] < cnt[v]) pinned.add(v); // (1.83) a limb's flat end stays exactly where it was cut
     const band = 4 * scale, dist = new Float64Array(nv).fill(Infinity), heap = [];
     const push = (x) => { heap.push(x); let i = heap.length - 1; while (i > 0) { const pI = (i - 1) >> 1; if (heap[pI][0] <= heap[i][0]) break; [heap[pI], heap[i]] = [heap[i], heap[pI]]; i = pI; } };
     const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
@@ -5130,6 +5178,124 @@ const KMCore = (() => {
     if (a1 < 0.75 * a0 || a1 > 1.33 * a0) return null;
     return { P: P2, I: I2, seg: s2, groups: [1], loops: l2, scale, added };
   }
+  // (1.83) A limb ends in a flat cut across it where it meets the body. A sleeve's region ends where the cloth does,
+  // which on the owner's Father Rhinehardt runs up under the capelet: cutting along it left the capelet's rim as knife
+  // flaps on the body and a spike on top of the arm. Here each outline of a region pick that is the root of a tube
+  // (the picked surface near it shaped like a tube, the region across it much bigger) is replaced by the ring of a
+  // plane square to the tube's axis, at the outline's mean height along it, moved into the limb until the ring is the
+  // tube's own (no longer than 1.6 times its girth: the plane must not run into the body or the cape). The surface is
+  // sliced along that ring only (the plane's other rings, through a cape or the coat, are left joined), and the pick
+  // becomes what lies on the limb's side of the ring, reached from the picked triangles without crossing the ring or
+  // the pick's other outlines. Returns { P, I, seg, groups: [1], pin, ends, planes } on the new mesh, or null.
+  function limbEndPick(P, I, seg, groups, opts = {}) {
+    const nt = I.length / 3, nv = P.length / 3, set = new Set(groups), inT = new Uint8Array(nt);
+    let aPick = 0; const A = new Float64Array(nt), C = new Float64Array(3 * nt), N = new Float64Array(3 * nt);
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]), L = Math.hypot(n[0], n[1], n[2]);
+      A[t] = L / 2; for (let k = 0; k < 3; k++) { C[3 * t + k] = (P[a + k] + P[b + k] + P[c + k]) / 3; N[3 * t + k] = L > 0 ? n[k] / L : 0; }
+      if (set.has(seg.groupOf[t])) { inT[t] = 1; aPick += A[t]; }
+    }
+    if (!aPick) return null;
+    let total = 0; for (let t = 0; t < nt; t++) total += A[t];
+    const loops = groupLoops(P, I, seg, groups); if (!loops.length || loops.some(l => !l.closed)) return null;
+    const vt = vertexTriangles(P, I), scale = diag(bounds(P));
+    const pip = (xy, x, y) => { let inside = false; const m = xy.length / 2; for (let i = 0, j = m - 1; i < m; j = i++) { const xi = xy[2 * i], yi = xy[2 * i + 1], xj = xy[2 * j], yj = xy[2 * j + 1]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside; } return inside; };
+    const ringLen = (xy) => { let l = 0; const m = xy.length / 2; for (let i = 0; i < m; i++) { const j = (i + 1) % m; l += Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1]); } return l; };
+    const ends = [], other = [];
+    for (const lp of loops) {
+      const vs = lp.verts, m = vs.length; if (m < 6) { other.push(lp); continue; }
+      let len = 0; const c0 = [0, 0, 0];
+      for (let i = 0; i < m; i++) { const p = 3 * vs[i], q = 3 * vs[(i + 1) % m]; len += Math.hypot(P[p] - P[q], P[p + 1] - P[q + 1], P[p + 2] - P[q + 2]); for (let k = 0; k < 3; k++) c0[k] += P[p + k] / m; }
+      const r0 = len / (2 * Math.PI);
+      // the rest of the part must be much bigger than the pick (the body a limb comes off; a cape or a cuff beside the
+      // outline can be smaller than a whole arm)
+      if (total - aPick < 1.5 * aPick) { other.push(lp); continue; }
+      // the picked surface near the outline must be a tube
+      const s = new Float64Array(16), near = [];
+      for (let t = 0; t < nt; t++) if (inT[t]) {
+        const x = C[3 * t], y = C[3 * t + 1], z = C[3 * t + 2]; if (Math.hypot(x - c0[0], y - c0[1], z - c0[2]) > 2.5 * r0) continue;
+        const a = A[t], u = N[3 * t], v = N[3 * t + 1], w = N[3 * t + 2]; near.push(t);
+        s[0] += a; s[1] += a * x; s[2] += a * y; s[3] += a * z; s[4] += a * x * x; s[5] += a * x * y; s[6] += a * x * z; s[7] += a * y * y; s[8] += a * y * z; s[9] += a * z * z;
+        s[10] += a * u * u; s[11] += a * u * v; s[12] += a * u * w; s[13] += a * v * v; s[14] += a * v * w; s[15] += a * w * w;
+      }
+      const ax0 = near.length >= 30 ? tubeAxis(s, true) : null;
+      if (!ax0) { other.push(lp); continue; }
+      const mu = [s[1] / s[0], s[2] / s[0], s[3] / s[0]];
+      let ax = ax0.slice(); if ((c0[0] - mu[0]) * ax[0] + (c0[1] - mu[1]) * ax[1] + (c0[2] - mu[2]) * ax[2] < 0) ax = ax.map(x => -x); // pointing out of the limb, into the body
+      const rs = near.map(t => { const d = [C[3 * t] - mu[0], C[3 * t + 1] - mu[1], C[3 * t + 2] - mu[2]], h = d[0] * ax[0] + d[1] * ax[1] + d[2] * ax[2]; return Math.hypot(d[0] - h * ax[0], d[1] - h * ax[1], d[2] - h * ax[2]); }).sort((x, y) => x - y);
+      const rT = rs[rs.length >> 1]; if (!(rT > 0)) { other.push(lp); continue; }
+      let sRing = 0; for (const v of vs) sRing += ((P[3 * v] - mu[0]) * ax[0] + (P[3 * v + 1] - mu[1]) * ax[1] + (P[3 * v + 2] - mu[2]) * ax[2]) / m;
+      // the plane's place: from the outline's mean height into the limb, the ring that is the tube's own and meets the
+      // surface most squarely (a sleeve flares where it meets the coat under a cape: a ring through the flare grazes the
+      // surface and leaves a blade on the arm)
+      let found = null;
+      for (let k = 0; k <= 6; k++) { // (at most a radius and a half in: further, a short sleeve would be cut away)
+        const h = sRing - k * 0.25 * rT, o = [mu[0] + h * ax[0], mu[1] + h * ax[1], mu[2] + h * ax[2]];
+        const F = frameFromNormal(ax, o), sec = section(P, I, F, scale); if (sec.error) continue;
+        let best = null, bl = Infinity;
+        for (const L of sec.loops) { if (!pip(L.xy, 0, 0)) continue; const l = ringLen(L.xy); if (l < bl) { bl = l; best = L; } }
+        if (!best || bl > 1.6 * 2 * Math.PI * rT || bl < 0.4 * 2 * Math.PI * rT) continue;
+        const xy = best.xy, mm = xy.length / 2, pts = []; for (let i = 0; i < mm; i += Math.max(1, Math.floor(mm / 120))) pts.push(planePoint(F, xy[2 * i], xy[2 * i + 1]));
+        let graze = 0; for (const v of nearestVertices(P, pts)) { let nx = 0, ny = 0, nz = 0; for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const t = vt.tri[j]; nx += N[3 * t] * A[t]; ny += N[3 * t + 1] * A[t]; nz += N[3 * t + 2] * A[t]; } const L = Math.hypot(nx, ny, nz) || 1; graze += Math.abs((nx * ax[0] + ny * ax[1] + nz * ax[2]) / L); }
+        graze /= pts.length;
+        if (!found || graze < found.graze - 0.05) found = { o, n: ax, F, ring: best, len: bl, graze };
+        if (found.graze <= 0.3) break; // (the first that meets the surface squarely enough: nearer the joint is better)
+      }
+      if (!found) { other.push(lp); continue; }
+      ends.push(found);
+    }
+    if (!ends.length) return null;
+    // the field: each end's plane, signed so the limb's side is positive; one end per limb, so the planes are far apart
+    // and each vertex takes the plane of the end nearest it
+    const f = new Float64Array(nv);
+    for (let v = 0; v < nv; v++) {
+      let bd = Infinity, bi = 0;
+      for (let e = 0; e < ends.length; e++) { const o = ends[e].o, d = Math.hypot(P[3 * v] - o[0], P[3 * v + 1] - o[1], P[3 * v + 2] - o[2]); if (d < bd) { bd = d; bi = e; } }
+      const { o, n } = ends[bi];
+      const dz = (P[3 * v] - o[0]) * n[0] + (P[3 * v + 1] - o[1]) * n[1] + (P[3 * v + 2] - o[2]) * n[2];
+      f[v] = dz === 0 ? 1e-12 * scale : -dz;
+    }
+    // each end's own ring: the triangles it crosses, flooded from those nearest the section's points across crossed neighbours
+    const pr = trianglePairs(I), tnb = new Int32Array(nt + 1); for (let i = 0; i < pr.length; i += 4) { tnb[pr[i] + 1]++; tnb[pr[i + 1] + 1]++; }
+    for (let t = 0; t < nt; t++) tnb[t + 1] += tnb[t];
+    const fill = tnb.slice(0, nt), tto = new Int32Array(tnb[nt]); for (let i = 0; i < pr.length; i += 4) { tto[fill[pr[i]]++] = pr[i + 1]; tto[fill[pr[i + 1]]++] = pr[i]; }
+    const crossed = (t) => { const a = f[I[3 * t]] > 0, b = f[I[3 * t + 1]] > 0, c = f[I[3 * t + 2]] > 0; return a !== b || b !== c; };
+    const chain = new Uint8Array(nt);
+    for (const e of ends) {
+      const xy = e.ring.xy, m = xy.length / 2, pts = []; for (let i = 0; i < m; i++) pts.push(planePoint(e.F, xy[2 * i], xy[2 * i + 1]));
+      const seeds = nearestVertices(P, pts), queue = [], seen = new Uint8Array(nt);
+      for (const v of seeds) for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const t = vt.tri[j]; if (!seen[t] && crossed(t)) { seen[t] = 1; queue.push(t); } }
+      for (let h = 0; h < queue.length; h++) { const t = queue[h]; for (let j = tnb[t]; j < tnb[t + 1]; j++) { const u = tto[j]; if (!seen[u] && crossed(u)) { seen[u] = 1; queue.push(u); } } }
+      if (queue.length < 6) return null;
+      for (const t of queue) chain[t] = 1;
+    }
+    const { P2, I2, G, parent } = sliceByField(P, I, f), nt2 = G.length;
+    // the edges the flood may not cross: an end's ring (inside a chain triangle, both ends new) and the pick's other outlines
+    const blocked = new Set(); for (const lp of other) { const vs = lp.verts; for (let i = 0; i < vs.length; i++) { const a = vs[i], b = vs[(i + 1) % vs.length]; blocked.add(a < b ? a * nv + b : b * nv + a); } }
+    const pr2 = trianglePairs(I2), nb = new Int32Array(nt2 + 1); for (let i = 0; i < pr2.length; i += 4) { nb[pr2[i] + 1]++; nb[pr2[i + 1] + 1]++; }
+    for (let t = 0; t < nt2; t++) nb[t + 1] += nb[t];
+    const fl = nb.slice(0, nt2), to = new Int32Array(nb[nt2]), ok = new Uint8Array(nb[nt2]);
+    for (let i = 0; i < pr2.length; i += 4) {
+      const a = pr2[i], b = pr2[i + 1], va = pr2[i + 2], vb = pr2[i + 3];
+      const ring = parent[a] === parent[b] && chain[parent[a]] && va >= nv && vb >= nv;
+      const line = va < nv && vb < nv && blocked.has(va < vb ? va * nv + vb : vb * nv + va);
+      const pass = ring || line ? 0 : 1;
+      ok[fl[a]] = pass; to[fl[a]++] = b; ok[fl[b]] = pass; to[fl[b]++] = a;
+    }
+    const sel = new Int32Array(nt2), queue = [];
+    // seeds: the picked triangles on the limb's side of the planes (a picked triangle up under the cape, beyond the
+    // plane, is left to the body); the flood then takes in whatever it reaches without crossing a ring or another outline
+    for (let t = 0; t < nt2; t++) if (inT[parent[t]] && G[t] === 1) { sel[t] = 1; queue.push(t); }
+    for (let h = 0; h < queue.length; h++) { const t = queue[h]; for (let j = nb[t]; j < nb[t + 1]; j++) { const u = to[j]; if (ok[j] && !sel[u]) { sel[u] = 1; queue.push(u); } } }
+    let a1 = 0, n1 = 0; for (let t = 0; t < nt2; t++) if (sel[t]) { n1++; const a = 3 * I2[3 * t], b = 3 * I2[3 * t + 1], c = 3 * I2[3 * t + 2]; const n = cross3([P2[b] - P2[a], P2[b + 1] - P2[a + 1], P2[b + 2] - P2[a + 2]], [P2[c] - P2[a], P2[c + 1] - P2[a + 1], P2[c + 2] - P2[a + 2]]); a1 += Math.hypot(n[0], n[1], n[2]) / 2; }
+    if (!n1 || n1 === nt2 || a1 < 0.5 * aPick || a1 > 2 * aPick) return null; // (the ring didn't close off the limb: the flood ran into the body)
+    const s2 = bordersFromGroups(P2, I2, sel), l2 = groupLoops(P2, I2, s2, [1]);
+    if (!l2.length || l2.some(l => !l.closed) || l2.length !== loops.length) return null;
+    if (seg.hard) { const h = new Uint8Array(nt2); for (let t = 0; t < nt2; t++) h[t] = seg.hard[parent[t]]; s2.hard = h; }
+    const pin = new Set(); for (let t = 0; t < nt2; t++) if (chain[parent[t]]) for (let k = 0; k < 3; k++) { const v = I2[3 * t + k]; if (v >= nv) pin.add(v); }
+    return { P: P2, I: I2, seg: s2, groups: [1], loops: l2, pin, ends: ends.length, planes: ends.map(e => ({ o: e.o, n: e.n })) };
+  }
   // The mesh a pick works on: with `req.smooth`, the picked lines eased along the surface (`smoothLoopVertices`)
   // on a copy, with its own index array so no cache kept for the original's positions is read for it
   function pickMesh(P, I, req) {
@@ -5139,6 +5305,15 @@ const KMCore = (() => {
       if (sl) return { P: sl.P, I: sl.I, req: { ...req, seg: sl.seg, regions: sl.groups, loops: sl.loops, sliced: true } };
     }
     if (!req.smooth) return { P, I, req };
+    if (req.regions && req.seg && !req.noReroute && !req.noSlice && req.limbEnds !== false) { // (1.83) a limb ends in a flat cut across it
+      let le = null; try { le = limbEndPick(P, I, req.seg, req.regions); } catch (err) { le = null; }
+      if (le) {
+        let sl = null; try { sl = sliceRegionPick(le.P, le.I, le.seg, [1], { ...(typeof req.smooth === 'object' ? req.smooth : {}), pin: le.pin }); } catch (err) { sl = null; }
+        const r = sl || le;
+        const flatEnds = le.ends >= le.loops.length; // (every outline a flat limb end: it meets the surface squarely, so the face isn't sunk; sunk, it left a thin collar round the recess)
+        return { P: r.P, I: r.I, req: { ...req, seg: r.seg, regions: r.groups, loops: r.loops, sliced: true, limbEnds: le.ends, sink: flatEnds ? 0 : req.sink } };
+      }
+    }
     if (req.regions && req.seg && !req.noReroute && !req.noSlice) { // a region pick sliced along a smooth curve through the triangles
       let sl = null; try { sl = sliceRegionPick(P, I, req.seg, req.regions, typeof req.smooth === 'object' ? req.smooth : {}); } catch (err) { sl = null; }
       if (sl) return { P: sl.P, I: sl.I, req: { ...req, seg: sl.seg, regions: sl.groups, loops: sl.loops, sliced: true } };
@@ -5231,6 +5406,56 @@ const KMCore = (() => {
     });
     return out;
   }
+  // (1.83) Knife edges along a cut's rim (the owner: "super thin sharp edges"): where the cut meets the surface at a
+  // grazing angle the piece runs out to a blade, thinner than anything prints. Each original triangle of a piece within
+  // a few `t` of the cut's rim casts a line straight into the piece; where less than half of `t` lies behind it, its area
+  // counts as blade for the rim point nearest it. A rim point whose blade reaches out further than `t` (the surface
+  // meets the cut at under about 25°: a plain slanted cut tapers over half a `t` or so) is a knife point, and a piece
+  // has a knife edge when such points run along at least 4·t of rim. Returns [{ part, length, rim }].
+  function knifeEdges(Pin, parts, t, opts = {}) {
+    const out = []; if (!(t > 0)) return out;
+    const fr = Math.fround, orig = new Set(); for (let i = 0; i < Pin.length; i += 3) orig.add(fr(Pin[i]) + ',' + fr(Pin[i + 1]) + ',' + fr(Pin[i + 2])); // (float32 either side: a piece's positions may be stored narrower than the model's)
+    parts.forEach((q, pi) => {
+      const Q = q.positions, J = q.indices, nv = Q.length / 3, nt = J.length / 3, isNew = new Uint8Array(nv);
+      for (let v = 0; v < nv; v++) isNew[v] = orig.has(fr(Q[3 * v]) + ',' + fr(Q[3 * v + 1]) + ',' + fr(Q[3 * v + 2])) ? 0 : 1;
+      const fresh = (tr) => isNew[J[3 * tr]] && isNew[J[3 * tr + 1]] && isNew[J[3 * tr + 2]];
+      // the rim: edges between a face the cut made and the original surface, as a chain of rim vertices with their share of length
+      const pr = trianglePairs(J), rimLen = new Map(); let total = 0;
+      for (let i = 0; i < pr.length; i += 4) { const a = pr[i], b = pr[i + 1]; if (fresh(a) === fresh(b)) continue; const va = pr[i + 2], vb = pr[i + 3], l = Math.hypot(Q[3 * va] - Q[3 * vb], Q[3 * va + 1] - Q[3 * vb + 1], Q[3 * va + 2] - Q[3 * vb + 2]); rimLen.set(va, (rimLen.get(va) || 0) + l / 2); rimLen.set(vb, (rimLen.get(vb) || 0) + l / 2); total += l; }
+      if (!total) { out.push({ part: pi, length: 0, rim: 0 }); return; }
+      const cell = 2 * t, hash = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
+      for (const v of rimLen.keys()) { const k = key(Math.floor(Q[3 * v] / cell), Math.floor(Q[3 * v + 1] / cell), Math.floor(Q[3 * v + 2] / cell)); let h = hash.get(k); if (!h) hash.set(k, h = []); h.push(v); }
+      const nearestRim = (p, R) => { const cx = Math.floor(p[0] / cell), cy = Math.floor(p[1] / cell), cz = Math.floor(p[2] / cell); let bd = R, bv = -1; for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) for (let k = -2; k <= 2; k++) { const h = hash.get(key(cx + i, cy + j, cz + k)); if (h) for (const v of h) { const d = Math.hypot(Q[3 * v] - p[0], Q[3 * v + 1] - p[1], Q[3 * v + 2] - p[2]); if (d < bd) { bd = d; bv = v; } } } return bv; };
+      const grid = meshGrid(Q, J, 64), D = diag(bounds(Q)), blade = new Map(), nearCells = new Set();
+      for (const k of hash.keys()) { const [x, y, z] = k.split(',').map(Number); for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) for (let l = -2; l <= 2; l++) nearCells.add(key(x + i, y + j, z + l)); }
+      const cands = [];
+      for (let tr = 0; tr < nt; tr++) {
+        if (fresh(tr)) continue;
+        const a = J[3 * tr], b = J[3 * tr + 1], c = J[3 * tr + 2];
+        if (nearCells.has(key(Math.floor((Q[3 * a] + Q[3 * b] + Q[3 * c]) / 3 / cell), Math.floor((Q[3 * a + 1] + Q[3 * b + 1] + Q[3 * c + 1]) / 3 / cell), Math.floor((Q[3 * a + 2] + Q[3 * b + 2] + Q[3 * c + 2]) / 3 / cell)))) cands.push(tr);
+      }
+      const stride = Math.max(1, Math.ceil(cands.length / (opts.samples || 12000))); // (sampled: each sample stands for `stride` triangles round it)
+      for (let ci = 0; ci < cands.length; ci += stride) {
+        const tr = cands[ci], a = J[3 * tr], b = J[3 * tr + 1], c = J[3 * tr + 2];
+        const o0 = [0, 1, 2].map(k => (Q[3 * a + k] + Q[3 * b + k] + Q[3 * c + k]) / 3);
+        const rv = nearestRim(o0, 4 * t); if (rv < 0) continue;
+        const ux = Q[3 * b] - Q[3 * a], uy = Q[3 * b + 1] - Q[3 * a + 1], uz = Q[3 * b + 2] - Q[3 * a + 2], wx = Q[3 * c] - Q[3 * a], wy = Q[3 * c + 1] - Q[3 * a + 1], wz = Q[3 * c + 2] - Q[3 * a + 2];
+        const n = [uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx], L = Math.hypot(n[0], n[1], n[2]); if (!L) continue;
+        n[0] /= L; n[1] /= L; n[2] /= L;
+        const o = o0.map((x, k) => x - n[k] * 1e-5 * D), d = castInward(grid, Q, J, o, [-n[0], -n[1], -n[2]], 2 * t);
+        if (d >= 0 && d < 0.5 * t) blade.set(rv, (blade.get(rv) || 0) + stride * L / 2);
+      }
+      // knife points (blade wider than t), and the longest run of them along the rim, joined over gaps of a t
+      const adj = new Map(); for (let i = 0; i < pr.length; i += 4) { const a = pr[i], b = pr[i + 1]; if (fresh(a) === fresh(b)) continue; const va = pr[i + 2], vb = pr[i + 3]; if (!adj.has(va)) adj.set(va, []); if (!adj.has(vb)) adj.set(vb, []); adj.get(va).push(vb); adj.get(vb).push(va); }
+      // the blade's width at a rim point, over the point and its two neighbours along the rim (the area lands on whichever is nearest)
+      const knife = new Set(); for (const v of rimLen.keys()) { let ar = blade.get(v) || 0, ln = rimLen.get(v) || 0; for (const w of adj.get(v) || []) { ar += blade.get(w) || 0; ln += rimLen.get(w) || 0; } if (ln > 0 && ar / ln > t) knife.add(v); }
+      const seen = new Set(); let longest = 0, knifeLen = 0;
+      for (const v of knife) knifeLen += rimLen.get(v) || 0;
+      for (const v0 of knife) { if (seen.has(v0)) continue; let run = 0; const st = [v0]; seen.add(v0); while (st.length) { const v = st.pop(); run += rimLen.get(v) || 0; for (const w of adj.get(v) || []) if (!seen.has(w) && knife.has(w)) { seen.add(w); st.push(w); } } longest = Math.max(longest, run); }
+      out.push({ part: pi, length: longest, knife: knifeLen, rim: total, sharp: longest >= 4 * t, points: opts.points ? [...knife] : undefined });
+    });
+    return out;
+  }
   function printMessage(bad) {
     return bad.some(b => b.crumb) ? 'This cut leaves a crumb too small to print. Pick a little more, or cut somewhere else.'
       : 'This cut leaves a piece with walls thinner than the Wall setting behind its cut face, which won’t print well. Move the line, turn off Sink face, or pick a little more.';
@@ -5244,6 +5469,14 @@ const KMCore = (() => {
       let bad = [];
       try { bad = cutPrintCheck(P, out.result.parts, req0.minThickness).filter(b => b.thin); } catch (err) { bad = []; }
       if (bad.length) { out.printCheck = bad.map(b => ({ part: b.part, crumb: !!b.crumb, share: b.share })); if (!out.forced) out.forced = printMessage(bad); }
+      else if (!req0.noKnifeCheck) { // (1.83) a blade-thin edge along the cut's rim
+        let knives = []; try { knives = knifeEdges(P, out.result.parts, req0.minThickness).filter(k => k.sharp); } catch (err) { knives = []; }
+        if (knives.length) {
+          const mm = Math.round(Math.max(...knives.map(k => k.length)));
+          out.printCheck = knives.map(k => ({ part: k.part, knife: true, length: k.length }));
+          if (!out.forced) out.forced = `This cut leaves a knife-thin edge along about ${mm} mm of its rim, thinner than the Thinnest piece setting (${+req0.minThickness.toFixed(2)} mm), which will snap or not print. Move the line so it meets the surface more squarely, or pick a little more.`;
+        }
+      }
     }
     return out;
   }
@@ -7223,7 +7456,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups,
+    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;

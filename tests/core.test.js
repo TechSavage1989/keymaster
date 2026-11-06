@@ -1108,6 +1108,19 @@ console.log('form: the parts of a figure by thickness');
     check('the planned candidates are the limbs, the head and the neck, never the torso, each freeing a real piece', plan.candidates.length >= 5 && !names.includes('torso') && ['arm R', 'arm L', 'leg R', 'leg L'].every(n => names.includes(n)) && plan.candidates.every(c => c.piece > 0 && c.share >= 0.015), names);
     const strict = K.splitCandidates(P, I, ps, { whole: K.volume(P, I) * 20 });
     check('a crumb floor from the whole model drops pieces too small to be parts', strict.candidates.length < plan.candidates.length, { all: plan.candidates.length, strict: strict.candidates.length }); }
+  // (1.83) limbs: a tube-shaped region is a tube, the torso is not; a pick of an arm ends in a flat cut across the arm
+  // at its root (the ring of one plane), sealed, volumes adding up
+  { const regionOf = (name) => { const m = new Map(); for (let t = 0; t < nt; t++) if (partOf(t) === name) m.set(ps.groupOf[t], (m.get(ps.groupOf[t]) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]; };
+    const sums = (g) => { const s = new Float64Array(16); for (let t = 0; t < nt; t++) { if (ps.groupOf[t] !== g) continue; const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; const u = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], w = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]; const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]], L = Math.hypot(...n), A = L / 2; const x = [(P[a] + P[b] + P[c]) / 3, (P[a + 1] + P[b + 1] + P[c + 1]) / 3, (P[a + 2] + P[b + 2] + P[c + 2]) / 3], N = n.map(v => v / L);
+      s[0] += A; for (let k = 0; k < 3; k++) s[1 + k] += A * x[k]; s[4] += A * x[0] * x[0]; s[5] += A * x[0] * x[1]; s[6] += A * x[0] * x[2]; s[7] += A * x[1] * x[1]; s[8] += A * x[1] * x[2]; s[9] += A * x[2] * x[2]; s[10] += A * N[0] * N[0]; s[11] += A * N[0] * N[1]; s[12] += A * N[0] * N[2]; s[13] += A * N[1] * N[1]; s[14] += A * N[1] * N[2]; s[15] += A * N[2] * N[2]; } return s; };
+    const armR = regionOf('arm R'), torso = regionOf('torso');
+    check('an arm\'s region reads as a tube, the torso\'s does not', K.tubeLike(sums(armR)) && !K.tubeLike(sums(torso)));
+    const le = K.limbEndPick(P, I, ps, [armR]);
+    let onPlane = 0; if (le) for (const v of le.pin) { const pl = le.planes[0], d = (le.P[3 * v] - pl.o[0]) * pl.n[0] + (le.P[3 * v + 1] - pl.o[1]) * pl.n[1] + (le.P[3 * v + 2] - pl.o[2]) * pl.n[2]; if (Math.abs(d) < 1e-3) onPlane++; }
+    check('a picked arm ends in a flat cut across it at the shoulder: one ring, every new point of it on the plane, square to the arm', !!le && le.ends >= 1 && le.pin.size > 8 && onPlane === le.pin.size && Math.abs(le.planes[0].n[0]) > 0.9, le && { ends: le.ends, pin: le.pin.size, onPlane, n: le.planes[0].n });
+    const req = { loops: K.groupLoops(P, I, ps, [armR]), regions: [armR], seg: { groupOf: ps.groupOf, count: ps.count, borders: ps.borders, areas: ps.areas }, cfg: { type: 'none' }, minThickness: 0.8, sink: 0, perArea: 1, numberJoints: false, joint: 1, smooth: true };
+    const pk = K.planPick(P, I, req), parts = pk.result ? pk.result.parts : [], vol = parts.reduce((a, q) => a + q.volume, 0);
+    check('splitting off the arm with its flat end gives sealed pieces whose volumes add up', parts.length === 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002, { error: pk.error, n: parts.length, vol }); }
   // a dip is not a part: a block with a round hollow pressed into its top
   { const block = K.shapeMesh({ kind: 'cube', w: 30, d: 30, h: 20, segments: 24 });
     const dent = K.booleanShape(block.positions, block.indices, { kind: 'ball', w: 16, h: 16, pos: [0, 0, 12], rot: [0, 0, 0], segments: 28 }, 'difference');
@@ -1831,6 +1844,16 @@ console.log('performance on a dense mesh');
   console.log(`    analyze ${ta}ms, auto keys ${tk}ms, cut ${tc}ms, display normals ${td}ms`);
   check('dense cut closed', allClosed(r.parts));
   check('display arrays sized', disp.pos.length === r.parts[0].indices.length * 3);
+}
+
+console.log('knife edges after a cut');
+{
+  // (1.83) a box cut by a plane grazing its top at 8° leaves a blade; cut at 45° it doesn't
+  const box = K.shapeMesh({ kind: 'cube', w: 20, d: 20, h: 20, segments: 20 }), bm = K.subdivideMesh(box.positions, box.indices, { maxEdge: 1.5 });
+  const cutAt = (deg) => { const a = deg * Math.PI / 180, F = K.frameFromNormal([Math.sin(a), 0, Math.cos(a)], [0, 0, 9]); return K.cutMesh(bm.positions, bm.indices, F, { scale: 35, cfg: { type: 'none' }, keys: [] }); };
+  const graze = cutAt(8), square = cutAt(45);
+  const kg = K.knifeEdges(bm.positions, graze.parts, 1.2), ks = K.knifeEdges(bm.positions, square.parts, 1.2);
+  check('a cut grazing a face at 8° leaves a knife edge; at 45° none', allClosed(graze.parts) && kg.some(k => k.sharp) && !ks.some(k => k.sharp), { graze: kg.map(k => +k.length.toFixed(1)), square: ks.map(k => +k.length.toFixed(1)) });
 }
 
 console.log(`\n${passes} passed, ${fails} failed`);
