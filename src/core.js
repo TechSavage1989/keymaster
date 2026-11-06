@@ -4096,7 +4096,7 @@ const KMCore = (() => {
     { const n = h.length; let a2 = 0, per = 0, lo = Infinity, hi = -Infinity; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; per += Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1]); lo = Math.min(lo, h[i]); hi = Math.max(hi, h[i]); }
       const width = per > 0 ? 2 * Math.abs(a2) / per : 0; // (4 × area / length: a circle's diameter)
       if (width < Math.max(4 * wall, 2 * want) || hi - lo > 2 * width) return null; }
-    const B = insetRing(xy, Math.max(0.02, 0.25 * wall));
+    const B = insetRing(xy, Math.max(0.02, 0.25 * wall)) || nudgeIn(xy, Math.max(0.02, 0.25 * wall)); // (1.91) only where the room is measured: a jagged CAD outline (the book's) that can't be offset cleanly is nudged in point by point
     if (B) {
       const r = sunkRingAt(P, I, F, ring, B, h, into2, want, wall, false, null, true);
       if (r) {
@@ -4107,6 +4107,17 @@ const KMCore = (() => {
       }
     }
     return sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, false, null);
+  }
+  // Each point of a ring moved in on its plane by d, along the inward direction of the ring eased smooth (no check
+  // that the result is a clean ring: it only says where to look for room)
+  function nudgeIn(xy, d) {
+    const n = xy.length / 2; if (n < 3) return null;
+    let a2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
+    const sg = a2 > 0 ? 1 : -1; let e = Array.from({ length: n }, (_, i) => [xy[2 * i], xy[2 * i + 1]]);
+    for (let k = 0; k < 10; k++) e = e.map((p, i) => { const a = e[(i + n - 1) % n], c = e[(i + 1) % n]; return [(a[0] + 2 * p[0] + c[0]) / 4, (a[1] + 2 * p[1] + c[1]) / 4]; });
+    const out = new Float64Array(2 * n);
+    for (let i = 0; i < n; i++) { const a = e[(i + n - 1) % n], c = e[(i + 1) % n], dx = c[0] - a[0], dy = c[1] - a[1], L = Math.hypot(dx, dy) || 1; out[2 * i] = xy[2 * i] - dy / L * sg * d; out[2 * i + 1] = xy[2 * i + 1] + dx / L * sg * d; }
+    return out;
   }
   // The floor's ring: each line point moved in on the plane by its depth × tan(deg), along the inward direction of
   // the line eased smooth (a line along mesh edges zig-zags); less taper where that would fold the ring.
@@ -4222,19 +4233,23 @@ const KMCore = (() => {
     }
     if (column) {
       let mx = 0, my = 0; for (let i = 0; i < n; i++) { mx += xy[2 * i] / n; my += xy[2 * i + 1] / n; }
+      // (1.91) a few points where the other piece is thin (the robe behind the book's edge: 7 of 316) don't set the
+      // plane: it is fitted to the rest, as long as they are nine in ten of the line, and dips there to stay inside
+      const need = Math.min(want, Math.max(0.3 * want, 0.5 * wall)), use = Array.from(roomOf, v => v >= need), nUse = use.filter(Boolean).length;
+      if (nUse < 0.9 * n) use.fill(true);
       let best = null;
       for (let bi = -14; bi <= 14; bi++) for (let ci = -14; ci <= 14; ci++) {
         const b = bi * 0.05, c = ci * 0.05, tilt = Math.hypot(b, c); if (tilt > 0.7) continue;
         let aUp = Infinity, aW = -Infinity;
-        for (let i = 0; i < n; i++) { const sl = b * (xy[2 * i] - mx) + c * (xy[2 * i + 1] - my), lv = h[i] * into2; aUp = Math.min(aUp, lv + roomOf[i] - sl); aW = Math.max(aW, lv + want - sl); }
+        for (let i = 0; i < n; i++) { if (!use[i]) continue; const sl = b * (xy[2 * i] - mx) + c * (xy[2 * i + 1] - my), lv = h[i] * into2; aUp = Math.min(aUp, lv + roomOf[i] - sl); aW = Math.max(aW, lv + want - sl); }
         if (!(aUp > -Infinity)) continue;
         const a = Math.min(aUp, aW); let dmin = Infinity;
-        for (let i = 0; i < n; i++) dmin = Math.min(dmin, a + b * (xy[2 * i] - mx) + c * (xy[2 * i + 1] - my) - h[i] * into2);
+        for (let i = 0; i < n; i++) if (use[i]) dmin = Math.min(dmin, a + b * (xy[2 * i] - mx) + c * (xy[2 * i + 1] - my) - h[i] * into2);
         const score = Math.min(dmin, want) - 0.3 * want * tilt;
         if (!best || score > best.score + 1e-9) best = { score, a, b, c, dmin };
       }
-      if (best && best.dmin >= Math.min(want, Math.max(0.3 * want, 0.5 * wall))) {
-        for (let i = 0; i < n; i++) depth[i] = best.a + best.b * (xy[2 * i] - mx) + best.c * (xy[2 * i + 1] - my) - h[i] * into2;
+      if (best && best.dmin >= need) {
+        for (let i = 0; i < n; i++) depth[i] = Math.max(0, Math.min(best.a + best.b * (xy[2 * i] - mx) + best.c * (xy[2 * i + 1] - my) - h[i] * into2, roomOf[i] > -Infinity ? roomOf[i] : 0));
         var planeFloor = { tilt: Math.atan(Math.hypot(best.b, best.c)) * 180 / Math.PI };
       }
     }

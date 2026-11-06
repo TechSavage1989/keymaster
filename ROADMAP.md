@@ -42,6 +42,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - The plug starts at the cut's edge (no lip), tapers (Taper, 5° by default), its depth is the Extrude setting, and Extra key chooses what goes on its end; Rotate turns the model with rings (1.88).
 - Plug as the extra key on an extruded cut: the extrusion is the plug; a joint never comes away as a piece of its own (1.89).
 - The extruded plug's end is always one flat face (level where it fits, tilted where it must), it shows in blue before the cut, and lines round crevices or specks aren't extruded (1.90).
+- The extrusion shows while painting with Extra key None, and a made object's jagged outline (the book) gets its flat plug too (1.91).
 - One tool for picking (Regions with Pick by: Click | Brush), and Sections as the smaller pieces within each part, never running into another part (1.84).
 - Limbs kept whole at Balanced and ended in a flat cut at the joint (no flaps under a cape, no spike on the arm), knife-thin edges flagged before a cut, a Thinnest piece setting (1.83).
 - The same regions at any size (they are found from the shape as it opened, so 100% and 1000% agree triangle for triangle; only the keys go by millimetres), and the strips between a book's clasps go with the book (1.82).

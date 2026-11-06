@@ -2760,7 +2760,7 @@
     renderPick(); updateHint(); markDirty();
     // the keys or plug drawn on the painted outline as soon as they are planned (the owner: "keys should show
     // correctly for every mode"); the cut and its checks still wait for Split off painted area
-    if (!loops.length || loops.some(l => !l.closed) || state.cfg.type === 'none') return;
+    if (!loops.length || loops.some(l => !l.closed) || (state.cfg.type === 'none' && !(state.cfg.sink > 0))) return; // (1.91) with no key the extrusion is still drawn
     const run = ++pickRun, seg = K.selectionSeg(p.positions, p.indices, state.paint.sel);
     coreTask('planJoints', [p.positions, p.indices, pickReq(loops, { regions: [1], seg, painted: true })]).then((j) => {
       if (run !== pickRun || state.regions.pick !== pick) return;
