@@ -38,6 +38,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Strokes sliced along their plane (the exact ring, no steps), CAD panels labelled whole, Split into parts falling back to flat cuts at narrow points, held pieces allowed out along a joint, small pieces in mm³ (1.76).
 - A made object's thin strips stay with the object, so a cut round a hand on a book no longer runs out along the book's groove; the joints message says how many lines have none and to scale a small part up (1.85).
 - A painted area is cut exactly as painted: the flat end a clicked limb gets no longer replaces a brushed outline, and a flat end's ring must run over the picked limb itself, so it never cuts through a shoulder pad or cape beside it (1.86).
+- Sink face steps the cut face in by the Thinnest piece and drops it straight into the other piece to a level floor, so a piece ends in a solid plug in a socket with no thin flaps where its line climbs; a forced cut keeps it (1.87).
 - One tool for picking (Regions with Pick by: Click | Brush), and Sections as the smaller pieces within each part, never running into another part (1.84).
 - Limbs kept whole at Balanced and ended in a flat cut at the joint (no flaps under a cape, no spike on the arm), knife-thin edges flagged before a cut, a Thinnest piece setting (1.83).
 - The same regions at any size (they are found from the shape as it opened, so 100% and 1000% agree triangle for triangle; only the keys go by millimetres), and the strips between a book's clasps go with the book (1.82).

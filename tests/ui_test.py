@@ -1217,6 +1217,9 @@ with sync_playwright() as p:
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     # a region whose piece would be too thin to print (the face of a flange half a millimetre thick) is refused, but the owner can split it off anyway
     flangeball_stl(str(OUT / 'flangeball.stl'))
+    # (1.87) with Sink face on, the flange face steps into the ball as a plug and is no longer thin: off for this one
+    # (set before the model opens, so no earlier pick is replayed by the change)
+    pg.fill('#sinkDepth', '0'); pg.dispatch_event('#sinkDepth', 'change'); pg.wait_for_timeout(300)
     pg.set_input_files('#fileInput', str(OUT / 'flangeball.stl'))
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1 && document.querySelector('#partList .part-name').innerText.includes('flangeball')", timeout=20000)
     if not pg.evaluate('KeymasterDebug.regionsOn()'): toggle_regions(pg)
@@ -1231,6 +1234,7 @@ with sync_playwright() as p:
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 3", timeout=15000)
     check('splitting it off anyway gives the pieces (the flange face, and the ball in two), and says it went against the warning', pg.locator('#partList li[data-id]').count() == 3 and 'against the warning' in pg.inner_text('#toast'), pg.inner_text('#toast'))
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
+    pg.fill('#sinkDepth', '1'); pg.dispatch_event('#sinkDepth', 'change'); pg.wait_for_timeout(200)
     # keys on a curved cut: an arm in a sleeve, cut at the hem, gets pegs sized to fit
     import math as _m
     def arm_r(z):

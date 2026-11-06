@@ -1067,10 +1067,10 @@ console.log('form: the parts of a figure by thickness');
     check('a pick planned as plain data splits the arm off sealed, the volumes adding up, and can be sent from a worker', !out.error && parts.length >= 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002 && sent.result.parts.length === parts.length && sent.draw.length === out.loops.length, { error: out.error, n: parts.length, vol, whole: K.volume(P, I) });
     const plain = K.splitRegions(P, I, req.seg, [arm], { cfg, minThickness: 0.8, sink: 1, perLoop: out.perLoop });
     check('trying the cut forced first gives the very pieces an unforced cut gives', !out.forced && plain.parts.length === parts.length && plain.parts.every((q, i) => Math.abs(q.volume - parts[i].volume) < 1e-6), { forced: out.forced }); }
-  // the joints first (1.68): planJoints alone gives the keys to draw, and planPick going on from it gives the same cut
-  { const cfg = { type: 'peg', shape: 'round', diameter: 3, length: 4, clearance: 0.2, margin: 0.8, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 1.5, printer: 'fdm', pegSide: 'below', perArea: 1, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, sizeMax: 3 };
+  // the joints first (1.68): planJoints alone gives the keys to draw, and planPick going on from it gives the same cut (with no sink: on this thin arm a face stepped in by the wall leaves no room for a peg; this checks the planning, not the sink)
+  { const cfg = { type: 'peg', shape: 'round', diameter: 3, length: 4, clearance: 0.2, margin: 0.8, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 1.5, printer: 'fdm', pegSide: 'below', perArea: 1, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 0, sizeMax: 3 };
     let arm = -1; { const m = new Map(); for (let t = 0; t < nt; t++) if (partOf(t) === 'arm R') m.set(ps.groupOf[t], (m.get(ps.groupOf[t]) || 0) + 1); arm = [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]; }
-    const req = { loops: K.groupLoops(P, I, ps, [arm]), regions: [arm], seg: { groupOf: ps.groupOf, count: ps.count, borders: ps.borders, areas: ps.areas }, cfg, minThickness: 0.8, sink: 1, perArea: 1, numberJoints: false, joint: 1 };
+    const req = { loops: K.groupLoops(P, I, ps, [arm]), regions: [arm], seg: { groupOf: ps.groupOf, count: ps.count, borders: ps.borders, areas: ps.areas }, cfg, minThickness: 0.8, sink: 0, perArea: 1, numberJoints: false, joint: 1 };
     const j = K.planJoints(P, I, req), sentJ = typeof structuredClone === 'function' ? structuredClone(K.plainData(j)) : K.plainData(j);
     const whole = K.planPick(P, I, req), after = K.planPick(P, I, { ...req, planned: sentJ });
     check('the joints alone are planned first, with keys to draw and no cut yet, and the cut that goes on from them is the whole pick’s', j.keys > 0 && !j.result && j.draw.every((d, i) => d.keys.length === j.perLoop[i].keys.length) && after.result && whole.result && after.keys === whole.keys && after.result.parts.length === whole.result.parts.length && after.result.parts.every((q, i) => Math.abs(q.volume - whole.result.parts[i].volume) < 1e-6 && K.edgeReport(q.indices).closed), { keys: j.keys, after: after.keys, whole: whole.keys }); }
@@ -1310,15 +1310,18 @@ console.log('curved cuts along a border');
   const anS = K.analyzeLoop(sp.positions, sp.indices, orientedW, { type: 'none', sink: 1, margin: 1 }, 40);
   const smallPlain = Math.min(...cw.parts.map(q => q.volume)), smallSunk = Math.min(...sunk.parts.map(q => q.volume)), faceArea = anS.base.regions[0].area;
   check('a sunk face: full depth, sealed, volume kept', sunk.sink > 0.95 && anS.curved.sink > 0.95 && allClosed(sunk.parts) && Math.abs(sumVol(sunk.parts) - sp.report.volume) / sp.report.volume < 1e-6, [sunk.sink, anS.curved.sink, sumVol(sunk.parts)]);
-  // Where the line runs along the ball's widest part there is no solid straight below it, so the recess fades out
-  // there (it never breaks out); elsewhere it is a full millimetre deep
-  const depths = anS.curved.sunk.depth, deepRim = depths.filter(d => d > 0.95).length;
-  check('the recess is a millimetre deep along most of the line and fades where there is only air beyond', deepRim > depths.length * 0.4 && depths.every(d => d <= 1 + 1e-9), [deepRim, depths.length]);
-  check('the smaller piece gains a slab in proportion', (smallSunk - smallPlain) > 0.3 * faceArea && (smallSunk - smallPlain) < 1.05 * faceArea, [smallSunk - smallPlain, faceArea]);
+  // (1.87) the face is stepped in from the line by the wall (a ledge level with the line), and from there goes
+  // straight down to one level floor a millimetre below the line's lowest dip, so the cap piece ends in a solid
+  // plug and neither piece thins to an edge where the line rises; where there is no solid below, it comes up
+  const sk = anS.curved.sunk, depths = sk.depth, deepest = anS.curved.into2 > 0 ? Math.max(...sk.h2) : Math.min(...sk.h2);
+  const level = Array.from(sk.h2).filter(v => Math.abs(v - deepest) < 0.05).length;
+  check('a sunk face is stepped in from the line, with a level floor below its lowest dip along most of it', !!sk.ledge && level > depths.length * 0.4 && depths.every(d => d >= 0), [!!sk.ledge, level, depths.length]);
+  const capOf = (parts) => parts.reduce((a, b) => (a.bbox.max[2] > b.bbox.max[2] ? a : b)), capPlain = capOf(cw.parts).volume, capSunk = capOf(sunk.parts).volume;
+  check('the cap piece gains the plug', capSunk - capPlain > 0.3 * faceArea, [capSunk - capPlain, faceArea]);
   // the slab really is there: along the frame normal, the smaller piece is at least a millimetre thick at the line
   // wherever the recess is full depth
   const thickAtRim = (() => { // a hair inside the line (right on it, the ray would run down the wall)
-    const F = anS.frame, piece = sunk.parts.find(q => q.volume === smallSunk), g = K.rayGrid(piece.positions, piece.indices, F), xy = anS.base.loops[0].xy, n = xy.length / 2;
+    const F = anS.frame, piece = capOf(sunk.parts), g = K.rayGrid(piece.positions, piece.indices, F), xy = anS.base.loops[0].xy, n = xy.length / 2;
     const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2];
     let cx = 0, cy = 0; for (let i = 0; i < n; i++) { cx += xy[2 * i] / n; cy += xy[2 * i + 1] / n; }
     let worst = Infinity, missed = 0, hit = 0;
@@ -1337,6 +1340,17 @@ console.log('curved cuts along a border');
   const keysS = (() => { const a = K.analyzeLoop(sp.positions, sp.indices, orientedW, tightS, 40), ks = K.autoPlaceKeys(a, tightS, 3, new Set()), ev = K.evaluateKeys(a, ks, tightS, new Set()); return ks.filter((k, i) => ev[i].ok); })();
   const sunkK = K.cutAlongLoop(sp.positions, sp.indices, orientedW, { cfg: tightS, keys: keysS, sink: 1, minThickness: 1 });
   check('pegs on a sunk face: sealed, still sunk', sunkK.sink > 0.95 && keysS.length >= 2 && allClosed(sunkK.parts), [sunkK.sink, keysS.length]);
+  // (1.87) a line that climbs and dips round a limb (the owner's sleeve under a capelet): sunk, the face steps in by the
+  // wall and drops straight to one level floor past the line's lowest point, so the piece ends in a solid column with
+  // no thin rim on either piece; sealed, volume kept
+  { const cy = K.shapeMesh({ kind: 'cone', w: 12, d: 12, h: 60, segments: 48 }), m = K.subdivideMesh(cy.positions, cy.indices, { maxEdge: 1 }), cP = m.positions, cI = m.indices, cn = cI.length / 3, cg = new Int32Array(cn);
+    for (let q = 0; q < cn; q++) { let x = 0, y = 0, z = 0; for (let k = 0; k < 3; k++) { const v = 3 * cI[3 * q + k]; x += cP[v]; y += cP[v + 1]; z += cP[v + 2]; } cg[q] = z / 3 > 8 * Math.cos(2 * Math.atan2(y, x)) ? 1 : 0; }
+    const cl = K.orientLoops(cP, cI, [K.borderLoops(cP, K.bordersFromGroups(cP, cI, cg))[0]], { what: 'lines' }).loops[0];
+    const can = K.analyzeLoop(cP, cI, cl, { type: 'none', sink: 1, margin: 1 }, 60), cs = can.curved.sunk, deep = can.curved.into2 > 0 ? Math.max(...cs.h2) : Math.min(...cs.h2);
+    const lvl = Array.from(cs.h2).filter(v => Math.abs(v - deep) < 0.05).length / cs.h2.length;
+    const cr = K.cutAlongLoop(cP, cI, cl, { sink: 1, minThickness: 1 }), cvol = cr.parts.reduce((a, q) => a + q.volume, 0);
+    const knives = K.knifeEdges(cP, cr.parts, 1, { deg: 60 }).filter(k => k.length > 0.5);
+    check('a climbing line round a limb sinks to a column: stepped in, one level floor past its lowest point, no thin rim, sealed, volume kept', !!cs.ledge && cs.max > 15 && lvl > 0.8 && cr.sink > 15 && allClosed(cr.parts) && Math.abs(cvol - K.volume(cP, cI)) / K.volume(cP, cI) < 1e-6 && !knives.length && !K.cutPrintCheck(cP, cr.parts, 1).some(b => b.thin), [!!cs.ledge, cs.max, lvl, cr.sink, knives.length]); }
   // with a wall thicker than the ball required beyond the face, there is no room to sink: the cut is as before
   const noRoom = K.cutAlongLoop(sp.positions, sp.indices, orientedW, { sink: 1, cfg: cfgOf({ margin: 30 }) });
   check('no room to sink: the face stays where it was, and the cut is still sealed', noRoom.sink === 0 && allClosed(noRoom.parts) && Math.abs(Math.min(...noRoom.parts.map(q => q.volume)) - smallPlain) < 1e-6, [noRoom.sink, noRoom.parts.map(q => q.volume)]);

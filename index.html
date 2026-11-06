@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.86, build 9a34a6. After an update, refresh the page and check this changes.">v1.86 · 9a34a6</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.87, build ba5b25. After an update, refresh the page and check this changes.">v1.87 · ba5b25</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -663,7 +663,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
     <div class="rp-row rp-by"><span class="lbl">Find</span><div class="seg" role="group" aria-label="Find"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="Parts: whole parts of the figure: a limb, a head, the torso, a hat, armour, a book, a weapon, a base. Detail sets how finely they are told apart">Parts</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Sections: the smaller pieces within each part, wherever a border or a fold runs across it (a cuff on a sleeve, a collar, a belt, a plate of armour, a book's cover). A section never runs into another part">Sections</button></div><output id="regionsCount"></output></div>
     <div class="rp-row rp-ratio"><span class="lbl" title="How finely the model is split into parts">Detail</span><div class="seg" role="group" aria-label="Detail" id="regionsDetail"><button type="button" data-act="regions-detail" data-value="coarse" aria-pressed="false" title="Only the big parts: head, limbs, body, base">Big</button><button type="button" data-act="regions-detail" data-value="balanced" aria-pressed="true" title="The parts a kit would have: head, hands, feet, hat, clothing">Balanced</button><button type="button" data-act="regions-detail" data-value="fine" aria-pressed="false" title="Smaller parts too: ears, fingers, buttons, straps">Fine</button></div></div>
     <div class="rp-row rp-fold" hidden><label class="slider" title="How big the sections are: left for a few large ones, right for many small ones (the surface is split where it creases, and where a hard surface such as a book or a buckle meets cloth or skin)"><span class="lbl">Section size</span><input type="range" id="regionsAngle" min="0" max="100" step="5" value="55" aria-label="Section size, from large (left) to small (right)"><output id="regionsAngleOut">Medium</output></label></div>
-    <div class="btn-row"><label class="inline-num" title="Push the cut face this far into the other piece, with a wall down from the line, so the piece keeps its thickness to the edge. 0 turns it off."><span class="lbl">Sink face</span><input type="number" id="sinkDepth" min="0" step="0.2" value="1" aria-label="Sink the cut face into the other piece by this much"><span class="unit">mm</span></label><label class="inline-num" title="No piece may be thinner than this after a cut: a cut that would leave a thinner wall, a sliver or a knife-sharp edge along its rim is flagged before it is made (you can still cut it anyway). Follows the printer until set."><span class="lbl">Thinnest piece</span><input type="number" id="minPiece" min="0.2" step="0.1" value="1.2" aria-label="The thinnest a piece may be after a cut"><span class="unit">mm</span></label><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div>
+    <div class="btn-row"><label class="inline-num" title="Step the cut face in from its edge by the Thinnest piece and push it straight into the other piece, at least this far past the line&#39;s deepest point, so the piece ends in a solid plug that seats in a socket, with no thin or sharp rim. 0 turns it off."><span class="lbl">Sink face</span><input type="number" id="sinkDepth" min="0" step="0.2" value="1" aria-label="Sink the cut face into the other piece by this much"><span class="unit">mm</span></label><label class="inline-num" title="No piece may be thinner than this after a cut: a cut that would leave a thinner wall, a sliver or a knife-sharp edge along its rim is flagged before it is made (you can still cut it anyway). Follows the printer until set."><span class="lbl">Thinnest piece</span><input type="number" id="minPiece" min="0.2" step="0.1" value="1.2" aria-label="The thinnest a piece may be after a cut"><span class="unit">mm</span></label><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div>
     <div id="paintTools" class="paint-tools" hidden>
       <div class="btn-row"><label class="inline-num" title="Brush size"><span class="lbl">Brush</span><input type="number" id="brushSize" min="0.2" step="0.5" value="3" aria-label="Brush size in millimetres"><span class="unit">mm</span></label><input type="range" id="brushSlider" class="brush-slider" min="0" max="100" step="1" value="40" aria-label="Brush size" title="Brush size: drag to change ([ and ] too)"><button class="btn small" id="eraseBtn" aria-pressed="false" title="Erase paint instead of adding it (or hold Shift while painting)">Erase</button><button class="btn small" id="brushModeBtn" data-act="paint-mode" aria-pressed="false" title="Surface follows connected faces and stops at the edge of a layer; Sphere paints every face within reach, layers behind included">Surface</button><button class="btn small" id="fillBtn" data-act="paint-fill" aria-pressed="false" title="A click paints the whole surface region under the brush">Fill</button></div>
       <div class="btn-row"><button class="btn small" data-act="paint-grow" title="Grow the painted area outward by one brush width">Grow</button><button class="btn small" data-act="paint-shrink" title="Shrink the painted area by one brush width">Shrink</button><button class="btn small" data-act="paint-tidy" title="Smooth the painted area's edge: drop thin tongues and fill notches">Tidy edge</button><button class="btn small" data-act="paint-fill-gaps" title="Fill the gaps in the paint: channels narrower than the brush between painted pieces, and every patch the paint surrounds">Fill gaps</button><button class="btn small" data-act="paint-snap" title="Snap the paint to the surface regions: a region at least half painted is painted whole, the rest cleared">Snap to borders</button><button class="btn small" data-act="paint-clear" title="Remove all paint">Clear</button><button class="btn small" id="isolateBtn" data-act="paint-isolate" aria-pressed="false" title="Hide everything but the painted area, so the rest of the model stays out of the way of the brush and clicks">Isolate</button></div>
@@ -4175,7 +4175,7 @@ const KMCore = (() => {
     const { F, xy, h, dev } = loopFrame(P, loop.verts);
     const L = makeLoop(loop.verts, [], xy);
     const base = { error: null, loops: [L], regions: buildRegions([L]) };
-    const into2 = intoSide2(xy), sunk = cfg && cfg.sink > 0 ? sunkRing(P, I, F, loop.verts, xy, h, into2, cfg.sink, cfg.margin || 0.8) : null;
+    const into2 = intoSide2(xy), sunk = cfg && cfg.sink > 0 ? (cfg.sinkStep === false ? sunkRingAt : sunkRing)(P, I, F, loop.verts, xy, h, into2, cfg.sink, cfg.minThickness > 0 ? cfg.minThickness : cfg.margin || 0.8) : null;
     if (sunk) { const L2 = makeLoop(loop.verts, [], sunk.xy2); base.loops = [L2]; base.regions = buildRegions([L2]); }
     const an = { frame: F, base, depth: [], curved: { deviation: dev, heightAt: sunk ? capHeightGrid(sunk.xy2, sunk.h2) : capHeightGrid(xy, h), sink: sunk ? sunk.max : 0, into2, sunk } };
     Object.defineProperty(an, '_src', { value: { P, I, F, scale, cfg, cache: new Map() } });
@@ -4688,7 +4688,7 @@ const KMCore = (() => {
   // floor, so the inlay prints on its base), wall (solid to keep under the pocket).
   function inlayCut(P, I, sel, opts = {}) {
     const depth = opts.depth > 0 ? opts.depth : 3, fit = opts.fit >= 0 ? opts.fit : 0.2, wall = opts.wall > 0 ? opts.wall : 0.8;
-    const cut = (s, want, w, plane) => splitRegions(P, I, selectionSeg(P, I, s), [1], { sink: want, sinkFlat: !!opts.flat, sinkPlane: plane || null, force: true, minThickness: 0, cfg: { type: 'none', margin: w } });
+    const cut = (s, want, w, plane) => splitRegions(P, I, selectionSeg(P, I, s), [1], { sink: want, sinkFlat: !!opts.flat, sinkPlane: plane || null, sinkStep: false, force: true, minThickness: 0, cfg: { type: 'none', margin: w } });
     let pocket;
     try { pocket = cut(sel, depth, wall); } catch (err) { throw new Error(`The pocket can’t be cut here: ${err.message.charAt(0).toLowerCase()}${err.message.slice(1)}`); }
     const got = pocket.sinks[0] || 0;
@@ -4804,7 +4804,59 @@ const KMCore = (() => {
      ring is checked the same way. Returns { xy2, h2, depth, max } in the line's frame, or null for no sink. The
      walls run straight along the line's frame normal: following the other piece's surface was tried and dropped,
      because on a bumpy line the pushed points crossed each other. */
+  /* (1.87) The sunk face stepped in from the line: the owner's arm, cut off along a line that climbs under the capelet,
+     came off with flaps of sleeve as thin as paper round its end, because the cut face hugged the sleeve where the
+     line climbed. Now the line's ring is moved in by `wall` (a ledge level with the line, square to the surface),
+     and from there the face goes straight into the other piece to one flat floor beyond the line's deepest point:
+     the piece's end is a solid column that seats in a matching socket, and neither piece is thinner than `wall`
+     where they meet. Where the flat floor has no room, each point is sunk by itself as before, still stepped in;
+     where the ring can't be stepped in (a line too small or too tight for it), the line itself is sunk. An inlay's
+     pocket (`flat`) keeps its exact outline. */
   function sunkRing(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null) {
+    if (flat) return sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, true, plane);
+    const B = wall > 0 ? insetRing(xy, wall) : null;
+    if (B) {
+      const r = sunkRingAt(P, I, F, ring, B, h, into2, want, wall, false, null, true);
+      if (r) { r.ledge = B; return r; }
+    }
+    return sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, false, null);
+  }
+  // The ring moved in by w on its plane (same points, same order), or null where that folds it or brings it nearer
+  // than most of w to the line anywhere.
+  function insetRing(xy, w) {
+    const n = xy.length / 2; if (n < 4) return null;
+    let a2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
+    const ccw = a2 > 0, idx = [...Array(n).keys()]; if (!ccw) idx.reverse();
+    const pts = idx.map(i => [xy[2 * i], xy[2 * i + 1]]);
+    const ease = (r) => r.map((p, i) => { const a = r[(i + n - 1) % n], c = r[(i + 1) % n]; return [(a[0] + 2 * p[0] + c[0]) / 4, (a[1] + 2 * p[1] + c[1]) / 4]; });
+    // a line along the mesh's edges zig-zags, and moving each corner in folds it, so the line is eased first (more
+    // each try), moved in from there, and must still stay most of w in from the line itself
+    for (const [passes, f] of [[0, 1], [3, 1], [10, 1.25], [30, 1.5]]) { let src = pts; for (let k = 0; k < passes; k++) src = ease(src); const r = insetFrom(src, w * f); if (r) return r; }
+    return null;
+    function insetFrom(src, d) {
+    let q = offsetRing(src, -d);
+    const near = (p) => { let best = Infinity; for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n], ex = b[0] - a[0], ey = b[1] - a[1], L = ex * ex + ey * ey || 1e-30, t = Math.max(0, Math.min(1, ((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / L)); best = Math.min(best, Math.hypot(a[0] + ex * t - p[0], a[1] + ey * t - p[1])); } return best; };
+    const flatPts = flatOf(pts), good = (r) => ringOk(r) && r.every(p => pointInRing(flatPts, p[0], p[1]) && near(p) >= 0.7 * w);
+    // a notch narrower than 2w folds the moved ring into a swallowtail: the loop past the crossing is cut out, its
+    // points spread along the two edges through the crossing (so none share a place)
+    for (let it = 0; it < 4 * n; it++) {
+      const hits = findSelfCrossings(flatOf(q)); if (!hits.length) break;
+      const [k, m, tk] = hits[0], inner = m - k, wrap = inner > n / 2;
+      if (Math.min(inner, n - inner) > n / 4) return null; // not a notch: the ring itself is too narrow here
+      const X = [q[k][0] + (q[(k + 1) % n][0] - q[k][0]) * tk, q[k][1] + (q[(k + 1) % n][1] - q[k][1]) * tk];
+      const from = wrap ? m : k, cnt = wrap ? n - inner : inner, A0 = q[from], B0 = q[(from + cnt + 1) % n];
+      const l1 = Math.hypot(X[0] - A0[0], X[1] - A0[1]), l2 = Math.hypot(B0[0] - X[0], B0[1] - X[1]), L = l1 + l2 || 1e-30;
+      for (let r = 1; r <= cnt; r++) { const d = (r / (cnt + 1)) * L; q[(from + r) % n] = d <= l1 ? [A0[0] + (X[0] - A0[0]) * d / (l1 || 1e-30), A0[1] + (X[1] - A0[1]) * d / (l1 || 1e-30)] : [X[0] + (B0[0] - X[0]) * (d - l1) / (l2 || 1e-30), X[1] + (B0[1] - X[1]) * (d - l1) / (l2 || 1e-30)]; }
+    }
+    for (let pass = 0; pass < 4 && !good(q); pass++) { // tight corners: ease the stepped-in ring and look again
+      q = q.map((p, i) => { const a = q[(i + n - 1) % n], c = q[(i + 1) % n]; return [(a[0] + 2 * p[0] + c[0]) / 4, (a[1] + 2 * p[1] + c[1]) / 4]; });
+    }
+    if (!good(q)) return null;
+    const out = new Float64Array(2 * n); idx.forEach((i, k) => { out[2 * i] = q[k][0]; out[2 * i + 1] = q[k][1]; });
+    return out;
+    }
+  }
+  function sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null, column = false) {
     const n = ring.length, g = raysFor(P, I, F), nv = P.length / 3;
     const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2], oz = F.o[0] * F.n[0] + F.o[1] * F.n[1] + F.o[2] * F.n[2];
     // straight into the other piece along the frame normal, so the recess walls are parallel and the piece lifts
@@ -4832,7 +4884,7 @@ const KMCore = (() => {
       for (const w of tries) {
         const d = given ? given : off.map(v => v + w);
         let ok = true;
-        for (let i = 0; i < n && ok; i++) { const r = roomAt(xy[2 * i], xy[2 * i + 1], h[i] + d[i] * into2); if (!(r && r[0] >= wall && r[1] >= 0.05)) ok = false; }
+        for (let i = 0; i < n && ok; i++) { const r = roomAt(xy[2 * i], xy[2 * i + 1], h[i] + d[i] * into2); if (!(r && r[0] >= wall && (column ? r[1] >= d[i] - 1e-3 * wall : r[1] >= 0.05))) ok = false; } // (a stepped-in column must be solid all the way from the ledge to the floor)
         if (!ok) continue;
         const xy2 = new Float64Array(2 * n), h2 = new Float64Array(n);
         for (let i = 0; i < n; i++) { xy2[2 * i] = xy[2 * i]; xy2[2 * i + 1] = xy[2 * i + 1]; h2[i] = h[i] + d[i] * into2; }
@@ -4847,11 +4899,18 @@ const KMCore = (() => {
       }
       return null;
     }
-    for (let i = 0; i < n; i++) {
+    // (1.87) stepped in: every point goes as deep as the solid holds it with a wall to spare (one line through the
+    // model from the ledge), up to the line's deepest point plus `want`, so where there is room the floor is flat
+    let top = -Infinity; if (column) for (let i = 0; i < n; i++) top = Math.max(top, h[i] * into2);
+    for (let i = 0; column && i < n; i++) {
+      const r = roomAt(xy[2 * i], xy[2 * i + 1], h[i] + into2 * 1e-3 * wall);
+      depth[i] = r ? Math.max(0, Math.min(top - h[i] * into2 + want, r[0] - wall)) : 0;
+    }
+    for (let i = 0; !column && i < n; i++) {
       let s = want;
       for (let tries = 0; tries < 5 && s > 0.02; tries++) {
         const r = roomAt(xy[2 * i] + s * dirs[i][0], xy[2 * i + 1] + s * dirs[i][1], h[i] + s * dirs[i][2]);
-        if (r && r[0] >= wall && r[1] >= 0.05) break;
+        if (r && r[0] >= wall && (column ? r[1] >= s - 1e-3 * wall : r[1] >= 0.05)) break;
         s /= 2;
         if (tries === 4) s = 0;
       }
@@ -4860,9 +4919,12 @@ const KMCore = (() => {
     // smoothed along the line: no deeper than its neighbours within a wall's length, then averaged over the same
     const len = new Float64Array(n); for (let i = 0; i < n; i++) { const j = (i + 1) % n; len[i] = Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1], h[j] - h[i]); }
     const window = (i, f) => { let acc = f.init, run = 0; for (let k = 0; k <= n / 2; k++) { if (k > 0 && (run += len[(i + k - 1) % n]) > wall) break; acc = f.step(acc, depth[(i + k) % n]); } run = 0; for (let k = 1; k <= n / 2; k++) { if ((run += len[(i + n - k) % n]) > wall) break; acc = f.step(acc, depth[(i + n - k) % n]); } return f.done(acc); };
+    if (column) for (let i = 0; i < n; i++) depth[i] = depth[i] > 0 ? h[i] * into2 + depth[i] : -Infinity; // (stepped: the floor's level is what is smoothed, so a level floor stays level; a point with no room holds its neighbours back)
+    if (column) { let lo = Infinity; for (let i = 0; i < n; i++) if (depth[i] > -Infinity) lo = Math.min(lo, depth[i]); if (lo === Infinity) return null; for (let i = 0; i < n; i++) if (depth[i] === -Infinity) depth[i] = h[i] * into2; }
     const lows = new Float64Array(n); for (let i = 0; i < n; i++) lows[i] = window(i, { init: Infinity, step: Math.min, done: (a) => a });
     depth.set(lows);
     const smooth = new Float64Array(n); for (let i = 0; i < n; i++) smooth[i] = window(i, { init: [0, 0], step: (a, v) => [a[0] + v, a[1] + 1], done: (a) => a[0] / a[1] });
+    if (column) for (let i = 0; i < n; i++) smooth[i] = Math.max(0, smooth[i] - h[i] * into2);
     let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, smooth[i]);
     if (max < 0.05) return null;
     const xy2 = new Float64Array(2 * n), h2 = new Float64Array(n);
@@ -5294,7 +5356,7 @@ const KMCore = (() => {
       const lcfg = per.pegSide && per.pegSide !== cfg.pegSide ? { ...cfg, pegSide: per.pegSide } : cfg; // which piece the pegs or plug stand on, per line
       // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
       // keys and its checks then all work on the sunk ring
-      const sunk = opts.sink > 0 ? sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, !!opts.sinkFlat, opts.sinkPlane || null) : null;
+      const sunk = opts.sink > 0 ? (opts.sinkStep === false ? sunkRingAt : sunkRing)(P, I, F, ring, xy, lf.h, into2, opts.sink, opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, !!opts.sinkFlat, opts.sinkPlane || null) : null;
       const faceOf = (fxy, fh) => { const sec = { loops: [makeLoop(ring, [], fxy)] }; sec.regions = buildRegions(sec.loops); return { xy: fxy, h: fh, sec, step: capStep(fxy), H: capHeight(fxy, fh) }; };
       const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, cfg: lcfg, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
       c.use = (which) => { const f = which === 'sunk' && c.sunkFace ? c.sunkFace : c.plain; Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0 }); c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length; };
@@ -5321,8 +5383,9 @@ const KMCore = (() => {
           let capRing = ring, lowOf = null;
           if (sunk) {
             const low = ring.map((v, i) => { const id = addAt(sunk.xy2[2 * i], sunk.xy2[2 * i + 1], sunk.h2[i]); xyMap.set(id, [sunk.xy2[2 * i], sunk.xy2[2 * i + 1]]); return id; });
-            for (let i = 0; i < n; i++) {
-              const a = ring[i], b = ring[(i + 1) % n], la = low[i], lb = low[(i + 1) % n];
+            const steps = sunk.ledge ? [ring, ring.map((v, i) => addAt(sunk.ledge[2 * i], sunk.ledge[2 * i + 1], c.lf.h[i])), low] : [ring, low]; // (1.87) the ledge in from the line, then the wall
+            for (let s = 0; s + 1 < steps.length; s++) for (let i = 0; i < n; i++) {
+              const a = steps[s][i], b = steps[s][(i + 1) % n], la = steps[s + 1][i], lb = steps[s + 1][(i + 1) % n];
               tris[1].push(b, a, la, b, la, lb); // against side 1's line edge a -> b, and along the sunk ring's la -> lb
               tris[2].push(copy.get(b), copy.get(la), copy.get(a), copy.get(b), copy.get(lb), copy.get(la));
             }
@@ -5395,6 +5458,14 @@ const KMCore = (() => {
       caps.forEach((c, i) => c.use(sinkPlans[pi][i]));
       parts = buildParts();
       try { warnings = checkPieces(parts, last); break; } catch (e) { if (last || e.code !== 'locked') throw e; }
+    }
+    // (1.87) forced through a lock that no plan frees (a piece held at both ends): cut with the sunk faces after all,
+    // since dropping them only brought the thin rims back
+    // (the stepped-in ones only: a face sunk without its ledge has its own thin rim)
+    const stepped = caps.map(c => (c.sunkFace && c.sunkFace.sunk.ledge ? 'sunk' : 'plain'));
+    if (opts.force && stepped.includes('sunk') && sinkPlans.length > 1 && warnings && warnings.some(w => w.code === 'locked')) {
+      caps.forEach((c, i) => c.use(stepped[i]));
+      try { const p0 = buildParts(), w0 = checkPieces(p0, true); parts = p0; warnings = w0; } catch (e) { caps.forEach((c, i) => c.use(sinkPlans[sinkPlans.length - 1][i])); }
     }
     parts.sort((x, y) => y.volume - x.volume);
     return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings, sinks: caps.map(c => c.sink), floors: caps.map(c => (c.sunk && c.sunk.plane) || null) };
@@ -5472,8 +5543,9 @@ const KMCore = (() => {
     let capRing = ring;
     if (sunk) {
       const low = ring.map((v, i) => { const q = at(xy[2 * i], xy[2 * i + 1], hts[i]), v1 = addV(q), v2 = addV(q); other.set(v1, v2); ringXY.set(v1, [xy[2 * i], xy[2 * i + 1]]); return v1; });
-      for (let i = 0; i < n; i++) {
-        const a = ring[i], b = ring[(i + 1) % n], la = low[i], lb = low[(i + 1) % n];
+      const steps = sunk.ledge ? [ring, ring.map((v, i) => { const q = at(sunk.ledge[2 * i], sunk.ledge[2 * i + 1], hts0[i]), v1 = addV(q), v2 = addV(q); other.set(v1, v2); return v1; }), low] : [ring, low]; // (1.87) the ledge in from the line, then the wall
+      for (let s = 0; s + 1 < steps.length; s++) for (let i = 0; i < n; i++) {
+        const a = steps[s][i], b = steps[s][(i + 1) % n], la = steps[s + 1][i], lb = steps[s + 1][(i + 1) % n];
         tris[1].push(b, a, la, b, la, lb);
         tris[2].push(other.get(b), other.get(la), other.get(a), other.get(b), other.get(lb), other.get(la));
       }
@@ -6113,7 +6185,7 @@ const KMCore = (() => {
   }
   function planJoints(P0, I0, req0) {
     const { P, I, req } = pickMesh(P0, I0, req0);
-    const cfg = req.cfg, D = diag(bounds(P));
+    const cfg = { ...req.cfg, ...(req.minThickness > 0 ? { minThickness: req.minThickness } : {}), ...(req.sink !== undefined ? { sink: req.sink } : {}), ...(req.sinkStep === false ? { sinkStep: false } : {}) }, D = diag(bounds(P)); // (1.87) keys planned on the face the cut makes: the same wall steps it in
     let loops = req.loops;
     if (!req.regions && loops.length && loops.every(l => l.closed)) { try { loops = orientLoops(P, I, loops, { what: 'lines' }).loops; } catch (err) { /* the cut will say why */ } }
     const out = { loops, perLoop: [], frames: [], draw: [], keys: 0, plugs: 0, noKeys: null, result: null, error: null, errorCode: null, forced: null, dropped: null };
@@ -6241,6 +6313,17 @@ const KMCore = (() => {
   // a piece too thin is offered only forced, with the reason, as any thin refusal is
   const pickMeshOf = new WeakMap();
   function planPick(P0, I0, req0) {
+    const out = planPickOnce(P0, I0, req0);
+    // (1.87) a face stepped into the other piece can run its socket near that piece's far side; when the pieces
+    // then fail the print check, the face is sunk as before (each point by the depth, no ledge) and that is kept if
+    // it passes
+    if (out.printCheck && req0.sink > 0 && req0.sinkStep !== false) {
+      let alt = null; try { alt = planPickOnce(P0, I0, { ...req0, sinkStep: false, planned: null }); } catch (err) { alt = null; } // (its joints are planned again, on the face it makes)
+      if (alt && alt.result && !alt.error && !alt.printCheck) return alt;
+    }
+    return out;
+  }
+  function planPickOnce(P0, I0, req0) {
     const out = planPickPieces(P0, I0, req0), P = pickMeshOf.get(out) || P0;
     if (out.result && !out.error && req0.minThickness > 0 && !req0.noPrintCheck) {
       let bad = [];
@@ -6262,7 +6345,7 @@ const KMCore = (() => {
     const cfg = req.cfg, out = req.planned ? { ...req.planned, result: null, error: null, errorCode: null, forced: null, dropped: null } : planJoints(P, I, req), loops = out.loops;
     pickMeshOf.set(out, P);
     const run = (withJoints, force) => {
-      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, perLoop: withJoints ? out.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
+      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, sinkStep: req.sinkStep, perLoop: withJoints ? out.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
       if (req.regions) return splitRegions(P, I, req.seg, req.regions, o);
       if (loops.length > 1) return cutAlongLoops(P, I, loops, { ...o, what: 'lines' });
       const p0 = o.perLoop[0] || {};
