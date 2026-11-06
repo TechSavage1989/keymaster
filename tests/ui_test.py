@@ -85,7 +85,7 @@ def brush_on(pg):
     if not pg.is_visible('#paintBtn'):
         pg.click('#toolPanel .tool[data-tool=regions]')
         pg.wait_for_function("KeymasterDebug.regionsOn() && !KeymasterDebug.regionsLoading()", timeout=30000)
-    brush_on(pg)
+    pg.click('#paintBtn')
 
 
 def toggle_regions(pg):
