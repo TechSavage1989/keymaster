@@ -2759,7 +2759,7 @@
       if (run !== pickRun || state.regions.pick !== pick) return;
       pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths; pick.cover = j.cover || null;
       pick.keys = j.perLoop.flatMap(per => per.keys); pick.plugs = j.perLoop.flatMap(per => per.plugs);
-      pick.noKeys = noKeysText(j.noKeys, j.loops.length > 1);
+      pick.noKeys = noKeysText(j.noKeys, j.loops.length > 1, j.perLoop);
       drawPickLines(p, pick); renderPick(); markDirty();
     }).catch(() => {});
   }
@@ -4179,11 +4179,16 @@
       if (state.regions.pickPromise === pr) return;
     }
   }
-  function noKeysText(nk, many) {
+  function noKeysText(nk, many, perLoop) {
     if (!nk) return null;
-    const where = many ? 'one of its lines' : 'this line';
-    if (nk.code === 'plug') { const why = nk.reason || 'no room'; return `No plug inside ${where} (${why.charAt(0).toLowerCase() + why.slice(1)}), so that line will be cut without one.`; }
-    if (nk.code === 'room') return `No room for keys inside ${where} at these settings, so that line will be cut without them.`;
+    // (1.85) how many lines have no joint: "one of its lines" read as if the others had one when none did
+    const n = perLoop ? perLoop.length : 0, bare = perLoop ? perLoop.filter(per => !(per.keys && per.keys.length) && !(per.plugs && per.plugs.length)).length : 0;
+    const where = !many ? 'this line' : n && bare === n ? (n === 2 ? 'either of its lines' : `any of its ${n} lines`) : bare > 1 ? `${bare} of its ${n} lines` : 'one of its lines';
+    const those = !many ? 'that line' : bare > 1 ? 'those lines' : 'that line';
+    const p = selectedPart(), size = p ? Math.max(...p.bbox.size) : 0;
+    const small = n && bare === n && size > 0 && size < 80 ? ` The part is only ${fmt(size)} mm across: scale it up (the % box at the top left), or pick resin or smaller keys, and joints will fit.` : '';
+    if (nk.code === 'plug') { const why = nk.reason || 'no room'; return `No plug fits inside ${where} (${why.charAt(0).toLowerCase() + why.slice(1)}), so ${those} will be cut without one.${small}`; }
+    if (nk.code === 'room') return `No room for keys inside ${where} at these settings, so ${those} will be cut without them.${small}`;
     return 'Keys couldn’t be placed on this line, so it will be cut without them.';
   }
   function droppedText(d) {
@@ -4253,7 +4258,7 @@
       if (joints.paths) pick.paths = joints.paths; else { pick.loops = joints.loops; pick.loop = joints.loops[0]; } // a sliced pick's lines run through new vertices: drawn from their points, and the pick keeps the lines on the part itself
       pick.perLoop = joints.perLoop; pick.frames = joints.frames; pick.draw = joints.draw;
       pick.keys = joints.perLoop.flatMap(per => per.keys); pick.plugs = joints.perLoop.flatMap(per => per.plugs);
-      pick.noKeys = noKeysText(joints.noKeys, joints.loops.length > 1);
+      pick.noKeys = noKeysText(joints.noKeys, joints.loops.length > 1, joints.perLoop);
       drawPickLines(p, pick); renderPick(); markDirty();
       return coreTask('planPick', [p.positions, p.indices, { ...req, planned: joints }]);
     }).then((out) => {
@@ -4262,7 +4267,7 @@
       if (out.paths) pick.paths = out.paths; else { pick.loops = out.loops; pick.loop = out.loops[0]; }
       pick.perLoop = out.perLoop; pick.frames = out.frames; pick.draw = out.draw;
       pick.keys = out.perLoop.flatMap(per => per.keys); pick.plugs = out.perLoop.flatMap(per => per.plugs);
-      pick.noKeys = out.dropped ? droppedText(out.dropped) : noKeysText(out.noKeys, out.loops.length > 1);
+      pick.noKeys = out.dropped ? droppedText(out.dropped) : noKeysText(out.noKeys, out.loops.length > 1, out.perLoop);
       pick.result = out.result; pick.forced = out.forced; if (out.error) pick.error = out.error;
     }).catch((err) => {
       if (run !== pickRun || state.regions.pick !== pick) return;

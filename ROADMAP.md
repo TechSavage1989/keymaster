@@ -36,6 +36,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Scale % against the original, X/Y/Z sizes linked or free, turns by any angle, Turn freely, Lay flat, Inlay cut explained, hard-surface borders, Section size (1.74).
 - CAD-style parts told from sculpted ones and never melted together, drawn lines sliced through the faces, Section size shown as Large / Medium / Small (1.75).
 - Strokes sliced along their plane (the exact ring, no steps), CAD panels labelled whole, Split into parts falling back to flat cuts at narrow points, held pieces allowed out along a joint, small pieces in mm³ (1.76).
+- A made object's thin strips stay with the object, so a cut round a hand on a book no longer runs out along the book's groove; the joints message says how many lines have none and to scale a small part up (1.85).
 - One tool for picking (Regions with Pick by: Click | Brush), and Sections as the smaller pieces within each part, never running into another part (1.84).
 - Limbs kept whole at Balanced and ended in a flat cut at the joint (no flaps under a cape, no spike on the arm), knife-thin edges flagged before a cut, a Thinnest piece setting (1.83).
 - The same regions at any size (they are found from the shape as it opened, so 100% and 1000% agree triangle for triangle; only the keys go by millimetres), and the strips between a book's clasps go with the book (1.82).
