@@ -1310,12 +1310,11 @@ console.log('curved cuts along a border');
   const anS = K.analyzeLoop(sp.positions, sp.indices, orientedW, { type: 'none', sink: 1, margin: 1 }, 40);
   const smallPlain = Math.min(...cw.parts.map(q => q.volume)), smallSunk = Math.min(...sunk.parts.map(q => q.volume)), faceArea = anS.base.regions[0].area;
   check('a sunk face: full depth, sealed, volume kept', sunk.sink > 0.95 && anS.curved.sink > 0.95 && allClosed(sunk.parts) && Math.abs(sumVol(sunk.parts) - sp.report.volume) / sp.report.volume < 1e-6, [sunk.sink, anS.curved.sink, sumVol(sunk.parts)]);
-  // (1.87) the face is stepped in from the line by the wall (a ledge level with the line), and from there goes
-  // straight down to one level floor a millimetre below the line's lowest dip, so the cap piece ends in a solid
+  // (1.87, 1.88) the face goes from the line's own edge straight down to one level floor a millimetre below the line's lowest dip, so the cap piece ends in a solid
   // plug and neither piece thins to an edge where the line rises; where there is no solid below, it comes up
   const sk = anS.curved.sunk, depths = sk.depth, deepest = anS.curved.into2 > 0 ? Math.max(...sk.h2) : Math.min(...sk.h2);
   const level = Array.from(sk.h2).filter(v => Math.abs(v - deepest) < 0.05).length;
-  check('a sunk face is stepped in from the line, with a level floor below its lowest dip along most of it', !!sk.ledge && level > depths.length * 0.4 && depths.every(d => d >= 0), [!!sk.ledge, level, depths.length]);
+  check('a sunk face goes straight in from the line’s edge, with a level floor below its lowest dip along most of it', !!sk.column && level > depths.length * 0.4 && depths.every(d => d >= 0), [!!sk.column, level, depths.length]);
   const capOf = (parts) => parts.reduce((a, b) => (a.bbox.max[2] > b.bbox.max[2] ? a : b)), capPlain = capOf(cw.parts).volume, capSunk = capOf(sunk.parts).volume;
   check('the cap piece gains the plug', capSunk - capPlain > 0.3 * faceArea, [capSunk - capPlain, faceArea]);
   // the slab really is there: along the frame normal, the smaller piece is at least a millimetre thick at the line
@@ -1350,7 +1349,12 @@ console.log('curved cuts along a border');
     const lvl = Array.from(cs.h2).filter(v => Math.abs(v - deep) < 0.05).length / cs.h2.length;
     const cr = K.cutAlongLoop(cP, cI, cl, { sink: 1, minThickness: 1 }), cvol = cr.parts.reduce((a, q) => a + q.volume, 0);
     const knives = K.knifeEdges(cP, cr.parts, 1, { deg: 60 }).filter(k => k.length > 0.5);
-    check('a climbing line round a limb sinks to a column: stepped in, one level floor past its lowest point, no thin rim, sealed, volume kept', !!cs.ledge && cs.max > 15 && lvl > 0.8 && cr.sink > 15 && allClosed(cr.parts) && Math.abs(cvol - K.volume(cP, cI)) / K.volume(cP, cI) < 1e-6 && !knives.length && !K.cutPrintCheck(cP, cr.parts, 1).some(b => b.thin), [!!cs.ledge, cs.max, lvl, cr.sink, knives.length]); }
+    check('a climbing line round a limb sinks to a plug from its edge: one level floor past its lowest point, no thin rim, sealed, volume kept', !!cs.column && cs.max > 15 && lvl > 0.8 && cr.sink > 15 && allClosed(cr.parts) && Math.abs(cvol - K.volume(cP, cI)) / K.volume(cP, cI) < 1e-6 && !knives.length && !K.cutPrintCheck(cP, cr.parts, 1).some(b => b.thin), [!!cs.column, cs.max, lvl, cr.sink, knives.length]);
+    // (1.88) tapered: the plug's walls lean in by 5°, its floor ring inside the line by depth × tan 5°, the socket matching
+    const area = (a) => { let t = 0; const n = a.length / 2; for (let i = 0; i < n; i++) { const j = (i + 1) % n; t += a[2 * i] * a[2 * j + 1] - a[2 * j] * a[2 * i + 1]; } return Math.abs(t) / 2; };
+    const tan = K.analyzeLoop(cP, cI, cl, { type: 'none', sink: 1, margin: 1, sinkTaper: 5 }, 60).curved.sunk, ring = can.base.loops[0].xy;
+    const tr = K.cutAlongLoop(cP, cI, cl, { sink: 1, minThickness: 1, sinkTaper: 5 }), tvol = tr.parts.reduce((a, q) => a + q.volume, 0);
+    check('tapered 5°: the floor ring sits inside the line (by up to depth × tan 5°), sealed, volume kept', tan.taper === 5 && area(tan.xy2) < area(ring) * 0.85 && area(tan.xy2) > area(ring) * 0.4 && allClosed(tr.parts) && Math.abs(tvol - K.volume(cP, cI)) / K.volume(cP, cI) < 1e-6, [tan.taper, area(tan.xy2), area(ring)]); }
   // with a wall thicker than the ball required beyond the face, there is no room to sink: the cut is as before
   const noRoom = K.cutAlongLoop(sp.positions, sp.indices, orientedW, { sink: 1, cfg: cfgOf({ margin: 30 }) });
   check('no room to sink: the face stays where it was, and the cut is still sealed', noRoom.sink === 0 && allClosed(noRoom.parts) && Math.abs(Math.min(...noRoom.parts.map(q => q.volume)) - smallPlain) < 1e-6, [noRoom.sink, noRoom.parts.map(q => q.volume)]);

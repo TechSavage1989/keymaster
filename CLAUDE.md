@@ -374,6 +374,16 @@ The owner, after 1.86: the arm came off as painted but "still produces super sha
 - Checked on the page with the real renderer, Rhinehardt at 1000%, the owner's brushed arm, Sink face 3, Thinnest piece 0.4: the arm ends in a column 15 mm into the shoulder with its peg, no flaps; the body has the matching socket. Tested: a saddle-shaped line round a cylinder sinks to a level floor past its lowest point, sealed, volume kept, no rim under 60°. On a thin arm (the test figure's), the face stepped in by the wall leaves no room for a peg; the column itself locates the piece.
 - Known: the hand-on-book line still can't be stepped in, so where the palm meets the book the old thin strips remain.
 
+## The plug from the cut's edge, tapered; Extra key; Rotate rings (1.88)
+
+The owner, after 1.87: "close to what i want, but it needs to be also tapered, and also still allow me to choose what kind of additional key if any at all. also the depth of the extrusion should be adjustable"; "start the extrusion right from the edge of the cut, not ... with that sliver of a lip or ridge"; "for rotating the model, it should have ring style controls like in other 3d software".
+- **No ledge**: `sunkRing` now builds the walls from the line itself. The room is still measured along lines a hair inside the line (`insetRing` by a quarter of the wall, at least 0.02 mm: on the line the lines graze the surface), and the result is a plug (`sunk.column`) whose walls start at the cut's edge. The forced-lock fallback keeps plugs (`column`), not faces sunk point by point.
+- **Taper** (`cfg.sinkTaper`, degrees, default 5; `opts.sinkTaper` on the cut): `taperRing(xy, depth, deg)` moves each floor point in by its depth × tan(deg) along the inward direction of the line eased smooth (from the eased line first, so the floor ring is smooth; then from the line; then at half and a quarter of the angle where the ring would fold). `analyzeLoop` and `cutAlongLoops` both take it, so keys sit on the floor the cut makes. Tested on the saddle cylinder: 5° holds, the floor ring is inside the line, sealed, volume kept.
+- **In the regions panel**: Sink face is now **Extrude** (mm past the line's deepest point; `#sinkDepth`), beside **Taper** (`#sinkTaper`, °) and **Extra key** (`#extraKey`: Pegs, Dowels, Magnets, Plug, None, the same `cfg.type` as Joints, both ways; `syncMinPiece` keeps the boxes in step and runs on every `renderInspector`); Thinnest piece reads **Thinnest**.
+- **Rotate**: the chip's Free is **Rotate**, the panel's Turn freely **Rotate with rings**; the rotate rings are drawn at 1.7× (`tc.setSize`) round the model, and Shift snaps them to 15° (`setRotationSnap`).
+- Checked on the page with the real renderer: the owner's arm at Extrude 3, Taper 5: a plug from the cut's edge, leaning in 5°, 15 mm into the shoulder, peg on top, no lip.
+- Known: the plug and its socket share one surface, so they print with no gap between them; the taper lets it seat.
+
 ## Versions
 
 `VERSION` holds the version shown next to the app's name, with a short build code that `tools/build.py` works out from the sources (the same sources always give the same code). **Bump `VERSION` in every pull request** (1.14 to 1.15 and so on), so the owner can refresh the live page and see the new version has arrived.
