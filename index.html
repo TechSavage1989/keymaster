@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.87, build ba5b25. After an update, refresh the page and check this changes.">v1.87 · ba5b25</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.88, build f75314. After an update, refresh the page and check this changes.">v1.88 · f75314</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -602,7 +602,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         </div>
       </div>
       <div class="model-tools" id="modelTools" aria-label="Model size and orientation" hidden>
-        <span class="lbl">Turn</span><button class="btn small" data-act="rotate" data-value="x" title="Turn the whole model a quarter turn about X">X</button><button class="btn small" data-act="rotate" data-value="y" title="Turn the whole model a quarter turn about Y">Y</button><button class="btn small" data-act="rotate" data-value="z" title="Turn the whole model a quarter turn about Z">Z</button><button class="btn small" data-act="turn-free" aria-pressed="false" title="Turn the model freely with the rings, as in any 3D app">Free</button><button class="btn small" data-act="lay-flat" aria-pressed="false" title="Click a face of the model to lay it face down on the bed">Lay flat</button>
+        <span class="lbl">Turn</span><button class="btn small" data-act="rotate" data-value="x" title="Turn the whole model a quarter turn about X">X</button><button class="btn small" data-act="rotate" data-value="y" title="Turn the whole model a quarter turn about Y">Y</button><button class="btn small" data-act="rotate" data-value="z" title="Turn the whole model a quarter turn about Z">Z</button><button class="btn small" data-act="turn-free" aria-pressed="false" title="Rotate the model with rings, as in any 3D app (Shift snaps to 15°)">Rotate</button><button class="btn small" data-act="lay-flat" aria-pressed="false" title="Click a face of the model to lay it face down on the bed">Lay flat</button>
         <span class="lbl">Scale</span><button class="btn small" data-act="scale" data-value="0.1" title="Scale the whole model down ten times">× 0.1</button><button class="btn small" data-act="scale" data-value="10" title="Scale the whole model up ten times">× 10</button><label class="inline-num"><input type="number" id="quickScale" value="100" min="0.1" step="1" aria-label="The model's scale against how it opened, in percent" title="The model's size against how it opened: type a new one and press Enter or Set"><span class="unit">%</span></label><button class="btn small" data-act="scale-quick" title="Set the model to this scale, against how it opened">Set</button>
       </div>
       <div class="view-tools" id="viewTools" hidden>
@@ -663,7 +663,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
     <div class="rp-row rp-by"><span class="lbl">Find</span><div class="seg" role="group" aria-label="Find"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="Parts: whole parts of the figure: a limb, a head, the torso, a hat, armour, a book, a weapon, a base. Detail sets how finely they are told apart">Parts</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Sections: the smaller pieces within each part, wherever a border or a fold runs across it (a cuff on a sleeve, a collar, a belt, a plate of armour, a book's cover). A section never runs into another part">Sections</button></div><output id="regionsCount"></output></div>
     <div class="rp-row rp-ratio"><span class="lbl" title="How finely the model is split into parts">Detail</span><div class="seg" role="group" aria-label="Detail" id="regionsDetail"><button type="button" data-act="regions-detail" data-value="coarse" aria-pressed="false" title="Only the big parts: head, limbs, body, base">Big</button><button type="button" data-act="regions-detail" data-value="balanced" aria-pressed="true" title="The parts a kit would have: head, hands, feet, hat, clothing">Balanced</button><button type="button" data-act="regions-detail" data-value="fine" aria-pressed="false" title="Smaller parts too: ears, fingers, buttons, straps">Fine</button></div></div>
     <div class="rp-row rp-fold" hidden><label class="slider" title="How big the sections are: left for a few large ones, right for many small ones (the surface is split where it creases, and where a hard surface such as a book or a buckle meets cloth or skin)"><span class="lbl">Section size</span><input type="range" id="regionsAngle" min="0" max="100" step="5" value="55" aria-label="Section size, from large (left) to small (right)"><output id="regionsAngleOut">Medium</output></label></div>
-    <div class="btn-row"><label class="inline-num" title="Step the cut face in from its edge by the Thinnest piece and push it straight into the other piece, at least this far past the line&#39;s deepest point, so the piece ends in a solid plug that seats in a socket, with no thin or sharp rim. 0 turns it off."><span class="lbl">Sink face</span><input type="number" id="sinkDepth" min="0" step="0.2" value="1" aria-label="Sink the cut face into the other piece by this much"><span class="unit">mm</span></label><label class="inline-num" title="No piece may be thinner than this after a cut: a cut that would leave a thinner wall, a sliver or a knife-sharp edge along its rim is flagged before it is made (you can still cut it anyway). Follows the printer until set."><span class="lbl">Thinnest piece</span><input type="number" id="minPiece" min="0.2" step="0.1" value="1.2" aria-label="The thinnest a piece may be after a cut"><span class="unit">mm</span></label><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div>
+    <div class="btn-row"><label class="inline-num" title="The cut goes from its edge straight into the other piece, at least this far past the line&#39;s deepest point, so the piece ends in a solid plug that seats in a matching socket, with no thin or sharp rim. 0 turns it off."><span class="lbl">Extrude</span><input type="number" id="sinkDepth" min="0" step="0.5" value="1" aria-label="How far the cut goes into the other piece past the line, in mm"><span class="unit">mm</span></label><label class="inline-num" title="The plug&#39;s sides lean in by this angle so it slides home. 0 for straight sides."><span class="lbl">Taper</span><input type="number" id="sinkTaper" min="0" max="20" step="1" value="5" aria-label="Taper of the plug&#39;s sides in degrees"><span class="unit">°</span></label><label class="inline-num" title="An extra key on the plug&#39;s end, or none. The same choice as in Joints."><span class="lbl">Extra key</span><select id="extraKey" aria-label="Extra key on the cut"><option value="peg">Pegs</option><option value="dowel">Dowels</option><option value="magnet">Magnets</option><option value="plug">Plug</option><option value="none">None</option></select></label><label class="inline-num" title="No piece may be thinner than this after a cut: a cut that would leave a thinner wall, a sliver or a knife-sharp edge along its rim is flagged before it is made (you can still cut it anyway). Follows the printer until set."><span class="lbl">Thinnest</span><input type="number" id="minPiece" min="0.2" step="0.1" value="1.2" aria-label="The thinnest a piece may be after a cut"><span class="unit">mm</span></label><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div>
     <div id="paintTools" class="paint-tools" hidden>
       <div class="btn-row"><label class="inline-num" title="Brush size"><span class="lbl">Brush</span><input type="number" id="brushSize" min="0.2" step="0.5" value="3" aria-label="Brush size in millimetres"><span class="unit">mm</span></label><input type="range" id="brushSlider" class="brush-slider" min="0" max="100" step="1" value="40" aria-label="Brush size" title="Brush size: drag to change ([ and ] too)"><button class="btn small" id="eraseBtn" aria-pressed="false" title="Erase paint instead of adding it (or hold Shift while painting)">Erase</button><button class="btn small" id="brushModeBtn" data-act="paint-mode" aria-pressed="false" title="Surface follows connected faces and stops at the edge of a layer; Sphere paints every face within reach, layers behind included">Surface</button><button class="btn small" id="fillBtn" data-act="paint-fill" aria-pressed="false" title="A click paints the whole surface region under the brush">Fill</button></div>
       <div class="btn-row"><button class="btn small" data-act="paint-grow" title="Grow the painted area outward by one brush width">Grow</button><button class="btn small" data-act="paint-shrink" title="Shrink the painted area by one brush width">Shrink</button><button class="btn small" data-act="paint-tidy" title="Smooth the painted area's edge: drop thin tongues and fill notches">Tidy edge</button><button class="btn small" data-act="paint-fill-gaps" title="Fill the gaps in the paint: channels narrower than the brush between painted pieces, and every patch the paint surrounds">Fill gaps</button><button class="btn small" data-act="paint-snap" title="Snap the paint to the surface regions: a region at least half painted is painted whole, the rest cleared">Snap to borders</button><button class="btn small" data-act="paint-clear" title="Remove all paint">Clear</button><button class="btn small" id="isolateBtn" data-act="paint-isolate" aria-pressed="false" title="Hide everything but the painted area, so the rest of the model stays out of the way of the brush and clicks">Isolate</button></div>
@@ -4175,7 +4175,7 @@ const KMCore = (() => {
     const { F, xy, h, dev } = loopFrame(P, loop.verts);
     const L = makeLoop(loop.verts, [], xy);
     const base = { error: null, loops: [L], regions: buildRegions([L]) };
-    const into2 = intoSide2(xy), sunk = cfg && cfg.sink > 0 ? (cfg.sinkStep === false ? sunkRingAt : sunkRing)(P, I, F, loop.verts, xy, h, into2, cfg.sink, cfg.minThickness > 0 ? cfg.minThickness : cfg.margin || 0.8) : null;
+    const into2 = intoSide2(xy), sunk = cfg && cfg.sink > 0 ? (cfg.sinkStep === false ? sunkRingAt(P, I, F, loop.verts, xy, h, into2, cfg.sink, cfg.minThickness > 0 ? cfg.minThickness : cfg.margin || 0.8) : sunkRing(P, I, F, loop.verts, xy, h, into2, cfg.sink, cfg.minThickness > 0 ? cfg.minThickness : cfg.margin || 0.8, false, null, cfg.sinkTaper || 0)) : null;
     if (sunk) { const L2 = makeLoop(loop.verts, [], sunk.xy2); base.loops = [L2]; base.regions = buildRegions([L2]); }
     const an = { frame: F, base, depth: [], curved: { deviation: dev, heightAt: sunk ? capHeightGrid(sunk.xy2, sunk.h2) : capHeightGrid(xy, h), sink: sunk ? sunk.max : 0, into2, sunk } };
     Object.defineProperty(an, '_src', { value: { P, I, F, scale, cfg, cache: new Map() } });
@@ -4804,22 +4804,46 @@ const KMCore = (() => {
      ring is checked the same way. Returns { xy2, h2, depth, max } in the line's frame, or null for no sink. The
      walls run straight along the line's frame normal: following the other piece's surface was tried and dropped,
      because on a bumpy line the pushed points crossed each other. */
-  /* (1.87) The sunk face stepped in from the line: the owner's arm, cut off along a line that climbs under the capelet,
-     came off with flaps of sleeve as thin as paper round its end, because the cut face hugged the sleeve where the
-     line climbed. Now the line's ring is moved in by `wall` (a ledge level with the line, square to the surface),
-     and from there the face goes straight into the other piece to one flat floor beyond the line's deepest point:
-     the piece's end is a solid column that seats in a matching socket, and neither piece is thinner than `wall`
-     where they meet. Where the flat floor has no room, each point is sunk by itself as before, still stepped in;
-     where the ring can't be stepped in (a line too small or too tight for it), the line itself is sunk. An inlay's
-     pocket (`flat`) keeps its exact outline. */
-  function sunkRing(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null) {
+  /* The sunk face as a plug (1.87, 1.88). The owner's arm, cut off along a line that climbs under the capelet, came
+     off with flaps of sleeve as thin as paper round its end, because the cut face hugged the sleeve where the line
+     climbed. So the face goes from the line's own edge straight into the other piece, each point as far as the solid
+     holds it with a wall to spare, down to one level floor `want` past the line's deepest point (lower only where
+     there is no room): the piece's end is a solid plug that seats in a matching socket. The walls lean in by `taper`
+     degrees so it slides home. 1.87 stepped the walls in by a wall's width first; the owner found the ledge "a
+     sliver of a lip", so the walls start at the line now, and the room is measured along lines a hair inside it
+     (on the line itself they graze the surface). Where the ring can't be moved in even that far, each point is
+     sunk by itself as before. An inlay's pocket (`flat`) keeps its exact outline. */
+  function sunkRing(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null, taper = 0) {
     if (flat) return sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, true, plane);
-    const B = wall > 0 ? insetRing(xy, wall) : null;
+    const B = insetRing(xy, Math.max(0.02, 0.25 * wall));
     if (B) {
       const r = sunkRingAt(P, I, F, ring, B, h, into2, want, wall, false, null, true);
-      if (r) { r.ledge = B; return r; }
+      if (r) {
+        const t = taperRing(xy, r.depth, taper);
+        r.xy2 = t.xy; r.taper = t.deg; r.column = true;
+        for (let i = 0; i < h.length; i++) r.h2[i] = h[i] + r.depth[i] * into2;
+        return r;
+      }
     }
     return sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, false, null);
+  }
+  // The floor's ring: each line point moved in on the plane by its depth × tan(deg), along the inward direction of
+  // the line eased smooth (a line along mesh edges zig-zags); less taper where that would fold the ring.
+  function taperRing(xy, depth, deg) {
+    const n = xy.length / 2, copy = Float64Array.from(xy);
+    if (!(deg > 0) || n < 4) return { xy: copy, deg: 0 };
+    let a2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
+    const sg = a2 > 0 ? 1 : -1; // inward is to the left of an anticlockwise ring
+    let e = Array.from({ length: n }, (_, i) => [xy[2 * i], xy[2 * i + 1]]);
+    for (let k = 0; k < 10; k++) e = e.map((p, i) => { const a = e[(i + n - 1) % n], c = e[(i + 1) % n]; return [(a[0] + 2 * p[0] + c[0]) / 4, (a[1] + 2 * p[1] + c[1]) / 4]; });
+    const nrm = e.map((p, i) => { const a = e[(i + n - 1) % n], c = e[(i + 1) % n], dx = c[0] - a[0], dy = c[1] - a[1], L = Math.hypot(dx, dy) || 1; return [-dy / L * sg, dx / L * sg]; });
+    const pts = Array.from({ length: n }, (_, i) => [xy[2 * i], xy[2 * i + 1]]), flatPts = flatOf(a2 > 0 ? pts : pts.slice().reverse());
+    for (const [f, src] of [[1, e], [1, pts], [0.5, e], [0.5, pts], [0.25, pts]]) { // (from the eased line first: the floor ring comes out smooth)
+      const tn = Math.tan(deg * f * Math.PI / 180), q = src.map((p, i) => [p[0] + nrm[i][0] * depth[i] * tn, p[1] + nrm[i][1] * depth[i] * tn]);
+      const qq = a2 > 0 ? q : q.slice().reverse();
+      if (ringOk(qq) && q.every(p => pointInRing(flatPts, p[0], p[1]))) { const out = new Float64Array(2 * n); q.forEach((p, i) => { out[2 * i] = p[0]; out[2 * i + 1] = p[1]; }); return { xy: out, deg: deg * f }; }
+    }
+    return { xy: copy, deg: 0 };
   }
   // The ring moved in by w on its plane (same points, same order), or null where that folds it or brings it nearer
   // than most of w to the line anywhere.
@@ -5356,7 +5380,7 @@ const KMCore = (() => {
       const lcfg = per.pegSide && per.pegSide !== cfg.pegSide ? { ...cfg, pegSide: per.pegSide } : cfg; // which piece the pegs or plug stand on, per line
       // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
       // keys and its checks then all work on the sunk ring
-      const sunk = opts.sink > 0 ? (opts.sinkStep === false ? sunkRingAt : sunkRing)(P, I, F, ring, xy, lf.h, into2, opts.sink, opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, !!opts.sinkFlat, opts.sinkPlane || null) : null;
+      const sinkWall = opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, sunk = !(opts.sink > 0) ? null : opts.sinkStep === false || opts.sinkFlat ? sunkRingAt(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, !!opts.sinkFlat, opts.sinkPlane || null) : sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, false, null, opts.sinkTaper !== undefined ? opts.sinkTaper : cfg.sinkTaper || 0);
       const faceOf = (fxy, fh) => { const sec = { loops: [makeLoop(ring, [], fxy)] }; sec.regions = buildRegions(sec.loops); return { xy: fxy, h: fh, sec, step: capStep(fxy), H: capHeight(fxy, fh) }; };
       const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, cfg: lcfg, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
       c.use = (which) => { const f = which === 'sunk' && c.sunkFace ? c.sunkFace : c.plain; Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0 }); c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length; };
@@ -5383,7 +5407,7 @@ const KMCore = (() => {
           let capRing = ring, lowOf = null;
           if (sunk) {
             const low = ring.map((v, i) => { const id = addAt(sunk.xy2[2 * i], sunk.xy2[2 * i + 1], sunk.h2[i]); xyMap.set(id, [sunk.xy2[2 * i], sunk.xy2[2 * i + 1]]); return id; });
-            const steps = sunk.ledge ? [ring, ring.map((v, i) => addAt(sunk.ledge[2 * i], sunk.ledge[2 * i + 1], c.lf.h[i])), low] : [ring, low]; // (1.87) the ledge in from the line, then the wall
+            const steps = [ring, low];
             for (let s = 0; s + 1 < steps.length; s++) for (let i = 0; i < n; i++) {
               const a = steps[s][i], b = steps[s][(i + 1) % n], la = steps[s + 1][i], lb = steps[s + 1][(i + 1) % n];
               tris[1].push(b, a, la, b, la, lb); // against side 1's line edge a -> b, and along the sunk ring's la -> lb
@@ -5461,8 +5485,8 @@ const KMCore = (() => {
     }
     // (1.87) forced through a lock that no plan frees (a piece held at both ends): cut with the sunk faces after all,
     // since dropping them only brought the thin rims back
-    // (the stepped-in ones only: a face sunk without its ledge has its own thin rim)
-    const stepped = caps.map(c => (c.sunkFace && c.sunkFace.sunk.ledge ? 'sunk' : 'plain'));
+    // (the plugs only: a face sunk point by point keeps its slant and its thin rim)
+    const stepped = caps.map(c => (c.sunkFace && c.sunkFace.sunk.column ? 'sunk' : 'plain'));
     if (opts.force && stepped.includes('sunk') && sinkPlans.length > 1 && warnings && warnings.some(w => w.code === 'locked')) {
       caps.forEach((c, i) => c.use(stepped[i]));
       try { const p0 = buildParts(), w0 = checkPieces(p0, true); parts = p0; warnings = w0; } catch (e) { caps.forEach((c, i) => c.use(sinkPlans[sinkPlans.length - 1][i])); }
@@ -5543,7 +5567,7 @@ const KMCore = (() => {
     let capRing = ring;
     if (sunk) {
       const low = ring.map((v, i) => { const q = at(xy[2 * i], xy[2 * i + 1], hts[i]), v1 = addV(q), v2 = addV(q); other.set(v1, v2); ringXY.set(v1, [xy[2 * i], xy[2 * i + 1]]); return v1; });
-      const steps = sunk.ledge ? [ring, ring.map((v, i) => { const q = at(sunk.ledge[2 * i], sunk.ledge[2 * i + 1], hts0[i]), v1 = addV(q), v2 = addV(q); other.set(v1, v2); return v1; }), low] : [ring, low]; // (1.87) the ledge in from the line, then the wall
+      const steps = [ring, low];
       for (let s = 0; s + 1 < steps.length; s++) for (let i = 0; i < n; i++) {
         const a = steps[s][i], b = steps[s][(i + 1) % n], la = steps[s + 1][i], lb = steps[s + 1][(i + 1) % n];
         tris[1].push(b, a, la, b, la, lb);
@@ -8355,7 +8379,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     flat: true, // show faces: flat shading, so every face of the mesh shows (the owner wants this by default)
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, numberJoints: false, smoothCut: true, sliceDrawn: true, minPiece: 0 },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, sinkTaper: 5, numberJoints: false, smoothCut: true, sliceDrawn: true, minPiece: 0 },
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, by: 'form', detail: 'balanced', ratio: 1.35, size: 55, ...sectionOpts(55), hover: null }; // by: 'form' (the thickness under the surface) or 'folds' (where it turns inward)
@@ -8887,6 +8911,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     renderModelTools(); updateHint(); markDirty();
   }
   function attachGizmo() {
+    if (tc.setSize) tc.setSize(state.turnFree ? 1.7 : 0.95); // (1.88) the rotate rings drawn big, round the model, as 3D apps do
     if (state.turnFree) {
       tc.setMode('rotate'); tc.showX = true; tc.showY = true; tc.showZ = true;
       if (tc.object !== turnPivot) tc.attach(turnPivot);
@@ -8937,7 +8962,12 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const pr = K.PRINTERS[state.cfg.printer === 'resin' ? 'resin' : 'fdm'].wall;
     return state.cfg.margin > 0 ? Math.min(state.cfg.margin, pr) : pr;
   }
-  function syncMinPiece() { const el = $('#minPiece'); if (el && document.activeElement !== el) el.value = +minWall().toFixed(2); }
+  function syncMinPiece() {
+    const el = $('#minPiece'); if (el && document.activeElement !== el) el.value = +minWall().toFixed(2);
+    // (1.88) and the plug's settings beside it, which the Joints panel and saved settings can change too
+    const sd = $('#sinkDepth'), st = $('#sinkTaper'), ek = $('#extraKey');
+    if (sd && document.activeElement !== sd) sd.value = state.cfg.sink; if (st && document.activeElement !== st) st.value = state.cfg.sinkTaper !== undefined ? state.cfg.sinkTaper : 5; if (ek) ek.value = state.cfg.type;
+  }
   // Areas that would leave a sliver too thin to print, among those listed and set to be cut.
   function thinShown() {
     const shown = new Set(shownAreas());
@@ -11383,7 +11413,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     else if (state.tool === 'sculpt') t = p ? `Drag over the ${p.name.toLowerCase()} to ${state.sculpt.mode === 'smooth' ? 'smooth' : state.sculpt.mode === 'flatten' ? 'flatten' : 'inflate'} it${state.sculpt.mode === 'inflate' ? ' (Shift pushes in)' : ''}. [ and ] size the brush. Each stroke is one undo step.` : 'Click a part to sculpt it.';
     else if (state.tool === 'boolean') t = booleanShape() && p ? `${BOOL_VERBS[state.bool.op]} the ${booleanShape().name.toLowerCase()} ${state.bool.op === 'union' ? 'to' : state.bool.op === 'difference' ? 'of' : 'and'} ${p.name}. Click another part to change which, or move the shape first with the Shapes tool.` : 'A boolean needs a shape and a part: add a shape with the Shapes tool, then click the part it should join or cut.';
     else if (state.across.on) t = 'Drag a straight line across the model where the cut should go. The cut goes through it, straight into the view. Esc to stop.';
-    else if (state.turnFree) t = 'Drag a ring to turn the whole model; letting go keeps the turn and sets it back on the bed. Esc or Turn freely again stops.';
+    else if (state.turnFree) t = 'Drag a ring to rotate the whole model (Shift snaps to 15°); letting go keeps the turn and sets it back on the bed. Esc or Rotate again stops.';
     else if (state.layFlat) t = 'Click the face of the model that should lie on the bed. Esc to stop.';
     else if (state.here.on) t = 'Click where the cut should go round, on a limb, a neck or an accessory. Keymaster finds the narrowest cut through that spot. Esc to stop.';
     else if (state.regions.on && state.paint.on && state.paint.iso) t = 'Only the painted area shows: the rest of the model is out of the way of the brush and clicks. Paint inside it, then split it off. Show whole model brings the rest back.';
@@ -11548,7 +11578,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   function numField(field, label, value, opts = {}) {
     return `<label class="num"><span>${label}</span><span class="num-wrap"><input type="number" inputmode="decimal" data-cfg="${field}" value="${value}" step="${opts.step || 0.1}" min="${opts.min || 0}" ${opts.max ? `max="${opts.max}"` : ''}><em>${opts.unit || 'mm'}</em></span></label>`;
   }
-  function renderInspector() {
+  function renderInspector() { syncMinPiece();
     const el = $('#inspector');
     if (!state.parts.length) {
       $('#toolHolder').appendChild(toolPanel);
@@ -11694,7 +11724,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     <div class="sec-body">
     <div class="ins-section">
       <h3>Orientation and scale</h3>
-      <div class="row">${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="rotate" data-value="${a}" title="Turn the whole model a quarter turn about ${a.toUpperCase()}">Turn on ${a.toUpperCase()}</button>`).join('')}<button class="btn small" data-act="turn-free" aria-pressed="${!!state.turnFree}" title="Turn the model freely with the rings, as in any 3D app; letting go keeps the turn">Turn freely</button><button class="btn small" data-act="lay-flat" aria-pressed="${!!state.layFlat}" title="Click a face of the model to lay it face down on the bed">Lay flat</button></div>
+      <div class="row">${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="rotate" data-value="${a}" title="Turn the whole model a quarter turn about ${a.toUpperCase()}">Turn on ${a.toUpperCase()}</button>`).join('')}<button class="btn small" data-act="turn-free" aria-pressed="${!!state.turnFree}" title="Rotate the model with rings, as in any 3D app; letting go keeps the turn (Shift snaps to 15°)">Rotate with rings</button><button class="btn small" data-act="lay-flat" aria-pressed="${!!state.layFlat}" title="Click a face of the model to lay it face down on the bed">Lay flat</button></div>
       <div class="row"><span class="lbl">Turn by</span><label class="inline-num"><input type="number" id="turnBy" value="${state.turnBy || 15}" step="1" aria-label="Turn by this many degrees"><span class="unit">°</span></label>${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="turn-by" data-value="${a}" title="Turn the model by that many degrees about ${a.toUpperCase()}">${a.toUpperCase()}</button>`).join('')}</div>
       <div class="row size-row"><span class="lbl">Size</span>${['x', 'y', 'z'].map(a => `<label class="inline-num"><span class="lbl">${a.toUpperCase()}</span><input type="number" id="size${a.toUpperCase()}" min="0.01" step="0.1" data-size="${a}" aria-label="${a.toUpperCase()} size in mm"></label>`).join('')}<span class="unit">mm</span><button class="btn small" id="sizeLock" data-act="size-lock" aria-pressed="${state.sizeLock !== false}" title="Linked: changing one size scales the whole model evenly. Free: each size changes on its own">${state.sizeLock !== false ? 'Linked' : 'Free'}</button></div>
       <div class="row">
@@ -13055,6 +13085,19 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     if (p && planeShown()) scheduleAnalysis(0);
   });
   syncMinPiece();
+  // (1.88) the plug's taper, and the extra key on its end (the same choice as Joints' key type)
+  $('#sinkTaper').addEventListener('change', (e) => {
+    state.cfg.sinkTaper = Math.max(0, Math.min(20, +e.target.value || 0)); e.target.value = state.cfg.sinkTaper; savePrefs();
+    const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
+  });
+  $('#extraKey').addEventListener('change', (e) => {
+    const c = state.cfg, val = e.target.value; if (c.type === val) return;
+    c.type = val; if (K.KEY_DEFAULTS[val]) { c.diameter = K.KEY_DEFAULTS[val].diameter; c.length = K.KEY_DEFAULTS[val].length; }
+    state.cut.auto = true; savePrefs(); scheduleAnalysis(0); renderInspector(); updateHint();
+    const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
+  });
+  // Shift snaps the rotate rings to 15°
+  for (const ev of ['keydown', 'keyup']) window.addEventListener(ev, (e) => { if (e.key === 'Shift' && tc.setRotationSnap) tc.setRotationSnap(ev === 'keydown' && state.turnFree ? Math.PI / 12 : null); });
   $('#sinkDepth').addEventListener('change', (e) => {
     state.cfg.sink = Math.max(0, +e.target.value || 0); e.target.value = state.cfg.sink;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);

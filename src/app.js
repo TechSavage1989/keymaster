@@ -30,7 +30,7 @@
     flat: true, // show faces: flat shading, so every face of the mesh shows (the owner wants this by default)
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, numberJoints: false, smoothCut: true, sliceDrawn: true, minPiece: 0 },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, sinkTaper: 5, numberJoints: false, smoothCut: true, sliceDrawn: true, minPiece: 0 },
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, by: 'form', detail: 'balanced', ratio: 1.35, size: 55, ...sectionOpts(55), hover: null }; // by: 'form' (the thickness under the surface) or 'folds' (where it turns inward)
@@ -562,6 +562,7 @@
     renderModelTools(); updateHint(); markDirty();
   }
   function attachGizmo() {
+    if (tc.setSize) tc.setSize(state.turnFree ? 1.7 : 0.95); // (1.88) the rotate rings drawn big, round the model, as 3D apps do
     if (state.turnFree) {
       tc.setMode('rotate'); tc.showX = true; tc.showY = true; tc.showZ = true;
       if (tc.object !== turnPivot) tc.attach(turnPivot);
@@ -612,7 +613,12 @@
     const pr = K.PRINTERS[state.cfg.printer === 'resin' ? 'resin' : 'fdm'].wall;
     return state.cfg.margin > 0 ? Math.min(state.cfg.margin, pr) : pr;
   }
-  function syncMinPiece() { const el = $('#minPiece'); if (el && document.activeElement !== el) el.value = +minWall().toFixed(2); }
+  function syncMinPiece() {
+    const el = $('#minPiece'); if (el && document.activeElement !== el) el.value = +minWall().toFixed(2);
+    // (1.88) and the plug's settings beside it, which the Joints panel and saved settings can change too
+    const sd = $('#sinkDepth'), st = $('#sinkTaper'), ek = $('#extraKey');
+    if (sd && document.activeElement !== sd) sd.value = state.cfg.sink; if (st && document.activeElement !== st) st.value = state.cfg.sinkTaper !== undefined ? state.cfg.sinkTaper : 5; if (ek) ek.value = state.cfg.type;
+  }
   // Areas that would leave a sliver too thin to print, among those listed and set to be cut.
   function thinShown() {
     const shown = new Set(shownAreas());
@@ -3058,7 +3064,7 @@
     else if (state.tool === 'sculpt') t = p ? `Drag over the ${p.name.toLowerCase()} to ${state.sculpt.mode === 'smooth' ? 'smooth' : state.sculpt.mode === 'flatten' ? 'flatten' : 'inflate'} it${state.sculpt.mode === 'inflate' ? ' (Shift pushes in)' : ''}. [ and ] size the brush. Each stroke is one undo step.` : 'Click a part to sculpt it.';
     else if (state.tool === 'boolean') t = booleanShape() && p ? `${BOOL_VERBS[state.bool.op]} the ${booleanShape().name.toLowerCase()} ${state.bool.op === 'union' ? 'to' : state.bool.op === 'difference' ? 'of' : 'and'} ${p.name}. Click another part to change which, or move the shape first with the Shapes tool.` : 'A boolean needs a shape and a part: add a shape with the Shapes tool, then click the part it should join or cut.';
     else if (state.across.on) t = 'Drag a straight line across the model where the cut should go. The cut goes through it, straight into the view. Esc to stop.';
-    else if (state.turnFree) t = 'Drag a ring to turn the whole model; letting go keeps the turn and sets it back on the bed. Esc or Turn freely again stops.';
+    else if (state.turnFree) t = 'Drag a ring to rotate the whole model (Shift snaps to 15°); letting go keeps the turn and sets it back on the bed. Esc or Rotate again stops.';
     else if (state.layFlat) t = 'Click the face of the model that should lie on the bed. Esc to stop.';
     else if (state.here.on) t = 'Click where the cut should go round, on a limb, a neck or an accessory. Keymaster finds the narrowest cut through that spot. Esc to stop.';
     else if (state.regions.on && state.paint.on && state.paint.iso) t = 'Only the painted area shows: the rest of the model is out of the way of the brush and clicks. Paint inside it, then split it off. Show whole model brings the rest back.';
@@ -3223,7 +3229,7 @@
   function numField(field, label, value, opts = {}) {
     return `<label class="num"><span>${label}</span><span class="num-wrap"><input type="number" inputmode="decimal" data-cfg="${field}" value="${value}" step="${opts.step || 0.1}" min="${opts.min || 0}" ${opts.max ? `max="${opts.max}"` : ''}><em>${opts.unit || 'mm'}</em></span></label>`;
   }
-  function renderInspector() {
+  function renderInspector() { syncMinPiece();
     const el = $('#inspector');
     if (!state.parts.length) {
       $('#toolHolder').appendChild(toolPanel);
@@ -3369,7 +3375,7 @@
     <div class="sec-body">
     <div class="ins-section">
       <h3>Orientation and scale</h3>
-      <div class="row">${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="rotate" data-value="${a}" title="Turn the whole model a quarter turn about ${a.toUpperCase()}">Turn on ${a.toUpperCase()}</button>`).join('')}<button class="btn small" data-act="turn-free" aria-pressed="${!!state.turnFree}" title="Turn the model freely with the rings, as in any 3D app; letting go keeps the turn">Turn freely</button><button class="btn small" data-act="lay-flat" aria-pressed="${!!state.layFlat}" title="Click a face of the model to lay it face down on the bed">Lay flat</button></div>
+      <div class="row">${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="rotate" data-value="${a}" title="Turn the whole model a quarter turn about ${a.toUpperCase()}">Turn on ${a.toUpperCase()}</button>`).join('')}<button class="btn small" data-act="turn-free" aria-pressed="${!!state.turnFree}" title="Rotate the model with rings, as in any 3D app; letting go keeps the turn (Shift snaps to 15°)">Rotate with rings</button><button class="btn small" data-act="lay-flat" aria-pressed="${!!state.layFlat}" title="Click a face of the model to lay it face down on the bed">Lay flat</button></div>
       <div class="row"><span class="lbl">Turn by</span><label class="inline-num"><input type="number" id="turnBy" value="${state.turnBy || 15}" step="1" aria-label="Turn by this many degrees"><span class="unit">°</span></label>${['x', 'y', 'z'].map(a => `<button class="btn small" data-act="turn-by" data-value="${a}" title="Turn the model by that many degrees about ${a.toUpperCase()}">${a.toUpperCase()}</button>`).join('')}</div>
       <div class="row size-row"><span class="lbl">Size</span>${['x', 'y', 'z'].map(a => `<label class="inline-num"><span class="lbl">${a.toUpperCase()}</span><input type="number" id="size${a.toUpperCase()}" min="0.01" step="0.1" data-size="${a}" aria-label="${a.toUpperCase()} size in mm"></label>`).join('')}<span class="unit">mm</span><button class="btn small" id="sizeLock" data-act="size-lock" aria-pressed="${state.sizeLock !== false}" title="Linked: changing one size scales the whole model evenly. Free: each size changes on its own">${state.sizeLock !== false ? 'Linked' : 'Free'}</button></div>
       <div class="row">
@@ -4730,6 +4736,19 @@
     if (p && planeShown()) scheduleAnalysis(0);
   });
   syncMinPiece();
+  // (1.88) the plug's taper, and the extra key on its end (the same choice as Joints' key type)
+  $('#sinkTaper').addEventListener('change', (e) => {
+    state.cfg.sinkTaper = Math.max(0, Math.min(20, +e.target.value || 0)); e.target.value = state.cfg.sinkTaper; savePrefs();
+    const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
+  });
+  $('#extraKey').addEventListener('change', (e) => {
+    const c = state.cfg, val = e.target.value; if (c.type === val) return;
+    c.type = val; if (K.KEY_DEFAULTS[val]) { c.diameter = K.KEY_DEFAULTS[val].diameter; c.length = K.KEY_DEFAULTS[val].length; }
+    state.cut.auto = true; savePrefs(); scheduleAnalysis(0); renderInspector(); updateHint();
+    const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
+  });
+  // Shift snaps the rotate rings to 15°
+  for (const ev of ['keydown', 'keyup']) window.addEventListener(ev, (e) => { if (e.key === 'Shift' && tc.setRotationSnap) tc.setRotationSnap(ev === 'keydown' && state.turnFree ? Math.PI / 12 : null); });
   $('#sinkDepth').addEventListener('change', (e) => {
     state.cfg.sink = Math.max(0, +e.target.value || 0); e.target.value = state.cfg.sink;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);

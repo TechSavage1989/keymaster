@@ -3450,7 +3450,7 @@ const KMCore = (() => {
     const { F, xy, h, dev } = loopFrame(P, loop.verts);
     const L = makeLoop(loop.verts, [], xy);
     const base = { error: null, loops: [L], regions: buildRegions([L]) };
-    const into2 = intoSide2(xy), sunk = cfg && cfg.sink > 0 ? (cfg.sinkStep === false ? sunkRingAt : sunkRing)(P, I, F, loop.verts, xy, h, into2, cfg.sink, cfg.minThickness > 0 ? cfg.minThickness : cfg.margin || 0.8) : null;
+    const into2 = intoSide2(xy), sunk = cfg && cfg.sink > 0 ? (cfg.sinkStep === false ? sunkRingAt(P, I, F, loop.verts, xy, h, into2, cfg.sink, cfg.minThickness > 0 ? cfg.minThickness : cfg.margin || 0.8) : sunkRing(P, I, F, loop.verts, xy, h, into2, cfg.sink, cfg.minThickness > 0 ? cfg.minThickness : cfg.margin || 0.8, false, null, cfg.sinkTaper || 0)) : null;
     if (sunk) { const L2 = makeLoop(loop.verts, [], sunk.xy2); base.loops = [L2]; base.regions = buildRegions([L2]); }
     const an = { frame: F, base, depth: [], curved: { deviation: dev, heightAt: sunk ? capHeightGrid(sunk.xy2, sunk.h2) : capHeightGrid(xy, h), sink: sunk ? sunk.max : 0, into2, sunk } };
     Object.defineProperty(an, '_src', { value: { P, I, F, scale, cfg, cache: new Map() } });
@@ -4079,22 +4079,46 @@ const KMCore = (() => {
      ring is checked the same way. Returns { xy2, h2, depth, max } in the line's frame, or null for no sink. The
      walls run straight along the line's frame normal: following the other piece's surface was tried and dropped,
      because on a bumpy line the pushed points crossed each other. */
-  /* (1.87) The sunk face stepped in from the line: the owner's arm, cut off along a line that climbs under the capelet,
-     came off with flaps of sleeve as thin as paper round its end, because the cut face hugged the sleeve where the
-     line climbed. Now the line's ring is moved in by `wall` (a ledge level with the line, square to the surface),
-     and from there the face goes straight into the other piece to one flat floor beyond the line's deepest point:
-     the piece's end is a solid column that seats in a matching socket, and neither piece is thinner than `wall`
-     where they meet. Where the flat floor has no room, each point is sunk by itself as before, still stepped in;
-     where the ring can't be stepped in (a line too small or too tight for it), the line itself is sunk. An inlay's
-     pocket (`flat`) keeps its exact outline. */
-  function sunkRing(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null) {
+  /* The sunk face as a plug (1.87, 1.88). The owner's arm, cut off along a line that climbs under the capelet, came
+     off with flaps of sleeve as thin as paper round its end, because the cut face hugged the sleeve where the line
+     climbed. So the face goes from the line's own edge straight into the other piece, each point as far as the solid
+     holds it with a wall to spare, down to one level floor `want` past the line's deepest point (lower only where
+     there is no room): the piece's end is a solid plug that seats in a matching socket. The walls lean in by `taper`
+     degrees so it slides home. 1.87 stepped the walls in by a wall's width first; the owner found the ledge "a
+     sliver of a lip", so the walls start at the line now, and the room is measured along lines a hair inside it
+     (on the line itself they graze the surface). Where the ring can't be moved in even that far, each point is
+     sunk by itself as before. An inlay's pocket (`flat`) keeps its exact outline. */
+  function sunkRing(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null, taper = 0) {
     if (flat) return sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, true, plane);
-    const B = wall > 0 ? insetRing(xy, wall) : null;
+    const B = insetRing(xy, Math.max(0.02, 0.25 * wall));
     if (B) {
       const r = sunkRingAt(P, I, F, ring, B, h, into2, want, wall, false, null, true);
-      if (r) { r.ledge = B; return r; }
+      if (r) {
+        const t = taperRing(xy, r.depth, taper);
+        r.xy2 = t.xy; r.taper = t.deg; r.column = true;
+        for (let i = 0; i < h.length; i++) r.h2[i] = h[i] + r.depth[i] * into2;
+        return r;
+      }
     }
     return sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, false, null);
+  }
+  // The floor's ring: each line point moved in on the plane by its depth × tan(deg), along the inward direction of
+  // the line eased smooth (a line along mesh edges zig-zags); less taper where that would fold the ring.
+  function taperRing(xy, depth, deg) {
+    const n = xy.length / 2, copy = Float64Array.from(xy);
+    if (!(deg > 0) || n < 4) return { xy: copy, deg: 0 };
+    let a2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
+    const sg = a2 > 0 ? 1 : -1; // inward is to the left of an anticlockwise ring
+    let e = Array.from({ length: n }, (_, i) => [xy[2 * i], xy[2 * i + 1]]);
+    for (let k = 0; k < 10; k++) e = e.map((p, i) => { const a = e[(i + n - 1) % n], c = e[(i + 1) % n]; return [(a[0] + 2 * p[0] + c[0]) / 4, (a[1] + 2 * p[1] + c[1]) / 4]; });
+    const nrm = e.map((p, i) => { const a = e[(i + n - 1) % n], c = e[(i + 1) % n], dx = c[0] - a[0], dy = c[1] - a[1], L = Math.hypot(dx, dy) || 1; return [-dy / L * sg, dx / L * sg]; });
+    const pts = Array.from({ length: n }, (_, i) => [xy[2 * i], xy[2 * i + 1]]), flatPts = flatOf(a2 > 0 ? pts : pts.slice().reverse());
+    for (const [f, src] of [[1, e], [1, pts], [0.5, e], [0.5, pts], [0.25, pts]]) { // (from the eased line first: the floor ring comes out smooth)
+      const tn = Math.tan(deg * f * Math.PI / 180), q = src.map((p, i) => [p[0] + nrm[i][0] * depth[i] * tn, p[1] + nrm[i][1] * depth[i] * tn]);
+      const qq = a2 > 0 ? q : q.slice().reverse();
+      if (ringOk(qq) && q.every(p => pointInRing(flatPts, p[0], p[1]))) { const out = new Float64Array(2 * n); q.forEach((p, i) => { out[2 * i] = p[0]; out[2 * i + 1] = p[1]; }); return { xy: out, deg: deg * f }; }
+    }
+    return { xy: copy, deg: 0 };
   }
   // The ring moved in by w on its plane (same points, same order), or null where that folds it or brings it nearer
   // than most of w to the line anywhere.
@@ -4631,7 +4655,7 @@ const KMCore = (() => {
       const lcfg = per.pegSide && per.pegSide !== cfg.pegSide ? { ...cfg, pegSide: per.pegSide } : cfg; // which piece the pegs or plug stand on, per line
       // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
       // keys and its checks then all work on the sunk ring
-      const sunk = opts.sink > 0 ? (opts.sinkStep === false ? sunkRingAt : sunkRing)(P, I, F, ring, xy, lf.h, into2, opts.sink, opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, !!opts.sinkFlat, opts.sinkPlane || null) : null;
+      const sinkWall = opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, sunk = !(opts.sink > 0) ? null : opts.sinkStep === false || opts.sinkFlat ? sunkRingAt(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, !!opts.sinkFlat, opts.sinkPlane || null) : sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, false, null, opts.sinkTaper !== undefined ? opts.sinkTaper : cfg.sinkTaper || 0);
       const faceOf = (fxy, fh) => { const sec = { loops: [makeLoop(ring, [], fxy)] }; sec.regions = buildRegions(sec.loops); return { xy: fxy, h: fh, sec, step: capStep(fxy), H: capHeight(fxy, fh) }; };
       const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, cfg: lcfg, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
       c.use = (which) => { const f = which === 'sunk' && c.sunkFace ? c.sunkFace : c.plain; Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0 }); c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length; };
@@ -4658,7 +4682,7 @@ const KMCore = (() => {
           let capRing = ring, lowOf = null;
           if (sunk) {
             const low = ring.map((v, i) => { const id = addAt(sunk.xy2[2 * i], sunk.xy2[2 * i + 1], sunk.h2[i]); xyMap.set(id, [sunk.xy2[2 * i], sunk.xy2[2 * i + 1]]); return id; });
-            const steps = sunk.ledge ? [ring, ring.map((v, i) => addAt(sunk.ledge[2 * i], sunk.ledge[2 * i + 1], c.lf.h[i])), low] : [ring, low]; // (1.87) the ledge in from the line, then the wall
+            const steps = [ring, low];
             for (let s = 0; s + 1 < steps.length; s++) for (let i = 0; i < n; i++) {
               const a = steps[s][i], b = steps[s][(i + 1) % n], la = steps[s + 1][i], lb = steps[s + 1][(i + 1) % n];
               tris[1].push(b, a, la, b, la, lb); // against side 1's line edge a -> b, and along the sunk ring's la -> lb
@@ -4736,8 +4760,8 @@ const KMCore = (() => {
     }
     // (1.87) forced through a lock that no plan frees (a piece held at both ends): cut with the sunk faces after all,
     // since dropping them only brought the thin rims back
-    // (the stepped-in ones only: a face sunk without its ledge has its own thin rim)
-    const stepped = caps.map(c => (c.sunkFace && c.sunkFace.sunk.ledge ? 'sunk' : 'plain'));
+    // (the plugs only: a face sunk point by point keeps its slant and its thin rim)
+    const stepped = caps.map(c => (c.sunkFace && c.sunkFace.sunk.column ? 'sunk' : 'plain'));
     if (opts.force && stepped.includes('sunk') && sinkPlans.length > 1 && warnings && warnings.some(w => w.code === 'locked')) {
       caps.forEach((c, i) => c.use(stepped[i]));
       try { const p0 = buildParts(), w0 = checkPieces(p0, true); parts = p0; warnings = w0; } catch (e) { caps.forEach((c, i) => c.use(sinkPlans[sinkPlans.length - 1][i])); }
@@ -4818,7 +4842,7 @@ const KMCore = (() => {
     let capRing = ring;
     if (sunk) {
       const low = ring.map((v, i) => { const q = at(xy[2 * i], xy[2 * i + 1], hts[i]), v1 = addV(q), v2 = addV(q); other.set(v1, v2); ringXY.set(v1, [xy[2 * i], xy[2 * i + 1]]); return v1; });
-      const steps = sunk.ledge ? [ring, ring.map((v, i) => { const q = at(sunk.ledge[2 * i], sunk.ledge[2 * i + 1], hts0[i]), v1 = addV(q), v2 = addV(q); other.set(v1, v2); return v1; }), low] : [ring, low]; // (1.87) the ledge in from the line, then the wall
+      const steps = [ring, low];
       for (let s = 0; s + 1 < steps.length; s++) for (let i = 0; i < n; i++) {
         const a = steps[s][i], b = steps[s][(i + 1) % n], la = steps[s + 1][i], lb = steps[s + 1][(i + 1) % n];
         tris[1].push(b, a, la, b, la, lb);

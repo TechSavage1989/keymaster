@@ -1235,6 +1235,14 @@ with sync_playwright() as p:
     check('splitting it off anyway gives the pieces (the flange face, and the ball in two), and says it went against the warning', pg.locator('#partList li[data-id]').count() == 3 and 'against the warning' in pg.inner_text('#toast'), pg.inner_text('#toast'))
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.fill('#sinkDepth', '1'); pg.dispatch_event('#sinkDepth', 'change'); pg.wait_for_timeout(200)
+    # (1.88) the extra key beside Extrude is the Joints' key type, both ways; Taper sets the plug's lean
+    before = pg.evaluate('KeymasterDebug.cfg().type')
+    pg.select_option('#extraKey', 'none'); pg.wait_for_timeout(200)
+    t_none = pg.evaluate('KeymasterDebug.cfg().type')
+    pg.select_option('#extraKey', before); pg.wait_for_timeout(200)
+    pg.fill('#sinkTaper', '8'); pg.dispatch_event('#sinkTaper', 'change'); pg.wait_for_timeout(100)
+    check('Extra key sets the key type (None too) and Taper the plug lean', t_none == 'none' and pg.evaluate('KeymasterDebug.cfg().type') == before and pg.evaluate('KeymasterDebug.cfg().sinkTaper') == 8, (t_none, before))
+    pg.fill('#sinkTaper', '5'); pg.dispatch_event('#sinkTaper', 'change'); pg.wait_for_timeout(100)
     # keys on a curved cut: an arm in a sleeve, cut at the hem, gets pegs sized to fit
     import math as _m
     def arm_r(z):
