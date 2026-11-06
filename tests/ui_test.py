@@ -80,6 +80,14 @@ def boxes_stl(path, boxes):
             f.write(struct.pack('<3f', 0, 0, 0))
             for p_ in tri: f.write(struct.pack('<3f', *p_))
             f.write(b'\0\0')
+def brush_on(pg):
+    # (1.84) the brush is Pick by: Brush in the Regions tool; the tool comes on first when it isn't showing
+    if not pg.is_visible('#paintBtn'):
+        pg.click('#toolPanel .tool[data-tool=regions]')
+        pg.wait_for_function("KeymasterDebug.regionsOn() && !KeymasterDebug.regionsLoading()", timeout=30000)
+    brush_on(pg)
+
+
 def toggle_regions(pg):
     pg.evaluate('KeymasterDebug.toggleRegions()')
     pg.wait_for_function('!KeymasterDebug.regionsLoading()', timeout=60000)
@@ -750,7 +758,7 @@ with sync_playwright() as p:
     pg.set_input_files('#fileInput', str(OUT / 'dumbbell.stl'))
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 1 && document.querySelector('#partList .part-name').innerText.includes('dumbbell')", timeout=20000)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]')
-    check('the cut tools are offered in a row: select, plane, regions, paint, draw, suggest, fit bed', [b.get_attribute('data-tool') for b in pg.locator('#toolPanel .tool-grid:not(.edit-grid) [data-tool]').all()] == ['select', 'plane', 'regions', 'paint', 'draw', 'suggest', 'bed'] and pg.get_attribute('[data-tool=plane]', 'aria-pressed') == 'true')
+    check('the cut tools are offered in a row: select, plane, regions, draw, suggest, fit bed (the brush is in Regions)', [b.get_attribute('data-tool') for b in pg.locator('#toolPanel .tool-grid:not(.edit-grid) [data-tool]').all()] == ['select', 'plane', 'regions', 'draw', 'suggest', 'bed'] and pg.get_attribute('[data-tool=plane]', 'aria-pressed') == 'true')
     pg.click('[data-tool=suggest]'); pg.wait_for_timeout(200)
     pg.wait_for_selector('[data-act=find-cuts]')
     # split into parts: one press finds the parts by form (the bar and its balls) and splits each off with keys, one undo step
@@ -995,7 +1003,7 @@ with sync_playwright() as p:
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
     # paint an area with the brush, like a face selection in Meshmixer: two dabs on a ball, grow, then split it off
-    pg.click('#paintBtn'); pg.wait_for_timeout(200)
+    brush_on(pg); pg.wait_for_timeout(200)
     check('the paint button turns painting on, with the brush tools', pg.get_attribute('#paintBtn', 'aria-pressed') == 'true' and pg.is_visible('#paintTools') and 'paint' in pg.inner_text('#hint').lower(), pg.inner_text('#hint'))
     check('the brush starts at a size to suit the model, faces show while painting, and the hint gives the size', 1 <= float(pg.input_value('#brushSize')) <= 4 and pg.get_attribute('#flatBtn', 'aria-pressed') == 'true' and 'mm wide' in pg.inner_text('#hint'), (pg.input_value('#brushSize'), pg.inner_text('#hint')))
     pg.fill('#brushSize', '4'); pg.press('#brushSize', 'Tab'); pg.wait_for_timeout(100)
@@ -1027,7 +1035,7 @@ with sync_playwright() as p:
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
     # a pick is kept when Find (or Detail) changes, as the faces it covers, so the new regions add to it
-    pg.click('#paintBtn'); pg.wait_for_timeout(200)
+    brush_on(pg); pg.wait_for_timeout(200)
     pg.fill('#brushSize', '4'); pg.press('#brushSize', 'Tab'); pg.wait_for_timeout(100)
     pg.evaluate(f"KeymasterDebug.paintAt(0, {top})"); pg.evaluate("KeymasterDebug.paintLetGo()"); pg.wait_for_timeout(300)
     before = pg.evaluate("KeymasterDebug.pickInfo()")
@@ -1040,7 +1048,7 @@ with sync_playwright() as p:
     if pg.locator('[data-act=paint-clear]').count(): pg.click('[data-act=paint-clear]')
     pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
-    if pg.get_attribute('#paintBtn', 'aria-pressed') != 'true': pg.click('#paintBtn')
+    if pg.get_attribute('#paintBtn', 'aria-pressed') != 'true': brush_on(pg)
     pg.wait_for_timeout(200)
     pg.fill('#brushSize', '4'); pg.press('#brushSize', 'Tab'); pg.wait_for_timeout(100)
     n1 = pg.evaluate(f"KeymasterDebug.paintAt(0, {top})"); n2 = pg.evaluate(f"KeymasterDebug.paintAt(0, {top2})")
@@ -1055,7 +1063,7 @@ with sync_playwright() as p:
     check('the inlay cut gives the body and an inlay part, and says what it did', any(n.endswith(' inlay') for n in namesI) and 'pocket 1.5 mm deep' in pg.inner_text('#toast') and 'flat base' in pg.inner_text('#toast'), (namesI, pg.inner_text('#toast')))
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
-    pg.click('#paintBtn'); pg.wait_for_timeout(200)
+    brush_on(pg); pg.wait_for_timeout(200)
     pg.fill('#brushSize', '4'); pg.press('#brushSize', 'Tab'); pg.wait_for_timeout(100)
     n1 = pg.evaluate(f"KeymasterDebug.paintAt(0, {top})"); n2 = pg.evaluate(f"KeymasterDebug.paintAt(0, {top2})")
     n3 = pg.evaluate("KeymasterDebug.paintEdit('paint-grow')")
@@ -1069,7 +1077,7 @@ with sync_playwright() as p:
     check('splitting off the painted area gives two pieces and stops painting', pg.locator('#partList li[data-id]').count() == 2 and 'painted area' in pg.inner_text('#toast') and pg.get_attribute('#paintBtn', 'aria-pressed') == 'false', pg.inner_text('#toast'))
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
-    pg.click('#paintBtn'); pg.wait_for_timeout(100)
+    brush_on(pg); pg.wait_for_timeout(100)
     pg.evaluate(f"KeymasterDebug.paintAt(0, {top})"); nE = pg.evaluate(f"KeymasterDebug.paintAt(0, {top}, true)")
     check('erasing takes the paint off again', nE == 0, nE)
     # isolate: only the painted area stays on screen and under the brush; the rest comes back with Show whole model

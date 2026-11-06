@@ -15,6 +15,8 @@
 
 ## Features
 
+- **One tool to pick with.** Regions and Paint are one tool: pick by clicking a part or section, or by brushing (with Fill, a dab picks the whole part or section under it).
+- **Parts and Sections.** Parts are whole parts of the figure (a limb, a head, armour, a book, a weapon, a base); Sections are the smaller pieces within each part, split where a border or a fold runs across it, and a section never runs into another part.
 - **Limbs end at the joint.** At Balanced a sleeve or a leg stays a part of its own, and splitting it off cuts flat across the limb where it meets the body, so a cape or a cuff above it isn't cut into thin flaps.
 - **No knife-thin edges.** A cut that would leave a blade-thin edge along its rim, or anything thinner than the new **Thinnest piece** setting, is flagged before it is made (you can still cut it anyway).
 - **The same parts at any size.** Regions come from the model's shape, never its size: scaling the model evenly (to 1000%, or down to a miniature) gives exactly the same regions, triangle for triangle, and only the keys follow the real millimetres. Turning, stretching one axis, sculpting or reducing works the regions out afresh.
