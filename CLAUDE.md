@@ -359,6 +359,10 @@ The owner: "the regions and paint tools can be combined into a single tool since
 - **The joints message counts the lines** (`noKeysText(nk, many, perLoop)`): "any of its 3 lines" when none has a joint, "2 of its 3 lines", "one of its lines"; when none has one on a part under 80 mm it says the part is only N mm across and to scale it up, pick resin or smaller keys. The owner's Rhinehardt at 100% (35 mm) had read "one of its lines" with no joint on any.
 - Known: a hand fused into a CAD book's cover and grooves still comes off with a block of the groove's fill under the palm when the pick is sliced; tried and dropped: holding every made vertex the pick left out fixed through the slice's smoothing (no change), pinning by `seg.hard` for painted picks (no change).
 
+## Painted areas cut as painted (1.86)
+
+The owner, brushing the arm with the book at Balanced (Fill, 1000%): "it's slicing through the shoulderpad instead of cutting whats actually highlighted". The selection was right; `limbEndPick` replaced the sleeve's outline under the capelet with a flat ring, and that plane's ring wrapped the capelet's lower edge with the arm, so the piece took 430 mm² of capelet. Now `pickMesh` never runs `limbEndPick` for a painted pick (`req.painted`): what is brushed is what is cut, with only the slice's smoothing (seams pinned). And for clicked picks a candidate ring must lie on the picked surface (at least 60% of its points' nearest vertices touch a picked triangle), so a plane whose ring runs through a pad or a cape beside the limb is passed over. Checked on the page with the real renderer: the same brushed arm, sleeve, cuff, hand and book, leaves 21 mm² outside the paint (the rim's smoothing), was 430; clicked sleeves on Rhinehardt still end flat.
+
 ## Versions
 
 `VERSION` holds the version shown next to the app's name, with a short build code that `tools/build.py` works out from the sources (the same sources always give the same code). **Bump `VERSION` in every pull request** (1.14 to 1.15 and so on), so the owner can refresh the live page and see the new version has arrived.

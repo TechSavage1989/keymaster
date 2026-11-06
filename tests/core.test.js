@@ -1120,7 +1120,10 @@ console.log('form: the parts of a figure by thickness');
     check('a picked arm ends in a flat cut across it at the shoulder: one ring, every new point of it on the plane, square to the arm', !!le && le.ends >= 1 && le.pin.size > 8 && onPlane === le.pin.size && Math.abs(le.planes[0].n[0]) > 0.9, le && { ends: le.ends, pin: le.pin.size, onPlane, n: le.planes[0].n });
     const req = { loops: K.groupLoops(P, I, ps, [armR]), regions: [armR], seg: { groupOf: ps.groupOf, count: ps.count, borders: ps.borders, areas: ps.areas }, cfg: { type: 'none' }, minThickness: 0.8, sink: 0, perArea: 1, numberJoints: false, joint: 1, smooth: true };
     const pk = K.planPick(P, I, req), parts = pk.result ? pk.result.parts : [], vol = parts.reduce((a, q) => a + q.volume, 0);
-    check('splitting off the arm with its flat end gives sealed pieces whose volumes add up', parts.length === 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002, { error: pk.error, n: parts.length, vol }); }
+    check('splitting off the arm with its flat end gives sealed pieces whose volumes add up', parts.length === 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002, { error: pk.error, n: parts.length, vol }); 
+    // (1.86) a painted pick is cut as painted: no flat end replaces its outline (the owner's brushed arm lost a strip of its shoulder pad to the flat end's ring)
+    const clicked = K.pickMesh(P, I, req), painted = K.pickMesh(P, I, { ...req, painted: true });
+    check('a clicked arm gets its flat end, a painted one keeps the outline it was painted with', !!clicked.req.limbEnds && !painted.req.limbEnds, { clicked: clicked.req.limbEnds, painted: painted.req.limbEnds }); }
   // (1.84) sections are pieces of parts: laid over the parts, no section holds triangles of two parts
   { const sc = K.segmentSections(P, I, { fold: 30, angle: 52, minFrac: 0.003, parts: ps.groupOf }), one = new Map();
     let crossing = 0; for (let t = 0; t < nt; t++) { const g = sc.groupOf[t]; if (!one.has(g)) one.set(g, ps.groupOf[t]); else if (one.get(g) !== ps.groupOf[t]) crossing++; }
