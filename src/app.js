@@ -2751,6 +2751,7 @@
     // (1.80) with Fill on the paint is whole regions, picked on purpose, so nothing is added: a hand lying on a book, shut in
     // between the book and the cuff, had filled as a hole of the book's region (Fill gaps under the pick still works)
     if (!state.paint.fill) try { const fg = K.fillSelectionGaps(p.positions, p.indices, state.paint.sel, { gap: Math.min(state.paint.size, fillGapDefault() / 2) }); if (fg.added) { state.paint.sel = fg.sel; renderPaint(); } } catch (err) { /* left as painted */ }
+    else try { const fg = K.fillSelectionGaps(p.positions, p.indices, state.paint.sel, { gap: 0, maxFrac: 0.02 }); if (fg.added) { state.paint.sel = fg.sel; renderPaint(); } } catch (err) { /* left as painted */ } // (1.90) with Fill, only specks of holes fill (between fingers): each would be a line of its own, cut and extruded
     let loops = [], error = '';
     try { const seg = K.selectionSeg(p.positions, p.indices, state.paint.sel); loops = K.groupLoops(p.positions, p.indices, seg, [1]); } catch (err) { error = err.message; }
     const pick = { partId: p.id, loops, error, painted: true, preview: true, keys: [], plugs: [], perLoop: [], frames: [], draw: [], selection: state.paint.sel };
@@ -4220,6 +4221,7 @@
       const per = pick.perLoop[li], F = pick.frames[li], d = pick.draw && pick.draw[li];
       if (per && F && d && d.keys.length) markers.add(curvedKeyMarkers(d.keys, F, per.cfg || state.cfg));
       if (per && F && d && d.plugs.length) markers.add(curvedPlugMarkers(d.plugs, F));
+      if (F && d && d.sink) markers.add(curvedSinkMarker(d.sink, F));
     });
     v.pickLine = g; v.mesh.add(g);
     if (markers.children.length) { v.pickKeys = markers; v.mesh.add(markers); }
@@ -4320,6 +4322,23 @@
     return g;
   }
   // A plug on a curved cut, drawn standing on the face that follows the line, as deep as it will be.
+  // (1.90) the cut's extrusion drawn before the cut, in the keys' blue: a see-through skin from the line down to the
+  // plug's flat end, and the end's outline, so it shows even with no extra key
+  function curvedSinkMarker(sk, F) {
+    const g = new THREE.Group(), n = sk.h.length, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z);
+    const pos = [], end = [];
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, a = at(sk.line[2 * i], sk.line[2 * i + 1], sk.lineH[i]), b = at(sk.line[2 * j], sk.line[2 * j + 1], sk.lineH[j]), c = at(sk.floor[2 * i], sk.floor[2 * i + 1], sk.h[i]), e = at(sk.floor[2 * j], sk.floor[2 * j + 1], sk.h[j]);
+      pos.push(...a, ...b, ...c, ...b, ...e, ...c);
+      end.push(new THREE.Vector3(...c));
+    }
+    const geom = new THREE.BufferGeometry(); geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); if (geom.computeVertexNormals) geom.computeVertexNormals();
+    const skin = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: KEY_MARK, roughness: 0.5, transparent: true, opacity: 0.35, depthTest: false, side: THREE.DoubleSide }));
+    skin.renderOrder = 8; g.add(skin);
+    const ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(end), new THREE.LineBasicMaterial({ color: KEY_MARK, depthTest: false }));
+    ring.renderOrder = 9; g.add(ring);
+    return g;
+  }
   function curvedPlugMarkers(draws, F) { // draws: { base, top, z0, tip } per plug, from planPick
     const g = new THREE.Group();
     for (const q of draws) {
