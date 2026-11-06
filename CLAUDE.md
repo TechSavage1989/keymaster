@@ -392,6 +392,15 @@ The owner, after 1.88, at Extrude 1, Taper 20, Extra key Plug: "it doesn't seem 
 - The pick says "The cut is extruded up to N mm into the other piece, tapered N°", or that there's no room to extrude it.
 - Tested: Plug on the saddle cylinder's 20° plug gives two sealed pieces and no second plug.
 
+## The plug's end flat, drawn before the cut, only where a plug can be (1.90)
+
+The owner, after 1.89, brushing the raised arm with its cross at Extrude 5, Taper 20, Extra key None: "not showing the keys"; "must always attempt to make the cut parts smooth or flat and not be jagged or pointy". The arm's end came off as a slanted point, and nothing showed before the cut because with no key `planJoints` skipped the lines altogether.
+- **A flat end** (`sunkRingAt` in `column` mode): the floor is one plane, found over a grid of tilts (tan up to 0.7, 35°) and levels: it must stay inside the solid at every point (each point's room along the line through the model) and is scored by its shallowest depth, up to `want`, less a little for tilt, so a level floor wins where it fits. A point whose line grazes the surface (no room at all) takes its neighbours' room. The plane is kept as it is (no smoothing) if the face over it has room under its middle too; otherwise each point is sunk by itself as before. On the owner's arm the end is a plane tilted 20°, every point at least 4.9 mm deep (it had sloped from 0 to 17 mm).
+- **Only a line round something a plug can be**: `sunkRing` returns null for a line narrower (4 × area / length) than 4 walls or twice the extrusion, or one winding out of its plane more than twice its width. The brushed fist left a 3 mm crevice winding 13 mm (and a 9 mm speck); extruding them made a knife-thin fin, the print check sent the pick back without a sink, and the shoulder lost its plug too.
+- **Drawn before the cut**: `planJoints` works out the extrusion even with Extra key None (`cfg.sink > 0`), `draw[i].sink` carries the floor ring, its heights and the line (`sunk.lineXY`, `lineH`), and `curvedSinkMarker` draws a see-through skin from the line to the floor and the floor's outline in the keys' blue.
+- **Specks of holes in Fill paint fill**: `fillSelectionGaps(..., { maxFrac })` fills only holes under that share of the selection; `previewPainted` with Fill on passes 0.02 (gaps between fingers), so a hand on a book is still left as painted.
+- Tested: the saddle cylinder's tapered plug ends in one flat face; a narrow line winding 16 mm gets no plug.
+
 ## Versions
 
 `VERSION` holds the version shown next to the app's name, with a short build code that `tools/build.py` works out from the sources (the same sources always give the same code). **Bump `VERSION` in every pull request** (1.14 to 1.15 and so on), so the owner can refresh the live page and see the new version has arrived.

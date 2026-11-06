@@ -4090,12 +4090,18 @@ const KMCore = (() => {
      sunk by itself as before. An inlay's pocket (`flat`) keeps its exact outline. */
   function sunkRing(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null, taper = 0) {
     if (flat) return sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, true, plane);
+    // (1.90) only a line round something a plug can be: a crevice in a fist (3 mm across, winding 13 mm out of its own
+    // plane) extruded into a knife-thin fin, and the cut that came back was offered without any plug; such a line,
+    // or one bounding a speck, is cut as it is
+    { const n = h.length; let a2 = 0, per = 0, lo = Infinity, hi = -Infinity; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; per += Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1]); lo = Math.min(lo, h[i]); hi = Math.max(hi, h[i]); }
+      const width = per > 0 ? 2 * Math.abs(a2) / per : 0; // (4 × area / length: a circle's diameter)
+      if (width < Math.max(4 * wall, 2 * want) || hi - lo > 2 * width) return null; }
     const B = insetRing(xy, Math.max(0.02, 0.25 * wall));
     if (B) {
       const r = sunkRingAt(P, I, F, ring, B, h, into2, want, wall, false, null, true);
       if (r) {
         const t = taperRing(xy, r.depth, taper);
-        r.xy2 = t.xy; r.taper = t.deg; r.column = true;
+        r.xy2 = t.xy; r.taper = t.deg; r.column = true; r.lineXY = Array.from(xy); r.lineH = Array.from(h);
         for (let i = 0; i < h.length; i++) r.h2[i] = h[i] + r.depth[i] * into2;
         return r;
       }
@@ -4201,9 +4207,36 @@ const KMCore = (() => {
     // (1.87) stepped in: every point goes as deep as the solid holds it with a wall to spare (one line through the
     // model from the ledge), up to the line's deepest point plus `want`, so where there is room the floor is flat
     let top = -Infinity; if (column) for (let i = 0; i < n; i++) top = Math.max(top, h[i] * into2);
+    const roomOf = new Float64Array(n);
     for (let i = 0; column && i < n; i++) {
       const r = roomAt(xy[2 * i], xy[2 * i + 1], h[i] + into2 * 1e-3 * wall);
+      roomOf[i] = r ? r[0] - wall : -Infinity;
       depth[i] = r ? Math.max(0, Math.min(top - h[i] * into2 + want, r[0] - wall)) : 0;
+    }
+    // (1.90) the plug's end is one flat face: the owner's arm, where the shoulder held a column only part of the way
+    // round, came off with its end sloping to a point. The floor is the plane, level if it can be and tilted up to 35°
+    // if it must, that stays inside the solid at every point and goes deepest (up to `want` past the line's highest
+    // point), found over a grid of tilts; only where no plane goes a useful depth is each point sunk by itself
+    if (column) { // a point whose line grazes the surface reads no room at all: it takes its nearer neighbours' room
+      for (let i = 0; i < n; i++) if (roomOf[i] === -Infinity) { let l = -Infinity, r = -Infinity; for (let k = 1; k <= 3 && l === -Infinity; k++) l = roomOf[(i + n - k) % n]; for (let k = 1; k <= 3 && r === -Infinity; k++) r = roomOf[(i + k) % n]; roomOf[i] = Math.min(l, r); }
+    }
+    if (column) {
+      let mx = 0, my = 0; for (let i = 0; i < n; i++) { mx += xy[2 * i] / n; my += xy[2 * i + 1] / n; }
+      let best = null;
+      for (let bi = -14; bi <= 14; bi++) for (let ci = -14; ci <= 14; ci++) {
+        const b = bi * 0.05, c = ci * 0.05, tilt = Math.hypot(b, c); if (tilt > 0.7) continue;
+        let aUp = Infinity, aW = -Infinity;
+        for (let i = 0; i < n; i++) { const sl = b * (xy[2 * i] - mx) + c * (xy[2 * i + 1] - my), lv = h[i] * into2; aUp = Math.min(aUp, lv + roomOf[i] - sl); aW = Math.max(aW, lv + want - sl); }
+        if (!(aUp > -Infinity)) continue;
+        const a = Math.min(aUp, aW); let dmin = Infinity;
+        for (let i = 0; i < n; i++) dmin = Math.min(dmin, a + b * (xy[2 * i] - mx) + c * (xy[2 * i + 1] - my) - h[i] * into2);
+        const score = Math.min(dmin, want) - 0.3 * want * tilt;
+        if (!best || score > best.score + 1e-9) best = { score, a, b, c, dmin };
+      }
+      if (best && best.dmin >= Math.min(want, Math.max(0.3 * want, 0.5 * wall))) {
+        for (let i = 0; i < n; i++) depth[i] = best.a + best.b * (xy[2 * i] - mx) + best.c * (xy[2 * i + 1] - my) - h[i] * into2;
+        var planeFloor = { tilt: Math.atan(Math.hypot(best.b, best.c)) * 180 / Math.PI };
+      }
     }
     for (let i = 0; !column && i < n; i++) {
       let s = want;
@@ -4218,6 +4251,15 @@ const KMCore = (() => {
     // smoothed along the line: no deeper than its neighbours within a wall's length, then averaged over the same
     const len = new Float64Array(n); for (let i = 0; i < n; i++) { const j = (i + 1) % n; len[i] = Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1], h[j] - h[i]); }
     const window = (i, f) => { let acc = f.init, run = 0; for (let k = 0; k <= n / 2; k++) { if (k > 0 && (run += len[(i + k - 1) % n]) > wall) break; acc = f.step(acc, depth[(i + k) % n]); } run = 0; for (let k = 1; k <= n / 2; k++) { if ((run += len[(i + n - k) % n]) > wall) break; acc = f.step(acc, depth[(i + n - k) % n]); } return f.done(acc); };
+    if (column && planeFloor) { // a flat floor is kept as it is: smoothing would bend it
+      let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, depth[i]);
+      const xy2 = Float64Array.from(xy), h2 = new Float64Array(n); for (let i = 0; i < n; i++) h2[i] = h[i] + depth[i] * into2;
+      const H = capHeight(xy2, h2), L = makeLoop(ring, [], xy2), base = { loops: [L], regions: buildRegions([L]) }, rooms = [];
+      for (const q of regionSamples(base, 0, 150)) { const r = roomAt(q.x, q.y, H(q.x, q.y)); rooms.push(r ? r[0] : 0); }
+      rooms.sort((a, b) => a - b);
+      if (!rooms.length || rooms[Math.floor(0.1 * rooms.length)] >= 0.75 * wall) return { xy2, h2, depth: Array.from(depth), max, flatEnd: true, floorTilt: planeFloor.tilt };
+      for (let i = 0; i < n; i++) depth[i] = roomOf[i] > -Infinity ? Math.max(0, Math.min(top - h[i] * into2 + want, roomOf[i])) : 0; // (no room under its middle: sunk point by point after all)
+    }
     if (column) for (let i = 0; i < n; i++) depth[i] = depth[i] > 0 ? h[i] * into2 + depth[i] : -Infinity; // (stepped: the floor's level is what is smoothed, so a level floor stays level; a point with no room holds its neighbours back)
     if (column) { let lo = Infinity; for (let i = 0; i < n; i++) if (depth[i] > -Infinity) lo = Math.min(lo, depth[i]); if (lo === Infinity) return null; for (let i = 0; i < n; i++) if (depth[i] === -Infinity) depth[i] = h[i] * into2; }
     const lows = new Float64Array(n); for (let i = 0; i < n; i++) lows[i] = window(i, { init: Infinity, step: Math.min, done: (a) => a });
@@ -4574,7 +4616,8 @@ const KMCore = (() => {
     // loose piece, an inner shell) are left alone
     let biggest = -1, ba = -1; for (const r of touches) { const a = comp.get(r); if (a > ba) { ba = a; biggest = r; } }
     let holes = 0;
-    const fill = new Set(); for (const r of touches) if (r !== biggest && comp.get(r) < selArea) { fill.add(r); holes++; }
+    const maxFill = opts.maxFrac > 0 ? opts.maxFrac * selArea : selArea; // (1.90) with maxFrac only holes under that share of the selection (gaps between fingers, not a hand on a book)
+    const fill = new Set(); for (const r of touches) if (r !== biggest && comp.get(r) < maxFill) { fill.add(r); holes++; }
     if (fill.size) for (let t = 0; t < nt; t++) if (!out[t] && fill.has(find(t))) out[t] = 1;
     // only what joins up with the picked pieces stays: the closing can leave a stray bit in a crevice nearby
     { const q = new Int32Array(nt); let h = 0, tl = 0; const keep = new Uint8Array(nt);
@@ -5491,7 +5534,7 @@ const KMCore = (() => {
     if (req.cover) out.cover = req.cover; // (1.83) what a limb's flat end makes the pick cover, on the part itself
     if (req.sliced) out.paths = loops.map(l => { const a = new Float32Array(3 * l.verts.length); l.verts.forEach((v, i) => { a[3 * i] = P[3 * v]; a[3 * i + 1] = P[3 * v + 1]; a[3 * i + 2] = P[3 * v + 2]; }); return a; }); // the sliced lines' points: their vertices are new, so the app draws them from these
     const closed = loops.length > 0 && loops.every(l => l.closed);
-    if (closed && cfg.type !== 'none') {
+    if (closed && (cfg.type !== 'none' || cfg.sink > 0)) { // (1.90) with no key the extrusion is still worked out, so it can be drawn
       for (const loop of loops) {
         const per = { keys: [], plugs: [] }, draw = { keys: [], plugs: [] };
         let an = null;
@@ -5500,7 +5543,10 @@ const KMCore = (() => {
           an = side === cfg.pegSide ? an0 : analyzeLoop(P, I, loop, lcfg, D);
           per.pegSide = side; per.cfg = lcfg;
           out.frames.push(an.frame);
-          if (cfg.type === 'plug' && an.curved && an.curved.sunk && an.curved.sunk.column) {
+          const sk = an.curved && an.curved.sunk; // (1.90) the extruded plug drawn before the cut: its floor ring, and where each wall starts
+          if (sk && sk.column) draw.sink = { floor: Array.from(sk.xy2), h: Array.from(sk.h2), line: sk.lineXY, lineH: sk.lineH };
+          if (cfg.type === 'none') { /* no key: the extrusion alone */ }
+          else if (cfg.type === 'plug' && sk && sk.column) {
             // (1.89) the cut is already extruded into a plug: a second plug on its floor added nothing and, on a steeply
             // tapered floor, came away as a slab of its own; the extruded plug is this line's plug
             per.plugs = []; per.extruded = true;

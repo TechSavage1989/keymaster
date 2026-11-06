@@ -1354,13 +1354,16 @@ console.log('curved cuts along a border');
     const area = (a) => { let t = 0; const n = a.length / 2; for (let i = 0; i < n; i++) { const j = (i + 1) % n; t += a[2 * i] * a[2 * j + 1] - a[2 * j] * a[2 * i + 1]; } return Math.abs(t) / 2; };
     const tan = K.analyzeLoop(cP, cI, cl, { type: 'none', sink: 1, margin: 1, sinkTaper: 5 }, 60).curved.sunk, ring = can.base.loops[0].xy;
     const tr = K.cutAlongLoop(cP, cI, cl, { sink: 1, minThickness: 1, sinkTaper: 5 }), tvol = tr.parts.reduce((a, q) => a + q.volume, 0);
-    check('tapered 5°: the floor ring sits inside the line (by up to depth × tan 5°), sealed, volume kept', tan.taper === 5 && area(tan.xy2) < area(ring) * 0.85 && area(tan.xy2) > area(ring) * 0.4 && allClosed(tr.parts) && Math.abs(tvol - K.volume(cP, cI)) / K.volume(cP, cI) < 1e-6, [tan.taper, area(tan.xy2), area(ring)]);
+    check('tapered 5°: the floor ring sits inside the line (by up to depth × tan 5°), its end one flat face, sealed, volume kept', tan.taper === 5 && tan.flatEnd && area(tan.xy2) < area(ring) * 0.85 && area(tan.xy2) > area(ring) * 0.4 && allClosed(tr.parts) && Math.abs(tvol - K.volume(cP, cI)) / K.volume(cP, cI) < 1e-6, [tan.taper, area(tan.xy2), area(ring)]);
     // (1.89) Plug as the extra key on a line already extruded into a plug: the extrusion is the plug (a second one on a
     // steep taper's floor came away as a piece of its own); the pick cuts in two sealed pieces
     const pcfg = { type: 'plug', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 1.5, printer: 'fdm', pegSide: 'below', perArea: 1, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, sinkTaper: 20, sizeMax: 5 };
     const preq = { loops: [cl], cfg: pcfg, minThickness: 1, sink: 1, perArea: 1, numberJoints: false, joint: 1 };
     const pj = K.planJoints(cP, cI, preq), pp = K.planPick(cP, cI, { ...preq, force: true }), pparts = pp.result ? pp.result.parts : [];
     check('Plug on an extruded plug: the extrusion is the plug, two sealed pieces, none of them a loose joint', pj.perLoop[0].extruded && !pj.perLoop[0].plugs.length && pparts.length === 2 && allClosed(pparts), { extruded: pj.perLoop[0].extruded, n: pparts.length, error: pp.error }); }
+  // (1.90) a line round a crevice (narrow against how far it winds out of its plane) is not extruded: it would make a fin
+  { const xy = [], h = [], n = 40; for (let i = 0; i < n; i++) { const t = 2 * Math.PI * i / n; xy.push(20 * Math.cos(t), 1.5 * Math.sin(t)); h.push(8 * Math.sin(3 * t)); }
+    check('a narrow line that winds far out of its plane gets no plug', K.sunkRing(sp.positions, sp.indices, { o: [0, 0, 0], n: [0, 0, 1], u: [1, 0, 0], v: [0, 1, 0] }, [...Array(n).keys()], xy, h, 1, 3, 0.8) === null); }
   // with a wall thicker than the ball required beyond the face, there is no room to sink: the cut is as before
   const noRoom = K.cutAlongLoop(sp.positions, sp.indices, orientedW, { sink: 1, cfg: cfgOf({ margin: 30 }) });
   check('no room to sink: the face stays where it was, and the cut is still sealed', noRoom.sink === 0 && allClosed(noRoom.parts) && Math.abs(Math.min(...noRoom.parts.map(q => q.volume)) - smallPlain) < 1e-6, [noRoom.sink, noRoom.parts.map(q => q.volume)]);
