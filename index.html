@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.83, build fbb630. After an update, refresh the page and check this changes.">v1.83 · fbb630</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.83, build 3c9e07. After an update, refresh the page and check this changes.">v1.83 · 3c9e07</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -6131,51 +6131,41 @@ const KMCore = (() => {
     });
     return out;
   }
-  // (1.83) Knife edges along a cut's rim (the owner: "super thin sharp edges"): where the cut meets the surface at a
-  // grazing angle the piece runs out to a blade, thinner than anything prints. Each original triangle of a piece within
-  // a few `t` of the cut's rim casts a line straight into the piece; where less than half of `t` lies behind it, its area
-  // counts as blade for the rim point nearest it. A rim point whose blade reaches out further than `t` (the surface
-  // meets the cut at under about 25°: a plain slanted cut tapers over half a `t` or so) is a knife point, and a piece
-  // has a knife edge when such points run along at least 4·t of rim. Returns [{ part, length, rim }].
+  // (1.83) Knife edges along a cut's rim (the owner: "super thin sharp edges"): where the cut face meets the surface at
+  // a grazing angle the piece runs out to a blade thinner than anything prints. At each rim edge (between a face the
+  // cut made and the original surface) the piece's inside angle is measured from the two sides' normals, each the
+  // area-weighted normal of its side's triangles round the edge's ends (a sliced triangle at the rim can be a tilted
+  // sliver); under `deg` (25°: a blade a `t` thick reaches over two `t` in) it is a knife edge, and a piece has one when
+  // such edges run along at least 4·t of rim (shorter nicks are a corner of the cut, not a blade).
+  // Returns [{ part, length, knife, rim, sharp, points }].
   function knifeEdges(Pin, parts, t, opts = {}) {
     const out = []; if (!(t > 0)) return out;
+    const cosMax = Math.cos(Math.PI - ((opts.deg || 25) * Math.PI) / 180); // normals further apart than this: inside angle under `deg`
     const fr = Math.fround, orig = new Set(); for (let i = 0; i < Pin.length; i += 3) orig.add(fr(Pin[i]) + ',' + fr(Pin[i + 1]) + ',' + fr(Pin[i + 2])); // (float32 either side: a piece's positions may be stored narrower than the model's)
     parts.forEach((q, pi) => {
       const Q = q.positions, J = q.indices, nv = Q.length / 3, nt = J.length / 3, isNew = new Uint8Array(nv);
       for (let v = 0; v < nv; v++) isNew[v] = orig.has(fr(Q[3 * v]) + ',' + fr(Q[3 * v + 1]) + ',' + fr(Q[3 * v + 2])) ? 0 : 1;
-      const fresh = (tr) => isNew[J[3 * tr]] && isNew[J[3 * tr + 1]] && isNew[J[3 * tr + 2]];
-      // the rim: edges between a face the cut made and the original surface, as a chain of rim vertices with their share of length
-      const pr = trianglePairs(J), rimLen = new Map(); let total = 0;
-      for (let i = 0; i < pr.length; i += 4) { const a = pr[i], b = pr[i + 1]; if (fresh(a) === fresh(b)) continue; const va = pr[i + 2], vb = pr[i + 3], l = Math.hypot(Q[3 * va] - Q[3 * vb], Q[3 * va + 1] - Q[3 * vb + 1], Q[3 * va + 2] - Q[3 * vb + 2]); rimLen.set(va, (rimLen.get(va) || 0) + l / 2); rimLen.set(vb, (rimLen.get(vb) || 0) + l / 2); total += l; }
-      if (!total) { out.push({ part: pi, length: 0, rim: 0 }); return; }
-      const cell = 2 * t, hash = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
-      for (const v of rimLen.keys()) { const k = key(Math.floor(Q[3 * v] / cell), Math.floor(Q[3 * v + 1] / cell), Math.floor(Q[3 * v + 2] / cell)); let h = hash.get(k); if (!h) hash.set(k, h = []); h.push(v); }
-      const nearestRim = (p, R) => { const cx = Math.floor(p[0] / cell), cy = Math.floor(p[1] / cell), cz = Math.floor(p[2] / cell); let bd = R, bv = -1; for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) for (let k = -2; k <= 2; k++) { const h = hash.get(key(cx + i, cy + j, cz + k)); if (h) for (const v of h) { const d = Math.hypot(Q[3 * v] - p[0], Q[3 * v + 1] - p[1], Q[3 * v + 2] - p[2]); if (d < bd) { bd = d; bv = v; } } } return bv; };
-      const grid = meshGrid(Q, J, 64), D = diag(bounds(Q)), blade = new Map(), nearCells = new Set();
-      for (const k of hash.keys()) { const [x, y, z] = k.split(',').map(Number); for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) for (let l = -2; l <= 2; l++) nearCells.add(key(x + i, y + j, z + l)); }
-      const cands = [];
-      for (let tr = 0; tr < nt; tr++) {
-        if (fresh(tr)) continue;
-        const a = J[3 * tr], b = J[3 * tr + 1], c = J[3 * tr + 2];
-        if (nearCells.has(key(Math.floor((Q[3 * a] + Q[3 * b] + Q[3 * c]) / 3 / cell), Math.floor((Q[3 * a + 1] + Q[3 * b + 1] + Q[3 * c + 1]) / 3 / cell), Math.floor((Q[3 * a + 2] + Q[3 * b + 2] + Q[3 * c + 2]) / 3 / cell)))) cands.push(tr);
+      const fresh = new Uint8Array(nt); for (let tr = 0; tr < nt; tr++) fresh[tr] = isNew[J[3 * tr]] && isNew[J[3 * tr + 1]] && isNew[J[3 * tr + 2]] ? 1 : 0;
+      const tn = new Float64Array(3 * nt); for (let tr = 0; tr < nt; tr++) { const a = 3 * J[3 * tr], b = 3 * J[3 * tr + 1], c = 3 * J[3 * tr + 2]; const n = cross3([Q[b] - Q[a], Q[b + 1] - Q[a + 1], Q[b + 2] - Q[a + 2]], [Q[c] - Q[a], Q[c + 1] - Q[a + 1], Q[c + 2] - Q[a + 2]]); tn[3 * tr] = n[0]; tn[3 * tr + 1] = n[1]; tn[3 * tr + 2] = n[2]; } // (area-weighted)
+      const vt = vertexTriangles(Q, J), pr = trianglePairs(J);
+      const sideNormal = (v, want) => { let x = 0, y = 0, z = 0; for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const tr = vt.tri[j]; if (fresh[tr] === want) { x += tn[3 * tr]; y += tn[3 * tr + 1]; z += tn[3 * tr + 2]; } } return [x, y, z]; };
+      const rimLen = new Map(), adj = new Map(), knife = new Set(); let total = 0, knifeLen = 0;
+      for (let i = 0; i < pr.length; i += 4) {
+        const a = pr[i], b = pr[i + 1]; if (fresh[a] === fresh[b]) continue;
+        const va = pr[i + 2], vb = pr[i + 3], l = Math.hypot(Q[3 * va] - Q[3 * vb], Q[3 * va + 1] - Q[3 * vb + 1], Q[3 * va + 2] - Q[3 * vb + 2]);
+        total += l; for (const [x, y] of [[va, vb], [vb, va]]) { rimLen.set(x, (rimLen.get(x) || 0) + l / 2); if (!adj.has(x)) adj.set(x, []); adj.get(x).push(y); }
+        const f1 = sideNormal(va, 1), f2 = sideNormal(vb, 1), s1 = sideNormal(va, 0), s2 = sideNormal(vb, 0);
+        const nf = norm3([f1[0] + f2[0], f1[1] + f2[1], f1[2] + f2[2]]), ns = norm3([s1[0] + s2[0], s1[1] + s2[1], s1[2] + s2[2]]);
+        const dot = nf[0] * ns[0] + nf[1] * ns[1] + nf[2] * ns[2];
+        if (dot >= cosMax) continue;
+        // convex (a blade, not a crack): the surface triangle's far corner lies behind the cut face
+        const s = fresh[a] ? b : a, o = [0, 1, 2].map(k => (Q[3 * J[3 * s] + k] + Q[3 * J[3 * s + 1] + k] + Q[3 * J[3 * s + 2] + k]) / 3);
+        if ((o[0] - Q[3 * va]) * nf[0] + (o[1] - Q[3 * va + 1]) * nf[1] + (o[2] - Q[3 * va + 2]) * nf[2] > 0) continue;
+        knife.add(va); knife.add(vb); knifeLen += l;
       }
-      const stride = Math.max(1, Math.ceil(cands.length / (opts.samples || 12000))); // (sampled: each sample stands for `stride` triangles round it)
-      for (let ci = 0; ci < cands.length; ci += stride) {
-        const tr = cands[ci], a = J[3 * tr], b = J[3 * tr + 1], c = J[3 * tr + 2];
-        const o0 = [0, 1, 2].map(k => (Q[3 * a + k] + Q[3 * b + k] + Q[3 * c + k]) / 3);
-        const rv = nearestRim(o0, 4 * t); if (rv < 0) continue;
-        const ux = Q[3 * b] - Q[3 * a], uy = Q[3 * b + 1] - Q[3 * a + 1], uz = Q[3 * b + 2] - Q[3 * a + 2], wx = Q[3 * c] - Q[3 * a], wy = Q[3 * c + 1] - Q[3 * a + 1], wz = Q[3 * c + 2] - Q[3 * a + 2];
-        const n = [uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx], L = Math.hypot(n[0], n[1], n[2]); if (!L) continue;
-        n[0] /= L; n[1] /= L; n[2] /= L;
-        const o = o0.map((x, k) => x - n[k] * 1e-5 * D), d = castInward(grid, Q, J, o, [-n[0], -n[1], -n[2]], 2 * t);
-        if (d >= 0 && d < 0.5 * t) blade.set(rv, (blade.get(rv) || 0) + stride * L / 2);
-      }
-      // knife points (blade wider than t), and the longest run of them along the rim, joined over gaps of a t
-      const adj = new Map(); for (let i = 0; i < pr.length; i += 4) { const a = pr[i], b = pr[i + 1]; if (fresh(a) === fresh(b)) continue; const va = pr[i + 2], vb = pr[i + 3]; if (!adj.has(va)) adj.set(va, []); if (!adj.has(vb)) adj.set(vb, []); adj.get(va).push(vb); adj.get(vb).push(va); }
-      // the blade's width at a rim point, over the point and its two neighbours along the rim (the area lands on whichever is nearest)
-      const knife = new Set(); for (const v of rimLen.keys()) { let ar = blade.get(v) || 0, ln = rimLen.get(v) || 0; for (const w of adj.get(v) || []) { ar += blade.get(w) || 0; ln += rimLen.get(w) || 0; } if (ln > 0 && ar / ln > t) knife.add(v); }
-      const seen = new Set(); let longest = 0, knifeLen = 0;
-      for (const v of knife) knifeLen += rimLen.get(v) || 0;
+      if (!total) { out.push({ part: pi, length: 0, knife: 0, rim: 0, sharp: false, points: opts.points ? [] : undefined }); return; }
+      // the longest run of knife points along the rim
+      const seen = new Set(); let longest = 0;
       for (const v0 of knife) { if (seen.has(v0)) continue; let run = 0; const st = [v0]; seen.add(v0); while (st.length) { const v = st.pop(); run += rimLen.get(v) || 0; for (const w of adj.get(v) || []) if (!seen.has(w) && knife.has(w)) { seen.add(w); st.push(w); } } longest = Math.max(longest, run); }
       out.push({ part: pi, length: longest, knife: knifeLen, rim: total, sharp: longest >= 4 * t, points: opts.points ? [...knife] : undefined });
     });
