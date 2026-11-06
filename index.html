@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.84, build 4bd455. After an update, refresh the page and check this changes.">v1.84 · 4bd455</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.85, build 761ddd. After an update, refresh the page and check this changes.">v1.85 · 761ddd</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -3496,7 +3496,28 @@ const KMCore = (() => {
     for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (pass[a] >= 0 && pass[a] === pass[b] && groupOf[a] === groupOf[b]) { const x = rf(a), y = rf(b); if (x !== y) rp[x] = y; } }
     const runA = new Map(), runM = new Map(); for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); runA.set(r, (runA.get(r) || 0) + A[t]); if (made[t]) runM.set(r, (runM.get(r) || 0) + A[t]); }
     const lost = new Set(), src = groupOf.slice ? groupOf.slice() : Array.from(groupOf);
-    let moved = 0; // (1.82: runs of at least 0.003% of the surface, a fifth of them made: the strips between the clasps are each a few tenths of a mm²)
+    { // (1.85) a run of made triangles in a sculpted region that borders an object's region far more than anything else is a
+      // strip of the object (the owner's book: the wall of the groove between the cover's panels, a narrow strip of long thin
+      // triangles running across the book, sat in the hand's part because the hand touches it, and a cut round the hand ran
+      // out along it to the book's edge and back, capping a thin sheet across the cover). Neither inside the outline nor on it
+      // facing out, it passes no test above; its border is what gives it away
+      const mp = new Int32Array(nt); for (let t = 0; t < nt; t++) mp[t] = t;
+      const mf = (x) => { while (mp[x] !== x) { mp[x] = mp[mp[x]]; x = mp[x]; } return x; };
+      const isRun = (t) => made[t] && cand(t) && pass[t] < 0;
+      for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (isRun(a) && isRun(b) && groupOf[a] === groupOf[b]) { const x = mf(a), y = mf(b); if (x !== y) mp[x] = y; } }
+      const toObj = new Map(), toRest = new Map();
+      for (let i = 0; i < np; i++) {
+        const a = pairs[4 * i], b = pairs[4 * i + 1], va = 3 * pairs[4 * i + 2], vb = 3 * pairs[4 * i + 3];
+        const l = Math.hypot(P[va] - P[vb], P[va + 1] - P[vb + 1], P[va + 2] - P[vb + 2]);
+        for (const [x, y] of [[a, b], [b, a]]) { if (!isRun(x) || (isRun(y) && groupOf[y] === groupOf[x])) continue; const r = mf(x);
+          if (isObjRegion.has(groupOf[y])) { let m = toObj.get(r); if (!m) toObj.set(r, m = new Map()); m.set(groupOf[y], (m.get(groupOf[y]) || 0) + l); }
+          else if (!made[y]) toRest.set(r, (toRest.get(r) || 0) + l); } // (only sculpted surface counts against it: more made surface beside it is more of the object)
+      }
+      const dest = new Map(); for (const [r, m] of toObj) { let bg = -1, bl = 0; for (const [g, l] of m) if (l > bl) { bl = l; bg = g; } if (bg >= 0 && bl >= 1.5 * (toRest.get(r) || 0)) dest.set(r, bg); }
+      const objOfRegion = new Map(); for (let o = 0; o < nObj; o++) if (objRegion[o] >= 0) objOfRegion.set(objRegion[o], o);
+      for (let t = 0; t < nt; t++) if (isRun(t)) { const g = dest.get(mf(t)); if (g !== undefined) { lost.add(groupOf[t]); groupOf[t] = g; prop[t] = objOfRegion.has(g) ? objOfRegion.get(g) : prop[t]; lost.add(g); } }
+    }
+    let moved = lost.size ? 1 : 0; // (1.82: runs of at least 0.003% of the surface, a fifth of them made: the strips between the clasps are each a few tenths of a mm²)
     for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); if (runA.get(r) >= 3e-5 * total && (runM.get(r) || 0) >= 0.2 * runA.get(r)) { groupOf[t] = objRegion[pass[t]]; prop[t] = pass[t]; moved++; lost.add(src[t]); lost.add(groupOf[t]); } }
     if (moved) { // (1.82) a region the move cut in two keeps its main piece; the scraps it left go to the neighbour they share most border with (on a boolean figure the shoulder's fillet went to the torso and left islands of the arm's region behind, which a pick cut as crumbs)
       const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
@@ -10976,7 +10997,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       if (run !== pickRun || state.regions.pick !== pick) return;
       pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths; pick.cover = j.cover || null;
       pick.keys = j.perLoop.flatMap(per => per.keys); pick.plugs = j.perLoop.flatMap(per => per.plugs);
-      pick.noKeys = noKeysText(j.noKeys, j.loops.length > 1);
+      pick.noKeys = noKeysText(j.noKeys, j.loops.length > 1, j.perLoop);
       drawPickLines(p, pick); renderPick(); markDirty();
     }).catch(() => {});
   }
@@ -12396,11 +12417,16 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       if (state.regions.pickPromise === pr) return;
     }
   }
-  function noKeysText(nk, many) {
+  function noKeysText(nk, many, perLoop) {
     if (!nk) return null;
-    const where = many ? 'one of its lines' : 'this line';
-    if (nk.code === 'plug') { const why = nk.reason || 'no room'; return `No plug inside ${where} (${why.charAt(0).toLowerCase() + why.slice(1)}), so that line will be cut without one.`; }
-    if (nk.code === 'room') return `No room for keys inside ${where} at these settings, so that line will be cut without them.`;
+    // (1.85) how many lines have no joint: "one of its lines" read as if the others had one when none did
+    const n = perLoop ? perLoop.length : 0, bare = perLoop ? perLoop.filter(per => !(per.keys && per.keys.length) && !(per.plugs && per.plugs.length)).length : 0;
+    const where = !many ? 'this line' : n && bare === n ? (n === 2 ? 'either of its lines' : `any of its ${n} lines`) : bare > 1 ? `${bare} of its ${n} lines` : 'one of its lines';
+    const those = !many ? 'that line' : bare > 1 ? 'those lines' : 'that line';
+    const p = selectedPart(), size = p ? Math.max(...p.bbox.size) : 0;
+    const small = n && bare === n && size > 0 && size < 80 ? ` The part is only ${fmt(size)} mm across: scale it up (the % box at the top left), or pick resin or smaller keys, and joints will fit.` : '';
+    if (nk.code === 'plug') { const why = nk.reason || 'no room'; return `No plug fits inside ${where} (${why.charAt(0).toLowerCase() + why.slice(1)}), so ${those} will be cut without one.${small}`; }
+    if (nk.code === 'room') return `No room for keys inside ${where} at these settings, so ${those} will be cut without them.${small}`;
     return 'Keys couldn’t be placed on this line, so it will be cut without them.';
   }
   function droppedText(d) {
@@ -12470,7 +12496,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       if (joints.paths) pick.paths = joints.paths; else { pick.loops = joints.loops; pick.loop = joints.loops[0]; } // a sliced pick's lines run through new vertices: drawn from their points, and the pick keeps the lines on the part itself
       pick.perLoop = joints.perLoop; pick.frames = joints.frames; pick.draw = joints.draw;
       pick.keys = joints.perLoop.flatMap(per => per.keys); pick.plugs = joints.perLoop.flatMap(per => per.plugs);
-      pick.noKeys = noKeysText(joints.noKeys, joints.loops.length > 1);
+      pick.noKeys = noKeysText(joints.noKeys, joints.loops.length > 1, joints.perLoop);
       drawPickLines(p, pick); renderPick(); markDirty();
       return coreTask('planPick', [p.positions, p.indices, { ...req, planned: joints }]);
     }).then((out) => {
@@ -12479,7 +12505,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       if (out.paths) pick.paths = out.paths; else { pick.loops = out.loops; pick.loop = out.loops[0]; }
       pick.perLoop = out.perLoop; pick.frames = out.frames; pick.draw = out.draw;
       pick.keys = out.perLoop.flatMap(per => per.keys); pick.plugs = out.perLoop.flatMap(per => per.plugs);
-      pick.noKeys = out.dropped ? droppedText(out.dropped) : noKeysText(out.noKeys, out.loops.length > 1);
+      pick.noKeys = out.dropped ? droppedText(out.dropped) : noKeysText(out.noKeys, out.loops.length > 1, out.perLoop);
       pick.result = out.result; pick.forced = out.forced; if (out.error) pick.error = out.error;
     }).catch((err) => {
       if (run !== pickRun || state.regions.pick !== pick) return;

@@ -2771,7 +2771,28 @@ const KMCore = (() => {
     for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (pass[a] >= 0 && pass[a] === pass[b] && groupOf[a] === groupOf[b]) { const x = rf(a), y = rf(b); if (x !== y) rp[x] = y; } }
     const runA = new Map(), runM = new Map(); for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); runA.set(r, (runA.get(r) || 0) + A[t]); if (made[t]) runM.set(r, (runM.get(r) || 0) + A[t]); }
     const lost = new Set(), src = groupOf.slice ? groupOf.slice() : Array.from(groupOf);
-    let moved = 0; // (1.82: runs of at least 0.003% of the surface, a fifth of them made: the strips between the clasps are each a few tenths of a mm²)
+    { // (1.85) a run of made triangles in a sculpted region that borders an object's region far more than anything else is a
+      // strip of the object (the owner's book: the wall of the groove between the cover's panels, a narrow strip of long thin
+      // triangles running across the book, sat in the hand's part because the hand touches it, and a cut round the hand ran
+      // out along it to the book's edge and back, capping a thin sheet across the cover). Neither inside the outline nor on it
+      // facing out, it passes no test above; its border is what gives it away
+      const mp = new Int32Array(nt); for (let t = 0; t < nt; t++) mp[t] = t;
+      const mf = (x) => { while (mp[x] !== x) { mp[x] = mp[mp[x]]; x = mp[x]; } return x; };
+      const isRun = (t) => made[t] && cand(t) && pass[t] < 0;
+      for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (isRun(a) && isRun(b) && groupOf[a] === groupOf[b]) { const x = mf(a), y = mf(b); if (x !== y) mp[x] = y; } }
+      const toObj = new Map(), toRest = new Map();
+      for (let i = 0; i < np; i++) {
+        const a = pairs[4 * i], b = pairs[4 * i + 1], va = 3 * pairs[4 * i + 2], vb = 3 * pairs[4 * i + 3];
+        const l = Math.hypot(P[va] - P[vb], P[va + 1] - P[vb + 1], P[va + 2] - P[vb + 2]);
+        for (const [x, y] of [[a, b], [b, a]]) { if (!isRun(x) || (isRun(y) && groupOf[y] === groupOf[x])) continue; const r = mf(x);
+          if (isObjRegion.has(groupOf[y])) { let m = toObj.get(r); if (!m) toObj.set(r, m = new Map()); m.set(groupOf[y], (m.get(groupOf[y]) || 0) + l); }
+          else if (!made[y]) toRest.set(r, (toRest.get(r) || 0) + l); } // (only sculpted surface counts against it: more made surface beside it is more of the object)
+      }
+      const dest = new Map(); for (const [r, m] of toObj) { let bg = -1, bl = 0; for (const [g, l] of m) if (l > bl) { bl = l; bg = g; } if (bg >= 0 && bl >= 1.5 * (toRest.get(r) || 0)) dest.set(r, bg); }
+      const objOfRegion = new Map(); for (let o = 0; o < nObj; o++) if (objRegion[o] >= 0) objOfRegion.set(objRegion[o], o);
+      for (let t = 0; t < nt; t++) if (isRun(t)) { const g = dest.get(mf(t)); if (g !== undefined) { lost.add(groupOf[t]); groupOf[t] = g; prop[t] = objOfRegion.has(g) ? objOfRegion.get(g) : prop[t]; lost.add(g); } }
+    }
+    let moved = lost.size ? 1 : 0; // (1.82: runs of at least 0.003% of the surface, a fifth of them made: the strips between the clasps are each a few tenths of a mm²)
     for (let t = 0; t < nt; t++) if (pass[t] >= 0) { const r = rf(t); if (runA.get(r) >= 3e-5 * total && (runM.get(r) || 0) >= 0.2 * runA.get(r)) { groupOf[t] = objRegion[pass[t]]; prop[t] = pass[t]; moved++; lost.add(src[t]); lost.add(groupOf[t]); } }
     if (moved) { // (1.82) a region the move cut in two keeps its main piece; the scraps it left go to the neighbour they share most border with (on a boolean figure the shoulder's fillet went to the torso and left islands of the arm's region behind, which a pick cut as crumbs)
       const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
