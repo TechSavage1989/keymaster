@@ -3261,7 +3261,8 @@
     return '';
   }
   function renderToolGrid() {
-    for (const b of toolPanel.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', b.dataset.tool === state.tool ? 'true' : 'false');
+    for (const b of toolPanel.querySelectorAll('.tool[data-tool]')) b.setAttribute('aria-pressed', b.dataset.tool === state.tool ? 'true' : 'false');
+    { const pc = $('#pickClickBtn'), pb = $('#paintBtn'); if (pc) pc.setAttribute('aria-pressed', state.paint.on ? 'false' : 'true'); if (pb) pb.setAttribute('aria-pressed', state.paint.on ? 'true' : 'false'); } // (1.84) Regions and Paint are one tool: Pick by Click | Brush
     const help = toolHelp(), hp = $('#toolHelp'); hp.textContent = help; hp.hidden = !help;
     const p = selectedPart();
     const sp = $('#suggestPanel'); sp.hidden = state.tool !== 'suggest' || !p; sp.innerHTML = sp.hidden ? '' : suggestSection();
@@ -3277,7 +3278,7 @@
   function syncTool() {
     const was = state.tool;
     const sg = state.suggest, regionSuggested = sg && sg.partId === state.selectedId && sg.active >= 0 && sg.items[sg.active] && sg.items[sg.active].kind === 'region';
-    if (state.regions.on) { if (state.paint.on) state.tool = 'paint'; else if (state.draw.on) state.tool = 'draw'; else if (!(was === 'suggest' && regionSuggested)) state.tool = 'regions'; }
+    if (state.regions.on) { if (state.paint.on) state.tool = 'regions'; else if (state.draw.on) state.tool = 'draw'; else if (!(was === 'suggest' && regionSuggested)) state.tool = 'regions'; }
     else if (was === 'regions' || was === 'paint' || was === 'draw') state.tool = 'plane';
     renderToolGrid();
     if (state.tool !== was) renderInspector();
@@ -3291,7 +3292,7 @@
     }
     if (state.here.on) setHere(false);
     if (state.across.on) setAcross(false);
-    if (state.tool === tool && tool !== 'paint' && tool !== 'draw') return;
+    if (state.tool === tool && tool !== 'paint' && tool !== 'draw' && !(tool === 'regions' && state.paint.on)) return;
     if (state.tool === 'shape' && tool !== 'shape' && p && p.shape) refreshView(p.id); // the shape's mesh goes back to the part's own positions
     if (tool === 'suggest') { const sg = state.suggest, it = sg && p && sg.partId === p.id && sg.active >= 0 ? sg.items[sg.active] : null; state.suggestPlane = !!(it && it.kind !== 'shells' && it.kind !== 'region'); } // the plane comes once a suggestion, a spot or a line has placed it
     clearShellPick();
@@ -3305,7 +3306,7 @@
         else if (tool === 'draw') { if (state.paint.on) setPainting(false); if (!state.draw.on) setDrawing(true); }
         else { if (state.paint.on) setPainting(false); if (state.draw.on) setDrawing(false); }
       } else if (state.regions.on) setRegions(false);
-      state.tool = tool;
+      state.tool = tool === 'paint' ? 'regions' : tool; // (1.84) the brush is a way of picking in the Regions tool
       selectPartSplitPreview(); updatePreview(); attachGizmo(); placeAreaTags(); renderInspector(); updateHint(); markDirty();
     };
     if ((tool === 'regions' || tool === 'paint' || tool === 'draw') && !state.regions.on) { state.tool = tool; startRegions(go); } // the plane steps aside at once, and the parts are found off the main thread
@@ -3545,7 +3546,7 @@
     }
     return keyStatus;
   }
-  const TOOL_NAMES = { select: 'Select', plane: 'Plane', regions: 'Regions', paint: 'Paint', draw: 'Draw', suggest: 'Suggest', bed: 'Fit bed', shape: 'Shapes', boolean: 'Boolean', sculpt: 'Sculpt' };
+  const TOOL_NAMES = { select: 'Select', plane: 'Plane', regions: 'Regions', paint: 'Regions', draw: 'Draw', suggest: 'Suggest', bed: 'Fit bed', shape: 'Shapes', boolean: 'Boolean', sculpt: 'Sculpt' };
   const TYPE_NAMES = { peg: 'Pegs', dowel: 'Dowels', magnet: 'Magnets', plug: 'Plug', none: 'None' };
   function jointSummary(c) {
     if (c.type === 'none') return 'None';
@@ -3899,7 +3900,8 @@
      with dark lines on the borders. The cut preview steps aside while they show; results are kept per part
      and threshold. */
   const regionCache = new Map();
-  const regionsKey = (p) => (state.regions.by === 'form' ? `${p.id}:form:${state.regions.detail || 'balanced'}` : `${p.id}:${state.regions.angle}:${state.regions.fold}:${state.regions.minFrac}`);
+  const partsKey = (p) => `${p.id}:form:${state.regions.detail || 'balanced'}`;
+  const regionsKey = (p) => (state.regions.by === 'form' ? partsKey(p) : `${p.id}:${state.regions.angle}:${state.regions.fold}:${state.regions.minFrac}:${state.regions.detail || 'balanced'}`); // (1.84: sections lie within the parts, so they follow Detail too)
   const sdfCache = new Map(); // the thickness under each part's surface, the slow half of finding its form, kept while the part stands
   /* Heavy core work off the main thread: a worker built from the page's own core script (the same code, no second
      copy), so finding the parts of a big sculpt no longer freezes the view and the busy sign keeps turning. When
@@ -3961,11 +3963,15 @@
     if (regionCache.has(key)) return regionCache.get(key);
     let seg;
     const a = analysisOf(p);
-    if (state.regions.by === 'form') {
-      seg = await coreTask('segmentParts', [a.P, p.indices, { ...regionOpts(), sdf: sdfCache.get(p.id) || null }]);
-      if (seg.sdf && !sdfCache.has(p.id)) sdfCache.set(p.id, seg.sdf);
-    } else seg = await coreTask('segmentSurface', [a.P, p.indices, regionOpts()]);
-    seg = scaledSeg(seg, a.f);
+    let parts = regionCache.get(partsKey(p));
+    if (!parts) {
+      const d = DETAIL[state.regions.detail || 'balanced'];
+      parts = await coreTask('segmentParts', [a.P, p.indices, { ...d, sdf: sdfCache.get(p.id) || null }]);
+      if (parts.sdf && !sdfCache.has(p.id)) sdfCache.set(p.id, parts.sdf);
+      parts = scaledSeg(parts, a.f); regionCache.set(partsKey(p), parts);
+    }
+    if (state.regions.by === 'form') seg = parts;
+    else seg = scaledSeg(await coreTask('segmentSections', [a.P, p.indices, { ...regionOpts(), parts: parts.groupOf }]), a.f); // (1.84) sections are pieces of the parts
     regionCache.set(key, seg);
     return seg;
   }
@@ -3973,11 +3979,13 @@
     const key = regionsKey(p);
     if (!regionCache.has(key)) {
       const a = analysisOf(p);
-      if (state.regions.by === 'form') {
-        const seg = K.segmentParts(a.P, p.indices, { ...regionOpts(), sdf: sdfCache.get(p.id) || null });
+      let parts = regionCache.get(partsKey(p));
+      if (!parts) {
+        const seg = K.segmentParts(a.P, p.indices, { ...DETAIL[state.regions.detail || 'balanced'], sdf: sdfCache.get(p.id) || null });
         if (seg.sdf && !sdfCache.has(p.id)) sdfCache.set(p.id, seg.sdf);
-        regionCache.set(key, scaledSeg(seg, a.f));
-      } else regionCache.set(key, scaledSeg(K.segmentSurface(a.P, p.indices, regionOpts()), a.f));
+        parts = scaledSeg(seg, a.f); regionCache.set(partsKey(p), parts);
+      }
+      if (state.regions.by !== 'form') regionCache.set(key, scaledSeg(K.segmentSections(a.P, p.indices, { ...regionOpts(), parts: parts.groupOf }), a.f));
     }
     return regionCache.get(key);
   }

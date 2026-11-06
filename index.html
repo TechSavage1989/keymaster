@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.83, build e5568d. After an update, refresh the page and check this changes.">v1.83 · e5568d</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.84, build 4bd455. After an update, refresh the page and check this changes.">v1.84 · 4bd455</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -642,7 +642,6 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
     <button type="button" class="tool" data-tool="select" aria-pressed="false" title="Choose a part by clicking it, with no cut plane in the way"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5l10.5 8.5-4.6.9 2.6 5.2-2.2 1.1-2.6-5.2L5 16.2z" fill="currentColor"/></svg><span>Select</span></button>
     <button type="button" class="tool" data-tool="plane" aria-pressed="true" title="A flat cut: slide and tilt a plane through the part"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l7 4v7l-7 4-7-4v-7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M1.5 12.5l17-5" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 2"/></svg><span>Plane</span></button>
     <button type="button" class="tool" data-tool="regions" aria-pressed="false" title="Cut along the surface's own borders: click a region to split it off, or a border line to cut along it"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h6.5v5H3zM10.5 4.5H17v8h-6.5zM3 10.5h6.5v5H3zM10.5 13.5H17v2h-6.5z" fill="currentColor" opacity=".35"/><path d="M3 4.5h14v11H3zM9.5 4.5v11M3 10h6.5M10.5 13h6.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span>Regions</span></button>
-    <button type="button" class="tool" id="paintBtn" data-tool="paint" aria-pressed="false" title="Paint the area to split off with a brush, like a face selection in Meshmixer or ZBrush"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 3l5.5 5.5-6 6-5.5-5.5z" fill="currentColor" opacity=".35"/><path d="M11.5 3l5.5 5.5-6 6-5.5-5.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6 10.5c-2 .5-3 2-3.5 6 4-.5 5.5-1.5 6-3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span>Paint</span></button>
     <button type="button" class="tool" id="drawLineBtn" data-tool="draw" aria-pressed="false" title="Click points on the part to draw your own cut line along the surface"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 16c2-5 5-7 9-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.5 2" stroke-linecap="round"/><path d="M12.5 3.5l4 4-6 6H6.5v-4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span>Draw</span></button>
     <button type="button" class="tool" data-tool="suggest" aria-pressed="false" title="Let Keymaster find the cuts: narrow points, joins and regions, a cut at a spot you click, or a line drawn across the view"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2l1.9 5.1L17 9l-5.1 1.9L10 16l-1.9-5.1L3 9l5.1-1.9z" fill="currentColor" opacity=".35"/><path d="M10 2l1.9 5.1L17 9l-5.1 1.9L10 16l-1.9-5.1L3 9l5.1-1.9z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M15.5 14.5l2 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Suggest</span></button>
     <button type="button" class="tool" data-tool="bed" aria-pressed="false" title="Cut the model into sections that fit your printer bed, across X, Y and Z"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 13.5h15v3h-15z" fill="currentColor" opacity=".35"/><path d="M2.5 13.5h15v3h-15zM5 13.5v-9h10v9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5 8.5h10M10 4.5v9" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1.5"/></svg><span>Fit bed</span></button>
@@ -660,7 +659,8 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
   <div id="suggestPanel" hidden></div>
   <div id="bedPanel" hidden></div>
   <div class="regions-panel" id="regionsPanel" hidden>
-    <div class="rp-row rp-by"><span class="lbl">Find</span><div class="seg" role="group" aria-label="Find"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="Parts: the figure's parts (head, arms, legs, torso, a weapon, a base), told apart by how thick the solid is, sized by Detail">Parts</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Sections: the surface split wherever it folds inward by more than the angle below (sleeves, collars, belts, cuffs, armour plates)">Sections</button></div><output id="regionsCount"></output></div>
+    <div class="rp-row rp-pickby"><span class="lbl">Pick by</span><div class="seg" role="group" aria-label="Pick by"><button type="button" id="pickClickBtn" data-tool="regions" aria-pressed="true" title="Click a part or a section to pick it, Shift-click to add more">Click</button><button type="button" id="paintBtn" data-tool="paint" aria-pressed="false" title="Paint the area with a brush, like a face selection in Meshmixer or ZBrush; with Fill, a dab picks the whole part or section under it">Brush</button></div></div>
+    <div class="rp-row rp-by"><span class="lbl">Find</span><div class="seg" role="group" aria-label="Find"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="Parts: whole parts of the figure: a limb, a head, the torso, a hat, armour, a book, a weapon, a base. Detail sets how finely they are told apart">Parts</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Sections: the smaller pieces within each part, wherever a border or a fold runs across it (a cuff on a sleeve, a collar, a belt, a plate of armour, a book's cover). A section never runs into another part">Sections</button></div><output id="regionsCount"></output></div>
     <div class="rp-row rp-ratio"><span class="lbl" title="How finely the model is split into parts">Detail</span><div class="seg" role="group" aria-label="Detail" id="regionsDetail"><button type="button" data-act="regions-detail" data-value="coarse" aria-pressed="false" title="Only the big parts: head, limbs, body, base">Big</button><button type="button" data-act="regions-detail" data-value="balanced" aria-pressed="true" title="The parts a kit would have: head, hands, feet, hat, clothing">Balanced</button><button type="button" data-act="regions-detail" data-value="fine" aria-pressed="false" title="Smaller parts too: ears, fingers, buttons, straps">Fine</button></div></div>
     <div class="rp-row rp-fold" hidden><label class="slider" title="How big the sections are: left for a few large ones, right for many small ones (the surface is split where it creases, and where a hard surface such as a book or a buckle meets cloth or skin)"><span class="lbl">Section size</span><input type="range" id="regionsAngle" min="0" max="100" step="5" value="55" aria-label="Section size, from large (left) to small (right)"><output id="regionsAngleOut">Medium</output></label></div>
     <div class="btn-row"><label class="inline-num" title="Push the cut face this far into the other piece, with a wall down from the line, so the piece keeps its thickness to the edge. 0 turns it off."><span class="lbl">Sink face</span><input type="number" id="sinkDepth" min="0" step="0.2" value="1" aria-label="Sink the cut face into the other piece by this much"><span class="unit">mm</span></label><label class="inline-num" title="No piece may be thinner than this after a cut: a cut that would leave a thinner wall, a sliver or a knife-sharp edge along its rim is flagged before it is made (you can still cut it anyway). Follows the printer until set."><span class="lbl">Thinnest piece</span><input type="number" id="minPiece" min="0.2" step="0.1" value="1.2" aria-label="The thinnest a piece may be after a cut"><span class="unit">mm</span></label><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div>
@@ -3121,6 +3121,41 @@ const KMCore = (() => {
     }
     const ids = new Map(); for (let t = 0; t < nt; t++) { if (!ids.has(label[t])) ids.set(label[t], ids.size); groupOf[t] = ids.get(label[t]); }
     return ids.size;
+  }
+  // (1.84) Sections are pieces of parts (the owner: "sections should be more sectional like sections or smaller pieces
+  // of defined parts, where a section is where a border or otherwise detectable delineation in a single part is"): the
+  // crease sections (`segmentSurface`) laid over the parts (`segmentParts`, or `opts.parts`, a groupOf), so a section
+  // never runs from one part into another (a sleeve's band never takes in the cape over it); a piece under the speck
+  // size melts into the neighbour in the same part it shares most border with, or stays when it is a whole small part.
+  function segmentSections(P, I, opts = {}) {
+    const nt = I.length / 3, pairs = trianglePairs(I);
+    const parts = opts.parts || segmentParts(P, I, opts.partsOpts || {}).groupOf;
+    const sec = segmentSurface(P, I, opts);
+    const A = new Float64Array(nt); let total = 0;
+    for (let t = 0; t < nt; t++) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]); A[t] = Math.hypot(n[0], n[1], n[2]) / 2; total += A[t]; }
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < pairs.length; i += 4) { const a = pairs[i], b = pairs[i + 1]; if (parts[a] === parts[b] && sec.groupOf[a] === sec.groupOf[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
+    const limit = total * (opts.minFrac === undefined ? 0.003 : opts.minFrac) * 0.5;
+    for (let pass = 0; pass < 8; pass++) { // specks the overlay leaves along a part's border melt within their part
+      const area = new Map(); for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
+      const nb = new Map();
+      for (let i = 0; i < pairs.length; i += 4) {
+        const a = pairs[i], b = pairs[i + 1]; if (parts[a] !== parts[b]) continue; const x = find(a), y = find(b); if (x === y) continue;
+        const l = Math.hypot(P[3 * pairs[i + 2]] - P[3 * pairs[i + 3]], P[3 * pairs[i + 2] + 1] - P[3 * pairs[i + 3] + 1], P[3 * pairs[i + 2] + 2] - P[3 * pairs[i + 3] + 2]);
+        for (const [u, w] of [[x, y], [y, x]]) { if (area.get(u) >= limit) continue; let m = nb.get(u); if (!m) nb.set(u, m = new Map()); m.set(w, (m.get(w) || 0) + l); }
+      }
+      let merged = 0, touched = new Set();
+      for (const [u, m] of [...nb].sort((p, q) => area.get(p[0]) - area.get(q[0]))) { if (touched.has(u) || find(u) !== u) continue; let best = -1, bl = 0; for (const [w, l] of m) if (l > bl && !touched.has(find(w))) { bl = l; best = find(w); } if (best < 0 || best === u) continue; par[u] = best; touched.add(best); merged++; }
+      if (!merged) break;
+    }
+    const groupOf = new Int32Array(nt), ids = new Map(); for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
+    unpinchGroups(P, I, groupOf);
+    const out = bordersFromGroups(P, I, groupOf);
+    out.areas = new Array(out.count).fill(0); for (let t = 0; t < nt; t++) out.areas[out.groupOf[t]] += A[t];
+    if (sec.hard) out.hard = sec.hard;
+    out.parts = parts;
+    return out;
   }
   function segmentSurface(P, I, opts = {}) {
     const angle = opts.angle === undefined ? 35 : opts.angle, minFrac = opts.minFrac === undefined ? 0.003 : opts.minFrac, fold = opts.fold;
@@ -8173,7 +8208,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh,
+    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh, segmentSections,
   };
 })();
 
@@ -11443,7 +11478,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     return '';
   }
   function renderToolGrid() {
-    for (const b of toolPanel.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', b.dataset.tool === state.tool ? 'true' : 'false');
+    for (const b of toolPanel.querySelectorAll('.tool[data-tool]')) b.setAttribute('aria-pressed', b.dataset.tool === state.tool ? 'true' : 'false');
+    { const pc = $('#pickClickBtn'), pb = $('#paintBtn'); if (pc) pc.setAttribute('aria-pressed', state.paint.on ? 'false' : 'true'); if (pb) pb.setAttribute('aria-pressed', state.paint.on ? 'true' : 'false'); } // (1.84) Regions and Paint are one tool: Pick by Click | Brush
     const help = toolHelp(), hp = $('#toolHelp'); hp.textContent = help; hp.hidden = !help;
     const p = selectedPart();
     const sp = $('#suggestPanel'); sp.hidden = state.tool !== 'suggest' || !p; sp.innerHTML = sp.hidden ? '' : suggestSection();
@@ -11459,7 +11495,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   function syncTool() {
     const was = state.tool;
     const sg = state.suggest, regionSuggested = sg && sg.partId === state.selectedId && sg.active >= 0 && sg.items[sg.active] && sg.items[sg.active].kind === 'region';
-    if (state.regions.on) { if (state.paint.on) state.tool = 'paint'; else if (state.draw.on) state.tool = 'draw'; else if (!(was === 'suggest' && regionSuggested)) state.tool = 'regions'; }
+    if (state.regions.on) { if (state.paint.on) state.tool = 'regions'; else if (state.draw.on) state.tool = 'draw'; else if (!(was === 'suggest' && regionSuggested)) state.tool = 'regions'; }
     else if (was === 'regions' || was === 'paint' || was === 'draw') state.tool = 'plane';
     renderToolGrid();
     if (state.tool !== was) renderInspector();
@@ -11473,7 +11509,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     }
     if (state.here.on) setHere(false);
     if (state.across.on) setAcross(false);
-    if (state.tool === tool && tool !== 'paint' && tool !== 'draw') return;
+    if (state.tool === tool && tool !== 'paint' && tool !== 'draw' && !(tool === 'regions' && state.paint.on)) return;
     if (state.tool === 'shape' && tool !== 'shape' && p && p.shape) refreshView(p.id); // the shape's mesh goes back to the part's own positions
     if (tool === 'suggest') { const sg = state.suggest, it = sg && p && sg.partId === p.id && sg.active >= 0 ? sg.items[sg.active] : null; state.suggestPlane = !!(it && it.kind !== 'shells' && it.kind !== 'region'); } // the plane comes once a suggestion, a spot or a line has placed it
     clearShellPick();
@@ -11487,7 +11523,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
         else if (tool === 'draw') { if (state.paint.on) setPainting(false); if (!state.draw.on) setDrawing(true); }
         else { if (state.paint.on) setPainting(false); if (state.draw.on) setDrawing(false); }
       } else if (state.regions.on) setRegions(false);
-      state.tool = tool;
+      state.tool = tool === 'paint' ? 'regions' : tool; // (1.84) the brush is a way of picking in the Regions tool
       selectPartSplitPreview(); updatePreview(); attachGizmo(); placeAreaTags(); renderInspector(); updateHint(); markDirty();
     };
     if ((tool === 'regions' || tool === 'paint' || tool === 'draw') && !state.regions.on) { state.tool = tool; startRegions(go); } // the plane steps aside at once, and the parts are found off the main thread
@@ -11727,7 +11763,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     }
     return keyStatus;
   }
-  const TOOL_NAMES = { select: 'Select', plane: 'Plane', regions: 'Regions', paint: 'Paint', draw: 'Draw', suggest: 'Suggest', bed: 'Fit bed', shape: 'Shapes', boolean: 'Boolean', sculpt: 'Sculpt' };
+  const TOOL_NAMES = { select: 'Select', plane: 'Plane', regions: 'Regions', paint: 'Regions', draw: 'Draw', suggest: 'Suggest', bed: 'Fit bed', shape: 'Shapes', boolean: 'Boolean', sculpt: 'Sculpt' };
   const TYPE_NAMES = { peg: 'Pegs', dowel: 'Dowels', magnet: 'Magnets', plug: 'Plug', none: 'None' };
   function jointSummary(c) {
     if (c.type === 'none') return 'None';
@@ -12081,7 +12117,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
      with dark lines on the borders. The cut preview steps aside while they show; results are kept per part
      and threshold. */
   const regionCache = new Map();
-  const regionsKey = (p) => (state.regions.by === 'form' ? `${p.id}:form:${state.regions.detail || 'balanced'}` : `${p.id}:${state.regions.angle}:${state.regions.fold}:${state.regions.minFrac}`);
+  const partsKey = (p) => `${p.id}:form:${state.regions.detail || 'balanced'}`;
+  const regionsKey = (p) => (state.regions.by === 'form' ? partsKey(p) : `${p.id}:${state.regions.angle}:${state.regions.fold}:${state.regions.minFrac}:${state.regions.detail || 'balanced'}`); // (1.84: sections lie within the parts, so they follow Detail too)
   const sdfCache = new Map(); // the thickness under each part's surface, the slow half of finding its form, kept while the part stands
   /* Heavy core work off the main thread: a worker built from the page's own core script (the same code, no second
      copy), so finding the parts of a big sculpt no longer freezes the view and the busy sign keeps turning. When
@@ -12143,11 +12180,15 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     if (regionCache.has(key)) return regionCache.get(key);
     let seg;
     const a = analysisOf(p);
-    if (state.regions.by === 'form') {
-      seg = await coreTask('segmentParts', [a.P, p.indices, { ...regionOpts(), sdf: sdfCache.get(p.id) || null }]);
-      if (seg.sdf && !sdfCache.has(p.id)) sdfCache.set(p.id, seg.sdf);
-    } else seg = await coreTask('segmentSurface', [a.P, p.indices, regionOpts()]);
-    seg = scaledSeg(seg, a.f);
+    let parts = regionCache.get(partsKey(p));
+    if (!parts) {
+      const d = DETAIL[state.regions.detail || 'balanced'];
+      parts = await coreTask('segmentParts', [a.P, p.indices, { ...d, sdf: sdfCache.get(p.id) || null }]);
+      if (parts.sdf && !sdfCache.has(p.id)) sdfCache.set(p.id, parts.sdf);
+      parts = scaledSeg(parts, a.f); regionCache.set(partsKey(p), parts);
+    }
+    if (state.regions.by === 'form') seg = parts;
+    else seg = scaledSeg(await coreTask('segmentSections', [a.P, p.indices, { ...regionOpts(), parts: parts.groupOf }]), a.f); // (1.84) sections are pieces of the parts
     regionCache.set(key, seg);
     return seg;
   }
@@ -12155,11 +12196,13 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const key = regionsKey(p);
     if (!regionCache.has(key)) {
       const a = analysisOf(p);
-      if (state.regions.by === 'form') {
-        const seg = K.segmentParts(a.P, p.indices, { ...regionOpts(), sdf: sdfCache.get(p.id) || null });
+      let parts = regionCache.get(partsKey(p));
+      if (!parts) {
+        const seg = K.segmentParts(a.P, p.indices, { ...DETAIL[state.regions.detail || 'balanced'], sdf: sdfCache.get(p.id) || null });
         if (seg.sdf && !sdfCache.has(p.id)) sdfCache.set(p.id, seg.sdf);
-        regionCache.set(key, scaledSeg(seg, a.f));
-      } else regionCache.set(key, scaledSeg(K.segmentSurface(a.P, p.indices, regionOpts()), a.f));
+        parts = scaledSeg(seg, a.f); regionCache.set(partsKey(p), parts);
+      }
+      if (state.regions.by !== 'form') regionCache.set(key, scaledSeg(K.segmentSections(a.P, p.indices, { ...regionOpts(), parts: parts.groupOf }), a.f));
     }
     return regionCache.get(key);
   }

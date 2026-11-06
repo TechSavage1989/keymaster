@@ -1121,6 +1121,10 @@ console.log('form: the parts of a figure by thickness');
     const req = { loops: K.groupLoops(P, I, ps, [armR]), regions: [armR], seg: { groupOf: ps.groupOf, count: ps.count, borders: ps.borders, areas: ps.areas }, cfg: { type: 'none' }, minThickness: 0.8, sink: 0, perArea: 1, numberJoints: false, joint: 1, smooth: true };
     const pk = K.planPick(P, I, req), parts = pk.result ? pk.result.parts : [], vol = parts.reduce((a, q) => a + q.volume, 0);
     check('splitting off the arm with its flat end gives sealed pieces whose volumes add up', parts.length === 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002, { error: pk.error, n: parts.length, vol }); }
+  // (1.84) sections are pieces of parts: laid over the parts, no section holds triangles of two parts
+  { const sc = K.segmentSections(P, I, { fold: 30, angle: 52, minFrac: 0.003, parts: ps.groupOf }), one = new Map();
+    let crossing = 0; for (let t = 0; t < nt; t++) { const g = sc.groupOf[t]; if (!one.has(g)) one.set(g, ps.groupOf[t]); else if (one.get(g) !== ps.groupOf[t]) crossing++; }
+    check('every section lies within one part, and there are at least as many sections as parts', crossing === 0 && sc.count >= ps.count && K.edgeReport(I).closed, { crossing, sections: sc.count, parts: ps.count }); }
   // a dip is not a part: a block with a round hollow pressed into its top
   { const block = K.shapeMesh({ kind: 'cube', w: 30, d: 30, h: 20, segments: 24 });
     const dent = K.booleanShape(block.positions, block.indices, { kind: 'ball', w: 16, h: 16, pos: [0, 0, 12], rot: [0, 0, 0], segments: 28 }, 'difference');

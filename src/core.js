@@ -2397,6 +2397,41 @@ const KMCore = (() => {
     const ids = new Map(); for (let t = 0; t < nt; t++) { if (!ids.has(label[t])) ids.set(label[t], ids.size); groupOf[t] = ids.get(label[t]); }
     return ids.size;
   }
+  // (1.84) Sections are pieces of parts (the owner: "sections should be more sectional like sections or smaller pieces
+  // of defined parts, where a section is where a border or otherwise detectable delineation in a single part is"): the
+  // crease sections (`segmentSurface`) laid over the parts (`segmentParts`, or `opts.parts`, a groupOf), so a section
+  // never runs from one part into another (a sleeve's band never takes in the cape over it); a piece under the speck
+  // size melts into the neighbour in the same part it shares most border with, or stays when it is a whole small part.
+  function segmentSections(P, I, opts = {}) {
+    const nt = I.length / 3, pairs = trianglePairs(I);
+    const parts = opts.parts || segmentParts(P, I, opts.partsOpts || {}).groupOf;
+    const sec = segmentSurface(P, I, opts);
+    const A = new Float64Array(nt); let total = 0;
+    for (let t = 0; t < nt; t++) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2]; const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]); A[t] = Math.hypot(n[0], n[1], n[2]) / 2; total += A[t]; }
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < pairs.length; i += 4) { const a = pairs[i], b = pairs[i + 1]; if (parts[a] === parts[b] && sec.groupOf[a] === sec.groupOf[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
+    const limit = total * (opts.minFrac === undefined ? 0.003 : opts.minFrac) * 0.5;
+    for (let pass = 0; pass < 8; pass++) { // specks the overlay leaves along a part's border melt within their part
+      const area = new Map(); for (let t = 0; t < nt; t++) { const r = find(t); area.set(r, (area.get(r) || 0) + A[t]); }
+      const nb = new Map();
+      for (let i = 0; i < pairs.length; i += 4) {
+        const a = pairs[i], b = pairs[i + 1]; if (parts[a] !== parts[b]) continue; const x = find(a), y = find(b); if (x === y) continue;
+        const l = Math.hypot(P[3 * pairs[i + 2]] - P[3 * pairs[i + 3]], P[3 * pairs[i + 2] + 1] - P[3 * pairs[i + 3] + 1], P[3 * pairs[i + 2] + 2] - P[3 * pairs[i + 3] + 2]);
+        for (const [u, w] of [[x, y], [y, x]]) { if (area.get(u) >= limit) continue; let m = nb.get(u); if (!m) nb.set(u, m = new Map()); m.set(w, (m.get(w) || 0) + l); }
+      }
+      let merged = 0, touched = new Set();
+      for (const [u, m] of [...nb].sort((p, q) => area.get(p[0]) - area.get(q[0]))) { if (touched.has(u) || find(u) !== u) continue; let best = -1, bl = 0; for (const [w, l] of m) if (l > bl && !touched.has(find(w))) { bl = l; best = find(w); } if (best < 0 || best === u) continue; par[u] = best; touched.add(best); merged++; }
+      if (!merged) break;
+    }
+    const groupOf = new Int32Array(nt), ids = new Map(); for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
+    unpinchGroups(P, I, groupOf);
+    const out = bordersFromGroups(P, I, groupOf);
+    out.areas = new Array(out.count).fill(0); for (let t = 0; t < nt; t++) out.areas[out.groupOf[t]] += A[t];
+    if (sec.hard) out.hard = sec.hard;
+    out.parts = parts;
+    return out;
+  }
   function segmentSurface(P, I, opts = {}) {
     const angle = opts.angle === undefined ? 35 : opts.angle, minFrac = opts.minFrac === undefined ? 0.003 : opts.minFrac, fold = opts.fold;
     const keepCreased = opts.keepCreased !== undefined ? !!opts.keepCreased : fold !== undefined; // (1.72) with a fold, regions creased all round are kept
@@ -7448,7 +7483,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh,
+    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh, segmentSections,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
