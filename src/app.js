@@ -30,7 +30,7 @@
     flat: true, // show faces: flat shading, so every face of the mesh shows (the owner wants this by default)
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, numberJoints: false, smoothCut: true, sliceDrawn: true },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, numberJoints: false, smoothCut: true, sliceDrawn: true, minPiece: 0 },
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, by: 'form', detail: 'balanced', ratio: 1.35, size: 55, ...sectionOpts(55), hover: null }; // by: 'form' (the thickness under the surface) or 'folds' (where it turns inward)
@@ -607,10 +607,12 @@
   function pointKeys() { return ['peg', 'dowel', 'magnet'].includes(state.cfg.type); }
   function plugsShown() { const shown = new Set(shownAreas()); return state.cut.plugs.filter(q => shown.has(q.region) && !state.cut.skip.has(q.region)); }
   // The thinnest a piece may be: the Wall setting, and never more than the printer handles reliably.
-  function minWall() {
+  function minWall() { // (1.83) the thinnest a piece may be after a cut: the Thinnest piece setting, or the Wall setting capped at the printer's wall
+    if (state.cfg.minPiece > 0) return state.cfg.minPiece;
     const pr = K.PRINTERS[state.cfg.printer === 'resin' ? 'resin' : 'fdm'].wall;
     return state.cfg.margin > 0 ? Math.min(state.cfg.margin, pr) : pr;
   }
+  function syncMinPiece() { const el = $('#minPiece'); if (el && document.activeElement !== el) el.value = +minWall().toFixed(2); }
   // Areas that would leave a sliver too thin to print, among those listed and set to be cut.
   function thinShown() {
     const shown = new Set(shownAreas());
@@ -2755,7 +2757,7 @@
     const run = ++pickRun, seg = K.selectionSeg(p.positions, p.indices, state.paint.sel);
     coreTask('planJoints', [p.positions, p.indices, pickReq(loops, { regions: [1], seg, painted: true })]).then((j) => {
       if (run !== pickRun || state.regions.pick !== pick) return;
-      pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths;
+      pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths; pick.cover = j.cover || null;
       pick.keys = j.perLoop.flatMap(per => per.keys); pick.plugs = j.perLoop.flatMap(per => per.plugs);
       pick.noKeys = noKeysText(j.noKeys, j.loops.length > 1);
       drawPickLines(p, pick); renderPick(); markDirty();
@@ -3676,7 +3678,7 @@
       case 'sizemode': c.sizeMode = val; state.cut.auto = true; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
       case 'printer': {
         const pr = K.PRINTERS[val];
-        c.printer = val; c.sizeMin = pr.min; c.clearance = pr.gap; c.margin = pr.wall;
+        c.printer = val; c.sizeMin = pr.min; c.clearance = pr.gap; c.margin = pr.wall; c.minPiece = 0; syncMinPiece();
         savePrefs(); renderInspector();
         toast(val === 'resin' ? 'Set up for resin: keys down to 1 mm, 0.1 mm gap, 0.8 mm walls.' : 'Set up for filament: keys down to 2.5 mm, 0.2 mm gap, 1.2 mm walls.');
         break;
@@ -4106,7 +4108,8 @@
     let areaPick = 0, big = 0;
     if (prev.regions && !prev.painted) for (const x of prev.regions) areaPick += seg.areas[x] || 0;
     for (let k = 0; k < seg.count; k++) if (seg.areas[k] > seg.areas[big]) big = k;
-    const huge = g === big || (areaPick > 0 && seg.areas[g] > 4 * areaPick);
+    let total = 0; for (let k = 0; k < seg.count; k++) total += seg.areas[k] || 0;
+    const huge = g === big || (areaPick > 0 && seg.areas[g] > 4 * areaPick && seg.areas[g] > 0.2 * total); // (1.83: a body-sized region; a hand bigger than the sleeve picked first is added whole)
     if (!prev.painted && !huge) return null; // a region added to regions, as before
     let sel;
     try { sel = (prev.selection || pickSelection(p, prev)).slice(); } catch (err) { return null; }
@@ -4238,6 +4241,7 @@
     // owner saw no keys at all until it was done
     const done = coreTask('planJoints', [p.positions, p.indices, req]).then((joints) => {
       if (!live()) return null;
+      pick.cover = joints.cover || null; if (pick.comp) pick.comp = null;
       if (joints.paths) pick.paths = joints.paths; else { pick.loops = joints.loops; pick.loop = joints.loops[0]; } // a sliced pick's lines run through new vertices: drawn from their points, and the pick keeps the lines on the part itself
       pick.perLoop = joints.perLoop; pick.frames = joints.frames; pick.draw = joints.draw;
       pick.keys = joints.perLoop.flatMap(per => per.keys); pick.plugs = joints.perLoop.flatMap(per => per.plugs);
@@ -4330,7 +4334,8 @@
     const picked = new Set(pick && pick.partId === p.id && pick.regions && !pick.painted ? pick.regions : []); // a painted pick's [1] names its own two-region labelling, not the part's regions
     // lines picked by hand: the piece they would split off (side 1, the smaller side) is tinted, kept on the pick
     let lineSel = null;
-    if (pick && pick.partId === p.id && pick.painted && pick.selection && !state.paint.on) lineSel = pick.selection; // a filled pick: its own selection, not the part's regions
+    if (pick && pick.partId === p.id && pick.cover && !state.paint.on) lineSel = pick.cover; // (1.83) a limb's flat end: what the cut will take, past the regions picked
+    else if (pick && pick.partId === p.id && pick.painted && pick.selection && !state.paint.on) lineSel = pick.selection; // a filled pick: its own selection, not the part's regions
     else if (pick && pick.partId === p.id && !pick.regions && !pick.painted && pick.loops && pick.loops.length && pick.loops.every(l => l.closed)) {
       if (pick.tintSel === undefined) { try { pick.tintSel = K.loopSelection(p.positions, p.indices, pick.loops); } catch (err) { pick.tintSel = null; } }
       lineSel = pick.tintSel;
@@ -4347,7 +4352,7 @@
     const anyPick = picked.size > 0 || lineSel !== null, dim = anyPick ? 0.78 : 1;
     let comp = null;
     if (anyPick) {
-      const key = lineSel ? 'lines' : [...picked].sort((x, y) => x - y).join(',');
+      const key = lineSel ? (pick.cover ? 'cover' : 'lines') : [...picked].sort((x, y) => x - y).join(',');
       if (!pick.comp || pick.comp.key !== key) { try { pick.comp = { key, ...K.pickComponents(p.positions, p.indices, seg.groupOf, picked, lineSel) }; } catch (err) { pick.comp = { key, label: null, count: 1 }; } }
       comp = pick.comp;
     }
@@ -4706,6 +4711,12 @@
     state.cfg.smoothCut = !!e.target.checked;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
   });
+  $('#minPiece').addEventListener('change', (e) => {
+    const v = +e.target.value; state.cfg.minPiece = v > 0 ? Math.min(20, v) : 0; syncMinPiece(); savePrefs();
+    const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
+    if (p && planeShown()) scheduleAnalysis(0);
+  });
+  syncMinPiece();
   $('#sinkDepth').addEventListener('change', (e) => {
     state.cfg.sink = Math.max(0, +e.target.value || 0); e.target.value = state.cfg.sink;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);

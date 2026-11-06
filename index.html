@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.82, build b35cf5. After an update, refresh the page and check this changes.">v1.82 · b35cf5</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.83, build e5568d. After an update, refresh the page and check this changes.">v1.83 · e5568d</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -663,7 +663,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
     <div class="rp-row rp-by"><span class="lbl">Find</span><div class="seg" role="group" aria-label="Find"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="Parts: the figure's parts (head, arms, legs, torso, a weapon, a base), told apart by how thick the solid is, sized by Detail">Parts</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Sections: the surface split wherever it folds inward by more than the angle below (sleeves, collars, belts, cuffs, armour plates)">Sections</button></div><output id="regionsCount"></output></div>
     <div class="rp-row rp-ratio"><span class="lbl" title="How finely the model is split into parts">Detail</span><div class="seg" role="group" aria-label="Detail" id="regionsDetail"><button type="button" data-act="regions-detail" data-value="coarse" aria-pressed="false" title="Only the big parts: head, limbs, body, base">Big</button><button type="button" data-act="regions-detail" data-value="balanced" aria-pressed="true" title="The parts a kit would have: head, hands, feet, hat, clothing">Balanced</button><button type="button" data-act="regions-detail" data-value="fine" aria-pressed="false" title="Smaller parts too: ears, fingers, buttons, straps">Fine</button></div></div>
     <div class="rp-row rp-fold" hidden><label class="slider" title="How big the sections are: left for a few large ones, right for many small ones (the surface is split where it creases, and where a hard surface such as a book or a buckle meets cloth or skin)"><span class="lbl">Section size</span><input type="range" id="regionsAngle" min="0" max="100" step="5" value="55" aria-label="Section size, from large (left) to small (right)"><output id="regionsAngleOut">Medium</output></label></div>
-    <div class="btn-row"><label class="inline-num" title="Push the cut face this far into the other piece, with a wall down from the line, so the piece keeps its thickness to the edge. 0 turns it off."><span class="lbl">Sink face</span><input type="number" id="sinkDepth" min="0" step="0.2" value="1" aria-label="Sink the cut face into the other piece by this much"><span class="unit">mm</span></label><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div>
+    <div class="btn-row"><label class="inline-num" title="Push the cut face this far into the other piece, with a wall down from the line, so the piece keeps its thickness to the edge. 0 turns it off."><span class="lbl">Sink face</span><input type="number" id="sinkDepth" min="0" step="0.2" value="1" aria-label="Sink the cut face into the other piece by this much"><span class="unit">mm</span></label><label class="inline-num" title="No piece may be thinner than this after a cut: a cut that would leave a thinner wall, a sliver or a knife-sharp edge along its rim is flagged before it is made (you can still cut it anyway). Follows the printer until set."><span class="lbl">Thinnest piece</span><input type="number" id="minPiece" min="0.2" step="0.1" value="1.2" aria-label="The thinnest a piece may be after a cut"><span class="unit">mm</span></label><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div>
     <div id="paintTools" class="paint-tools" hidden>
       <div class="btn-row"><label class="inline-num" title="Brush size"><span class="lbl">Brush</span><input type="number" id="brushSize" min="0.2" step="0.5" value="3" aria-label="Brush size in millimetres"><span class="unit">mm</span></label><input type="range" id="brushSlider" class="brush-slider" min="0" max="100" step="1" value="40" aria-label="Brush size" title="Brush size: drag to change ([ and ] too)"><button class="btn small" id="eraseBtn" aria-pressed="false" title="Erase paint instead of adding it (or hold Shift while painting)">Erase</button><button class="btn small" id="brushModeBtn" data-act="paint-mode" aria-pressed="false" title="Surface follows connected faces and stops at the edge of a layer; Sphere paints every face within reach, layers behind included">Surface</button><button class="btn small" id="fillBtn" data-act="paint-fill" aria-pressed="false" title="A click paints the whole surface region under the brush">Fill</button></div>
       <div class="btn-row"><button class="btn small" data-act="paint-grow" title="Grow the painted area outward by one brush width">Grow</button><button class="btn small" data-act="paint-shrink" title="Shrink the painted area by one brush width">Shrink</button><button class="btn small" data-act="paint-tidy" title="Smooth the painted area's edge: drop thin tongues and fill notches">Tidy edge</button><button class="btn small" data-act="paint-fill-gaps" title="Fill the gaps in the paint: channels narrower than the brush between painted pieces, and every patch the paint surrounds">Fill gaps</button><button class="btn small" data-act="paint-snap" title="Snap the paint to the surface regions: a region at least half painted is painted whole, the rest cleared">Snap to borders</button><button class="btn small" data-act="paint-clear" title="Remove all paint">Clear</button><button class="btn small" id="isolateBtn" data-act="paint-isolate" aria-pressed="false" title="Hide everything but the painted area, so the rest of the model stays out of the way of the brush and clicks">Isolate</button></div>
@@ -2338,6 +2338,37 @@ const KMCore = (() => {
     for (const a of principalAxes(P)) if (dirs.every(d => Math.abs(d[0] * a[0] + d[1] * a[1] + d[2] * a[2]) < 0.97)) dirs.push(a);
     return dirs;
   }
+  // (1.83) eigenvalues and vectors of a symmetric 3×3 [xx, xy, xz, yy, yz, zz] (Jacobi), largest first
+  function symEig3(c) {
+    const a = [[c[0], c[1], c[2]], [c[1], c[3], c[4]], [c[2], c[4], c[5]]], V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    for (let it = 0; it < 60; it++) {
+      let p = 0, q = 1; for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) if (Math.abs(a[i][j]) > Math.abs(a[p][q])) { p = i; q = j; }
+      if (Math.abs(a[p][q]) < 1e-18) break;
+      const th = 0.5 * Math.atan2(2 * a[p][q], a[q][q] - a[p][p]), cs = Math.cos(th), sn = Math.sin(th);
+      for (let k = 0; k < 3; k++) { const x = a[k][p], y = a[k][q]; a[k][p] = cs * x - sn * y; a[k][q] = sn * x + cs * y; }
+      for (let k = 0; k < 3; k++) { const x = a[p][k], y = a[q][k]; a[p][k] = cs * x - sn * y; a[q][k] = sn * x + cs * y; }
+      for (let k = 0; k < 3; k++) { const x = V[k][p], y = V[k][q]; V[k][p] = cs * x - sn * y; V[k][q] = sn * x + cs * y; }
+    }
+    return [0, 1, 2].map(i => ({ l: a[i][i], v: [V[0][i], V[1][i], V[2][i]] })).sort((x, y) => y.l - x.l);
+  }
+  // (1.83) A surface patch shaped like a tube (a sleeve, a leg, a forearm): longer than it is wide, and its faces
+  // turning all the way round its long axis (the normals' spread has almost nothing along that axis and plenty in both
+  // directions across it). A cape over the shoulders, a belt round the waist or a panel of a coat is not: a cape's
+  // normals point up as much as round, a belt is longest across its own axis, a panel faces one way.
+  // `s` holds the area-weighted sums [A, Σx(3), Σxxᵀ(6), Σnnᵀ(6)].
+  function tubeLike(s, short) { return !!tubeAxis(s, short); }
+  // the tube's axis (the direction its normals lack), or null; `short`: a stub of a tube, so no length is asked for
+  function tubeAxis(s, short) {
+    const A = s[0]; if (!(A > 0)) return null;
+    const m = [s[1] / A, s[2] / A, s[3] / A];
+    const c = [s[4] / A - m[0] * m[0], s[5] / A - m[0] * m[1], s[6] / A - m[0] * m[2], s[7] / A - m[1] * m[1], s[8] / A - m[1] * m[2], s[9] / A - m[2] * m[2]];
+    const e = symEig3(c), en = symEig3([s[10] / A, s[11] / A, s[12] / A, s[13] / A, s[14] / A, s[15] / A]);
+    if (!(en[2].l <= 0.13 && en[1].l >= 0.3)) return null;
+    if (short) return en[2].v;
+    if (!(e[1].l > 0) || e[0].l < 1.8 * e[1].l) return null;
+    const ax = e[0].v, nn = en[2].v, align = Math.abs(ax[0] * nn[0] + ax[1] * nn[1] + ax[2] * nn[2]);
+    return align >= 0.85 ? nn : null;
+  }
   function principalAxes(P) { // eigenvectors of the vertex covariance, by power iteration with deflation
     const n = P.length / 3, step = Math.max(1, Math.floor(n / 20000));
     let mx = 0, my = 0, mz = 0, c = 0;
@@ -3534,7 +3565,7 @@ const KMCore = (() => {
       if (propRoot[b.r] || propRoot[b.s] || kindsDiffer(b.r, b.s)) return 1; // (1.78, 1.79) a made object against a sculpted one is always a part boundary
       return Math.max(concave, step, neck, b.len > 0 ? b.hard / b.len : 0); // (1.74) a border all along where a hard surface meets an organic one is a part boundary
     };
-    const melt = (limit, pickWeakest) => { // regions under `limit` of the area go into a neighbour: the one sharing the most border, or the weakest border
+    const melt = (limit, pickWeakest, keep) => { // regions under `limit` of the area go into a neighbour: the one sharing the most border, or the weakest border
       for (let pass = 0; pass < 30; pass++) {
         const st = stats(), by = new Map();
         for (const b of st.border.values()) { if (!by.has(b.r)) by.set(b.r, []); if (!by.has(b.s)) by.set(b.s, []); by.get(b.r).push(b); by.get(b.s).push(b); }
@@ -3554,7 +3585,7 @@ const KMCore = (() => {
           for (const b of bs) { const o = find(b.r === g ? b.s : b.r); if (o === g) continue; allLen += b.len; if (propRoot[o]) { propLen += b.len; if (b.len > bpl) { bpl = b.len; bestProp = o; } } }
           if (bestProp !== null && propLen >= 0.4 * allLen) { join(g, bestProp); touched.add(find(bestProp)); merged++; continue; }
           const anyPlain = propLen < allLen;
-          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; if (anyPlain && propRoot[find(o)]) continue; const sb = pickWeakest ? strength(b, st) : 0; /* (1.79: a strong border no longer stops a small region melting by itself; a part attached by a narrow contact is kept below) */ if ((kindsDiffer(g, o) || (b.len > 0 && b.hard / b.len >= 0.5)) && st.area.get(g) >= 0.0001 * total) continue; /* (1.75, 1.78) never across hard to organic, by region or by edge */ /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
+          for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; if (anyPlain && propRoot[find(o)]) continue; if (keep && (keep.has(g) || keep.has(find(o))) && !keep.tubeWith(g, find(o))) continue; /* (1.83) a limb only joins, or takes in, more of itself */ const sb = pickWeakest ? strength(b, st) : 0; /* (1.79: a strong border no longer stops a small region melting by itself; a part attached by a narrow contact is kept below) */ if ((kindsDiffer(g, o) || (b.len > 0 && b.hard / b.len >= 0.5)) && st.area.get(g) >= 0.0001 * total) continue; /* (1.75, 1.78) never across hard to organic, by region or by edge */ /* never across a clear part boundary, unless a speck */ const v = pickWeakest ? -(b.turn / (b.len || 1)) - 0.1 * sb : b.len; if (v > bv) { bv = v; best = o; } } // (1.72) into the neighbour it flows into most smoothly: a strip of robe beside a book belongs to the robe, which it meets at a gentle fold, not to the book it meets at a right angle
           // (1.72) a small part clearly bounded all round (its weakest border still a crease or a step well past
           // `strong`: a hand lying on a book, a clasp) stays a part: the owner's picks "grabbed too much" when such
           // parts melted into what they touch. Only a speck under a tenth of the limit goes regardless.
@@ -3565,7 +3596,7 @@ const KMCore = (() => {
             let weak = Infinity, per = 0; for (const b of bs) { const o = b.r === g ? b.s : b.r; if (find(o) === g) continue; weak = Math.min(weak, strength(b, st)); if (!propRoot[find(o)]) per += b.len; }
             if (weak >= keepStrong && per < 0.7 * 2 * Math.sqrt(Math.PI * st.area.get(g))) continue;
           }
-          if (best !== null) { join(g, best); touched.add(find(best)); merged++; }
+          if (best !== null) { if (keep) keep.joined(g, find(best)); join(g, best); touched.add(find(best)); merged++; }
         }
         if (!merged) return;
       }
@@ -3582,7 +3613,23 @@ const KMCore = (() => {
       if (!weakest) break;
       join(weakest.s, weakest.r);
     }
-    melt(total * minFrac, true); // what is left small joins the neighbour it is least separated from
+    // (1.83) a limb stays a part: a tube-shaped region (a sleeve, a leg) at least `keepArea` is never melted for being small.
+    // At Balanced the owner's sleeves (1.3% and 1.5% of the surface) went into the capelet and the coat's back
+    const tubes = new Set();
+    if (opts.tubes !== false) {
+      const acc = new Map();
+      for (let t = 0; t < nt; t++) {
+        const r = find(t); let s = acc.get(r); if (!s) acc.set(r, s = new Float64Array(16));
+        const a = A[t], x = C[3 * t], y = C[3 * t + 1], z = C[3 * t + 2], u = N[3 * t], v = N[3 * t + 1], w = N[3 * t + 2];
+        s[0] += a; s[1] += a * x; s[2] += a * y; s[3] += a * z; s[4] += a * x * x; s[5] += a * x * y; s[6] += a * x * z; s[7] += a * y * y; s[8] += a * y * z; s[9] += a * z * z;
+        s[10] += a * u * u; s[11] += a * u * v; s[12] += a * u * w; s[13] += a * v * v; s[14] += a * v * w; s[15] += a * w * w;
+      }
+      for (const [r, s] of acc) if (!propRoot[r] && s[0] >= keepArea && s[0] < total * minFrac && tubeLike(s)) tubes.add(r);
+      const both = (a, b) => { const x = acc.get(a), y = acc.get(b), z = new Float64Array(16); for (let k = 0; k < 16; k++) z[k] = (x ? x[k] : 0) + (y ? y[k] : 0); return z; };
+      tubes.tubeWith = (g, o) => tubeLike(both(g, o)); // a sleeve's piece joins the rest of the sleeve, not the cape it meets
+      tubes.joined = (g, o) => { const z = both(g, o); acc.set(o, z); const was = tubes.has(g) || tubes.has(o); tubes.delete(g); if (was && tubeLike(z)) tubes.add(o); else tubes.delete(o); };
+    }
+    melt(total * minFrac, true, tubes); // what is left small joins the neighbour it is least separated from
     const groupOf = new Int32Array(nt), ids = new Map();
     for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
     // (1.79) the props' enclosed islands (a bevel strip between two panels) join them, and leftover slivers melt
@@ -5793,6 +5840,7 @@ const KMCore = (() => {
     // (1.77) the outline's vertices on a sharp edge (a crease of 25° or more, or hard meeting organic) are pinned: the
     // field is held at zero there through the smoothing, so the slice runs through them and never drifts off the seam
     const pinned = sharpEdgeVertices(P, I, seg.borders, (t1, t2) => inT[t1] !== inT[t2], opts.pinDeg || 25, seg.hard || null);
+    if (opts.pin) for (const v of opts.pin) if (cin[v] && cin[v] < cnt[v]) pinned.add(v); // (1.83) a limb's flat end stays exactly where it was cut
     const band = 4 * scale, dist = new Float64Array(nv).fill(Infinity), heap = [];
     const push = (x) => { heap.push(x); let i = heap.length - 1; while (i > 0) { const pI = (i - 1) >> 1; if (heap[pI][0] <= heap[i][0]) break; [heap[pI], heap[i]] = [heap[i], heap[pI]]; i = pI; } };
     const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
@@ -5855,6 +5903,125 @@ const KMCore = (() => {
     if (a1 < 0.75 * a0 || a1 > 1.33 * a0) return null;
     return { P: P2, I: I2, seg: s2, groups: [1], loops: l2, scale, added };
   }
+  // (1.83) A limb ends in a flat cut across it where it meets the body. A sleeve's region ends where the cloth does,
+  // which on the owner's Father Rhinehardt runs up under the capelet: cutting along it left the capelet's rim as knife
+  // flaps on the body and a spike on top of the arm. Here each outline of a region pick that is the root of a tube
+  // (the picked surface near it shaped like a tube, the region across it much bigger) is replaced by the ring of a
+  // plane square to the tube's axis, at the outline's mean height along it, moved into the limb until the ring is the
+  // tube's own (no longer than 1.6 times its girth: the plane must not run into the body or the cape). The surface is
+  // sliced along that ring only (the plane's other rings, through a cape or the coat, are left joined), and the pick
+  // becomes what lies on the limb's side of the ring, reached from the picked triangles without crossing the ring or
+  // the pick's other outlines. Returns { P, I, seg, groups: [1], pin, ends, planes } on the new mesh, or null.
+  function limbEndPick(P, I, seg, groups, opts = {}) {
+    const nt = I.length / 3, nv = P.length / 3, set = new Set(groups), inT = new Uint8Array(nt);
+    let aPick = 0; const A = new Float64Array(nt), C = new Float64Array(3 * nt), N = new Float64Array(3 * nt);
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]), L = Math.hypot(n[0], n[1], n[2]);
+      A[t] = L / 2; for (let k = 0; k < 3; k++) { C[3 * t + k] = (P[a + k] + P[b + k] + P[c + k]) / 3; N[3 * t + k] = L > 0 ? n[k] / L : 0; }
+      if (set.has(seg.groupOf[t])) { inT[t] = 1; aPick += A[t]; }
+    }
+    if (!aPick) return null;
+    let total = 0; for (let t = 0; t < nt; t++) total += A[t];
+    const loops = groupLoops(P, I, seg, groups); if (!loops.length || loops.some(l => !l.closed)) return null;
+    const vt = vertexTriangles(P, I), scale = diag(bounds(P));
+    const pip = (xy, x, y) => { let inside = false; const m = xy.length / 2; for (let i = 0, j = m - 1; i < m; j = i++) { const xi = xy[2 * i], yi = xy[2 * i + 1], xj = xy[2 * j], yj = xy[2 * j + 1]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside; } return inside; };
+    const ringLen = (xy) => { let l = 0; const m = xy.length / 2; for (let i = 0; i < m; i++) { const j = (i + 1) % m; l += Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1]); } return l; };
+    const ends = [], other = [];
+    for (const lp of loops) {
+      const vs = lp.verts, m = vs.length; if (m < 6) { other.push(lp); continue; }
+      let len = 0; const c0 = [0, 0, 0];
+      for (let i = 0; i < m; i++) { const p = 3 * vs[i], q = 3 * vs[(i + 1) % m]; len += Math.hypot(P[p] - P[q], P[p + 1] - P[q + 1], P[p + 2] - P[q + 2]); for (let k = 0; k < 3; k++) c0[k] += P[p + k] / m; }
+      const r0 = len / (2 * Math.PI);
+      // the rest of the part must be much bigger than the pick (the body a limb comes off; a cape or a cuff beside the
+      // outline can be smaller than a whole arm)
+      if (total - aPick < 1.5 * aPick) { other.push(lp); continue; }
+      // the picked surface near the outline must be a tube
+      const s = new Float64Array(16), near = [];
+      for (let t = 0; t < nt; t++) if (inT[t]) {
+        const x = C[3 * t], y = C[3 * t + 1], z = C[3 * t + 2]; if (Math.hypot(x - c0[0], y - c0[1], z - c0[2]) > 2.5 * r0) continue;
+        const a = A[t], u = N[3 * t], v = N[3 * t + 1], w = N[3 * t + 2]; near.push(t);
+        s[0] += a; s[1] += a * x; s[2] += a * y; s[3] += a * z; s[4] += a * x * x; s[5] += a * x * y; s[6] += a * x * z; s[7] += a * y * y; s[8] += a * y * z; s[9] += a * z * z;
+        s[10] += a * u * u; s[11] += a * u * v; s[12] += a * u * w; s[13] += a * v * v; s[14] += a * v * w; s[15] += a * w * w;
+      }
+      const ax0 = near.length >= 30 ? tubeAxis(s, true) : null;
+      if (!ax0) { other.push(lp); continue; }
+      const mu = [s[1] / s[0], s[2] / s[0], s[3] / s[0]];
+      let ax = ax0.slice(); if ((c0[0] - mu[0]) * ax[0] + (c0[1] - mu[1]) * ax[1] + (c0[2] - mu[2]) * ax[2] < 0) ax = ax.map(x => -x); // pointing out of the limb, into the body
+      const rs = near.map(t => { const d = [C[3 * t] - mu[0], C[3 * t + 1] - mu[1], C[3 * t + 2] - mu[2]], h = d[0] * ax[0] + d[1] * ax[1] + d[2] * ax[2]; return Math.hypot(d[0] - h * ax[0], d[1] - h * ax[1], d[2] - h * ax[2]); }).sort((x, y) => x - y);
+      const rT = rs[rs.length >> 1]; if (!(rT > 0)) { other.push(lp); continue; }
+      let sRing = 0; for (const v of vs) sRing += ((P[3 * v] - mu[0]) * ax[0] + (P[3 * v + 1] - mu[1]) * ax[1] + (P[3 * v + 2] - mu[2]) * ax[2]) / m;
+      // the plane's place: from the outline's mean height into the limb, the ring that is the tube's own and meets the
+      // surface most squarely (a sleeve flares where it meets the coat under a cape: a ring through the flare grazes the
+      // surface and leaves a blade on the arm)
+      let found = null;
+      for (let k = 0; k <= 6; k++) { // (at most a radius and a half in: further, a short sleeve would be cut away)
+        const h = sRing - k * 0.25 * rT, o = [mu[0] + h * ax[0], mu[1] + h * ax[1], mu[2] + h * ax[2]];
+        const F = frameFromNormal(ax, o), sec = section(P, I, F, scale); if (sec.error) continue;
+        let best = null, bl = Infinity;
+        for (const L of sec.loops) { if (!pip(L.xy, 0, 0)) continue; const l = ringLen(L.xy); if (l < bl) { bl = l; best = L; } }
+        if (!best || bl > 1.6 * 2 * Math.PI * rT || bl < 0.4 * 2 * Math.PI * rT) continue;
+        const xy = best.xy, mm = xy.length / 2, pts = []; for (let i = 0; i < mm; i += Math.max(1, Math.floor(mm / 120))) pts.push(planePoint(F, xy[2 * i], xy[2 * i + 1]));
+        let graze = 0; for (const v of nearestVertices(P, pts)) { let nx = 0, ny = 0, nz = 0; for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const t = vt.tri[j]; nx += N[3 * t] * A[t]; ny += N[3 * t + 1] * A[t]; nz += N[3 * t + 2] * A[t]; } const L = Math.hypot(nx, ny, nz) || 1; graze += Math.abs((nx * ax[0] + ny * ax[1] + nz * ax[2]) / L); }
+        graze /= pts.length;
+        if (!found || graze < found.graze - 0.05) found = { o, n: ax, F, ring: best, len: bl, graze };
+        if (found.graze <= 0.3) break; // (the first that meets the surface squarely enough: nearer the joint is better)
+      }
+      if (!found) { other.push(lp); continue; }
+      ends.push(found);
+    }
+    if (!ends.length) return null;
+    // the field: each end's plane, signed so the limb's side is positive; one end per limb, so the planes are far apart
+    // and each vertex takes the plane of the end nearest it
+    const f = new Float64Array(nv);
+    for (let v = 0; v < nv; v++) {
+      let bd = Infinity, bi = 0;
+      for (let e = 0; e < ends.length; e++) { const o = ends[e].o, d = Math.hypot(P[3 * v] - o[0], P[3 * v + 1] - o[1], P[3 * v + 2] - o[2]); if (d < bd) { bd = d; bi = e; } }
+      const { o, n } = ends[bi];
+      const dz = (P[3 * v] - o[0]) * n[0] + (P[3 * v + 1] - o[1]) * n[1] + (P[3 * v + 2] - o[2]) * n[2];
+      f[v] = dz === 0 ? 1e-12 * scale : -dz;
+    }
+    // each end's own ring: the triangles it crosses, flooded from those nearest the section's points across crossed neighbours
+    const pr = trianglePairs(I), tnb = new Int32Array(nt + 1); for (let i = 0; i < pr.length; i += 4) { tnb[pr[i] + 1]++; tnb[pr[i + 1] + 1]++; }
+    for (let t = 0; t < nt; t++) tnb[t + 1] += tnb[t];
+    const fill = tnb.slice(0, nt), tto = new Int32Array(tnb[nt]); for (let i = 0; i < pr.length; i += 4) { tto[fill[pr[i]]++] = pr[i + 1]; tto[fill[pr[i + 1]]++] = pr[i]; }
+    const crossed = (t) => { const a = f[I[3 * t]] > 0, b = f[I[3 * t + 1]] > 0, c = f[I[3 * t + 2]] > 0; return a !== b || b !== c; };
+    const chain = new Uint8Array(nt);
+    for (const e of ends) {
+      const xy = e.ring.xy, m = xy.length / 2, pts = []; for (let i = 0; i < m; i++) pts.push(planePoint(e.F, xy[2 * i], xy[2 * i + 1]));
+      const seeds = nearestVertices(P, pts), queue = [], seen = new Uint8Array(nt);
+      for (const v of seeds) for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const t = vt.tri[j]; if (!seen[t] && crossed(t)) { seen[t] = 1; queue.push(t); } }
+      for (let h = 0; h < queue.length; h++) { const t = queue[h]; for (let j = tnb[t]; j < tnb[t + 1]; j++) { const u = tto[j]; if (!seen[u] && crossed(u)) { seen[u] = 1; queue.push(u); } } }
+      if (queue.length < 6) return null;
+      for (const t of queue) chain[t] = 1;
+    }
+    const { P2, I2, G, parent } = sliceByField(P, I, f), nt2 = G.length;
+    // the edges the flood may not cross: an end's ring (inside a chain triangle, both ends new) and the pick's other outlines
+    const blocked = new Set(); for (const lp of other) { const vs = lp.verts; for (let i = 0; i < vs.length; i++) { const a = vs[i], b = vs[(i + 1) % vs.length]; blocked.add(a < b ? a * nv + b : b * nv + a); } }
+    const pr2 = trianglePairs(I2), nb = new Int32Array(nt2 + 1); for (let i = 0; i < pr2.length; i += 4) { nb[pr2[i] + 1]++; nb[pr2[i + 1] + 1]++; }
+    for (let t = 0; t < nt2; t++) nb[t + 1] += nb[t];
+    const fl = nb.slice(0, nt2), to = new Int32Array(nb[nt2]), ok = new Uint8Array(nb[nt2]);
+    for (let i = 0; i < pr2.length; i += 4) {
+      const a = pr2[i], b = pr2[i + 1], va = pr2[i + 2], vb = pr2[i + 3];
+      const ring = parent[a] === parent[b] && chain[parent[a]] && va >= nv && vb >= nv;
+      const line = va < nv && vb < nv && blocked.has(va < vb ? va * nv + vb : vb * nv + va);
+      const pass = ring || line ? 0 : 1;
+      ok[fl[a]] = pass; to[fl[a]++] = b; ok[fl[b]] = pass; to[fl[b]++] = a;
+    }
+    const sel = new Int32Array(nt2), queue = [];
+    // seeds: the picked triangles on the limb's side of the planes (a picked triangle up under the cape, beyond the
+    // plane, is left to the body); the flood then takes in whatever it reaches without crossing a ring or another outline
+    for (let t = 0; t < nt2; t++) if (inT[parent[t]] && G[t] === 1) { sel[t] = 1; queue.push(t); }
+    for (let h = 0; h < queue.length; h++) { const t = queue[h]; for (let j = nb[t]; j < nb[t + 1]; j++) { const u = to[j]; if (ok[j] && !sel[u]) { sel[u] = 1; queue.push(u); } } }
+    let a1 = 0, n1 = 0; for (let t = 0; t < nt2; t++) if (sel[t]) { n1++; const a = 3 * I2[3 * t], b = 3 * I2[3 * t + 1], c = 3 * I2[3 * t + 2]; const n = cross3([P2[b] - P2[a], P2[b + 1] - P2[a + 1], P2[b + 2] - P2[a + 2]], [P2[c] - P2[a], P2[c + 1] - P2[a + 1], P2[c + 2] - P2[a + 2]]); a1 += Math.hypot(n[0], n[1], n[2]) / 2; }
+    if (!n1 || n1 === nt2 || a1 < 0.5 * aPick || a1 > 2 * aPick) return null; // (the ring didn't close off the limb: the flood ran into the body)
+    const s2 = bordersFromGroups(P2, I2, sel), l2 = groupLoops(P2, I2, s2, [1]);
+    if (!l2.length || l2.some(l => !l.closed) || l2.length !== loops.length) return null;
+    if (seg.hard) { const h = new Uint8Array(nt2); for (let t = 0; t < nt2; t++) h[t] = seg.hard[parent[t]]; s2.hard = h; }
+    const pin = new Set(); for (let t = 0; t < nt2; t++) if (chain[parent[t]]) for (let k = 0; k < 3; k++) { const v = I2[3 * t + k]; if (v >= nv) pin.add(v); }
+    const cover = new Uint8Array(nt); for (let t = 0; t < nt2; t++) if (sel[t]) cover[parent[t]] = 1; // the part's own triangles the pick now covers, for the app to tint
+    return { P: P2, I: I2, seg: s2, groups: [1], loops: l2, pin, ends: ends.length, planes: ends.map(e => ({ o: e.o, n: e.n })), cover };
+  }
   // The mesh a pick works on: with `req.smooth`, the picked lines eased along the surface (`smoothLoopVertices`)
   // on a copy, with its own index array so no cache kept for the original's positions is read for it
   function pickMesh(P, I, req) {
@@ -5864,6 +6031,15 @@ const KMCore = (() => {
       if (sl) return { P: sl.P, I: sl.I, req: { ...req, seg: sl.seg, regions: sl.groups, loops: sl.loops, sliced: true } };
     }
     if (!req.smooth) return { P, I, req };
+    if (req.regions && req.seg && !req.noReroute && !req.noSlice && req.limbEnds !== false) { // (1.83) a limb ends in a flat cut across it
+      let le = null; try { le = limbEndPick(P, I, req.seg, req.regions); } catch (err) { le = null; }
+      if (le) {
+        let sl = null; try { sl = sliceRegionPick(le.P, le.I, le.seg, [1], { ...(typeof req.smooth === 'object' ? req.smooth : {}), pin: le.pin }); } catch (err) { sl = null; }
+        const r = sl || le;
+        const flatEnds = le.ends >= le.loops.length; // (every outline a flat limb end: it meets the surface squarely, so the face isn't sunk; sunk, it left a thin collar round the recess)
+        return { P: r.P, I: r.I, req: { ...req, seg: r.seg, regions: r.groups, loops: r.loops, sliced: true, limbEnds: le.ends, cover: le.cover, sink: flatEnds ? 0 : req.sink } };
+      }
+    }
     if (req.regions && req.seg && !req.noReroute && !req.noSlice) { // a region pick sliced along a smooth curve through the triangles
       let sl = null; try { sl = sliceRegionPick(P, I, req.seg, req.regions, typeof req.smooth === 'object' ? req.smooth : {}); } catch (err) { sl = null; }
       if (sl) return { P: sl.P, I: sl.I, req: { ...req, seg: sl.seg, regions: sl.groups, loops: sl.loops, sliced: true } };
@@ -5881,6 +6057,7 @@ const KMCore = (() => {
     let loops = req.loops;
     if (!req.regions && loops.length && loops.every(l => l.closed)) { try { loops = orientLoops(P, I, loops, { what: 'lines' }).loops; } catch (err) { /* the cut will say why */ } }
     const out = { loops, perLoop: [], frames: [], draw: [], keys: 0, plugs: 0, noKeys: null, result: null, error: null, errorCode: null, forced: null, dropped: null };
+    if (req.cover) out.cover = req.cover; // (1.83) what a limb's flat end makes the pick cover, on the part itself
     if (req.sliced) out.paths = loops.map(l => { const a = new Float32Array(3 * l.verts.length); l.verts.forEach((v, i) => { a[3 * i] = P[3 * v]; a[3 * i + 1] = P[3 * v + 1]; a[3 * i + 2] = P[3 * v + 2]; }); return a; }); // the sliced lines' points: their vertices are new, so the app draws them from these
     const closed = loops.length > 0 && loops.every(l => l.closed);
     if (closed && cfg.type !== 'none') {
@@ -5956,6 +6133,46 @@ const KMCore = (() => {
     });
     return out;
   }
+  // (1.83) Knife edges along a cut's rim (the owner: "super thin sharp edges"): where the cut face meets the surface at
+  // a grazing angle the piece runs out to a blade thinner than anything prints. At each rim edge (between a face the
+  // cut made and the original surface) the piece's inside angle is measured from the two sides' normals, each the
+  // area-weighted normal of its side's triangles round the edge's ends (a sliced triangle at the rim can be a tilted
+  // sliver); under `deg` (25°: a blade a `t` thick reaches over two `t` in) it is a knife edge, and a piece has one when
+  // such edges run along at least 4·t of rim (shorter nicks are a corner of the cut, not a blade).
+  // Returns [{ part, length, knife, rim, sharp, points }].
+  function knifeEdges(Pin, parts, t, opts = {}) {
+    const out = []; if (!(t > 0)) return out;
+    const cosMax = Math.cos(Math.PI - ((opts.deg || 25) * Math.PI) / 180); // normals further apart than this: inside angle under `deg`
+    const fr = Math.fround, orig = new Set(); for (let i = 0; i < Pin.length; i += 3) orig.add(fr(Pin[i]) + ',' + fr(Pin[i + 1]) + ',' + fr(Pin[i + 2])); // (float32 either side: a piece's positions may be stored narrower than the model's)
+    parts.forEach((q, pi) => {
+      const Q = q.positions, J = q.indices, nv = Q.length / 3, nt = J.length / 3, isNew = new Uint8Array(nv);
+      for (let v = 0; v < nv; v++) isNew[v] = orig.has(fr(Q[3 * v]) + ',' + fr(Q[3 * v + 1]) + ',' + fr(Q[3 * v + 2])) ? 0 : 1;
+      const fresh = new Uint8Array(nt); for (let tr = 0; tr < nt; tr++) fresh[tr] = isNew[J[3 * tr]] && isNew[J[3 * tr + 1]] && isNew[J[3 * tr + 2]] ? 1 : 0;
+      const tn = new Float64Array(3 * nt); for (let tr = 0; tr < nt; tr++) { const a = 3 * J[3 * tr], b = 3 * J[3 * tr + 1], c = 3 * J[3 * tr + 2]; const n = cross3([Q[b] - Q[a], Q[b + 1] - Q[a + 1], Q[b + 2] - Q[a + 2]], [Q[c] - Q[a], Q[c + 1] - Q[a + 1], Q[c + 2] - Q[a + 2]]); tn[3 * tr] = n[0]; tn[3 * tr + 1] = n[1]; tn[3 * tr + 2] = n[2]; } // (area-weighted)
+      const vt = vertexTriangles(Q, J), pr = trianglePairs(J);
+      const sideNormal = (v, want) => { let x = 0, y = 0, z = 0; for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const tr = vt.tri[j]; if (fresh[tr] === want) { x += tn[3 * tr]; y += tn[3 * tr + 1]; z += tn[3 * tr + 2]; } } return [x, y, z]; };
+      const rimLen = new Map(), adj = new Map(), knife = new Set(); let total = 0, knifeLen = 0;
+      for (let i = 0; i < pr.length; i += 4) {
+        const a = pr[i], b = pr[i + 1]; if (fresh[a] === fresh[b]) continue;
+        const va = pr[i + 2], vb = pr[i + 3], l = Math.hypot(Q[3 * va] - Q[3 * vb], Q[3 * va + 1] - Q[3 * vb + 1], Q[3 * va + 2] - Q[3 * vb + 2]);
+        total += l; for (const [x, y] of [[va, vb], [vb, va]]) { rimLen.set(x, (rimLen.get(x) || 0) + l / 2); if (!adj.has(x)) adj.set(x, []); adj.get(x).push(y); }
+        const f1 = sideNormal(va, 1), f2 = sideNormal(vb, 1), s1 = sideNormal(va, 0), s2 = sideNormal(vb, 0);
+        const nf = norm3([f1[0] + f2[0], f1[1] + f2[1], f1[2] + f2[2]]), ns = norm3([s1[0] + s2[0], s1[1] + s2[1], s1[2] + s2[2]]);
+        const dot = nf[0] * ns[0] + nf[1] * ns[1] + nf[2] * ns[2];
+        if (dot >= cosMax) continue;
+        // convex (a blade, not a crack): the surface triangle's far corner lies behind the cut face
+        const s = fresh[a] ? b : a, o = [0, 1, 2].map(k => (Q[3 * J[3 * s] + k] + Q[3 * J[3 * s + 1] + k] + Q[3 * J[3 * s + 2] + k]) / 3);
+        if ((o[0] - Q[3 * va]) * nf[0] + (o[1] - Q[3 * va + 1]) * nf[1] + (o[2] - Q[3 * va + 2]) * nf[2] > 0) continue;
+        knife.add(va); knife.add(vb); knifeLen += l;
+      }
+      if (!total) { out.push({ part: pi, length: 0, knife: 0, rim: 0, sharp: false, points: opts.points ? [] : undefined }); return; }
+      // the longest run of knife points along the rim
+      const seen = new Set(); let longest = 0;
+      for (const v0 of knife) { if (seen.has(v0)) continue; let run = 0; const st = [v0]; seen.add(v0); while (st.length) { const v = st.pop(); run += rimLen.get(v) || 0; for (const w of adj.get(v) || []) if (!seen.has(w) && knife.has(w)) { seen.add(w); st.push(w); } } longest = Math.max(longest, run); }
+      out.push({ part: pi, length: longest, knife: knifeLen, rim: total, sharp: longest >= 4 * t, points: opts.points ? [...knife] : undefined });
+    });
+    return out;
+  }
   function printMessage(bad) {
     return bad.some(b => b.crumb) ? 'This cut leaves a crumb too small to print. Pick a little more, or cut somewhere else.'
       : 'This cut leaves a piece with walls thinner than the Wall setting behind its cut face, which won’t print well. Move the line, turn off Sink face, or pick a little more.';
@@ -5969,6 +6186,14 @@ const KMCore = (() => {
       let bad = [];
       try { bad = cutPrintCheck(P, out.result.parts, req0.minThickness).filter(b => b.thin); } catch (err) { bad = []; }
       if (bad.length) { out.printCheck = bad.map(b => ({ part: b.part, crumb: !!b.crumb, share: b.share })); if (!out.forced) out.forced = printMessage(bad); }
+      else if (!req0.noKnifeCheck) { // (1.83) a blade-thin edge along the cut's rim
+        let knives = []; try { knives = knifeEdges(P, out.result.parts, req0.minThickness).filter(k => k.sharp); } catch (err) { knives = []; }
+        if (knives.length) {
+          const mm = Math.round(Math.max(...knives.map(k => k.length)));
+          out.printCheck = knives.map(k => ({ part: k.part, knife: true, length: k.length }));
+          if (!out.forced) out.forced = `This cut leaves a knife-thin edge along about ${mm} mm of its rim, thinner than the Thinnest piece setting (${+req0.minThickness.toFixed(2)} mm), which will snap or not print. Move the line so it meets the surface more squarely, or pick a little more.`;
+        }
+      }
     }
     return out;
   }
@@ -7948,7 +8173,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups,
+    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh,
   };
 })();
 
@@ -7987,7 +8212,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     flat: true, // show faces: flat shading, so every face of the mesh shows (the owner wants this by default)
     nextColor: 1,
     bed: { w: 220, d: 220, h: 250 },
-    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, numberJoints: false, smoothCut: true, sliceDrawn: true },
+    cfg: { type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 2, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, numberJoints: false, smoothCut: true, sliceDrawn: true, minPiece: 0 },
     cut: { keys: [], plugs: [], auto: true, skip: new Set(), thin: [], hoverArea: -1, labels: [], analysis: null, evals: [], active: -1, stale: true, lo: -1, hi: 1, center: [0, 0, 0], R: 1 },
   };
   state.regions = { on: false, by: 'form', detail: 'balanced', ratio: 1.35, size: 55, ...sectionOpts(55), hover: null }; // by: 'form' (the thickness under the surface) or 'folds' (where it turns inward)
@@ -8564,10 +8789,12 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   function pointKeys() { return ['peg', 'dowel', 'magnet'].includes(state.cfg.type); }
   function plugsShown() { const shown = new Set(shownAreas()); return state.cut.plugs.filter(q => shown.has(q.region) && !state.cut.skip.has(q.region)); }
   // The thinnest a piece may be: the Wall setting, and never more than the printer handles reliably.
-  function minWall() {
+  function minWall() { // (1.83) the thinnest a piece may be after a cut: the Thinnest piece setting, or the Wall setting capped at the printer's wall
+    if (state.cfg.minPiece > 0) return state.cfg.minPiece;
     const pr = K.PRINTERS[state.cfg.printer === 'resin' ? 'resin' : 'fdm'].wall;
     return state.cfg.margin > 0 ? Math.min(state.cfg.margin, pr) : pr;
   }
+  function syncMinPiece() { const el = $('#minPiece'); if (el && document.activeElement !== el) el.value = +minWall().toFixed(2); }
   // Areas that would leave a sliver too thin to print, among those listed and set to be cut.
   function thinShown() {
     const shown = new Set(shownAreas());
@@ -10712,7 +10939,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const run = ++pickRun, seg = K.selectionSeg(p.positions, p.indices, state.paint.sel);
     coreTask('planJoints', [p.positions, p.indices, pickReq(loops, { regions: [1], seg, painted: true })]).then((j) => {
       if (run !== pickRun || state.regions.pick !== pick) return;
-      pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths;
+      pick.perLoop = j.perLoop; pick.frames = j.frames; pick.draw = j.draw; if (j.paths) pick.paths = j.paths; pick.cover = j.cover || null;
       pick.keys = j.perLoop.flatMap(per => per.keys); pick.plugs = j.perLoop.flatMap(per => per.plugs);
       pick.noKeys = noKeysText(j.noKeys, j.loops.length > 1);
       drawPickLines(p, pick); renderPick(); markDirty();
@@ -11633,7 +11860,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       case 'sizemode': c.sizeMode = val; state.cut.auto = true; savePrefs(); scheduleAnalysis(0); renderInspector(); break;
       case 'printer': {
         const pr = K.PRINTERS[val];
-        c.printer = val; c.sizeMin = pr.min; c.clearance = pr.gap; c.margin = pr.wall;
+        c.printer = val; c.sizeMin = pr.min; c.clearance = pr.gap; c.margin = pr.wall; c.minPiece = 0; syncMinPiece();
         savePrefs(); renderInspector();
         toast(val === 'resin' ? 'Set up for resin: keys down to 1 mm, 0.1 mm gap, 0.8 mm walls.' : 'Set up for filament: keys down to 2.5 mm, 0.2 mm gap, 1.2 mm walls.');
         break;
@@ -12063,7 +12290,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     let areaPick = 0, big = 0;
     if (prev.regions && !prev.painted) for (const x of prev.regions) areaPick += seg.areas[x] || 0;
     for (let k = 0; k < seg.count; k++) if (seg.areas[k] > seg.areas[big]) big = k;
-    const huge = g === big || (areaPick > 0 && seg.areas[g] > 4 * areaPick);
+    let total = 0; for (let k = 0; k < seg.count; k++) total += seg.areas[k] || 0;
+    const huge = g === big || (areaPick > 0 && seg.areas[g] > 4 * areaPick && seg.areas[g] > 0.2 * total); // (1.83: a body-sized region; a hand bigger than the sleeve picked first is added whole)
     if (!prev.painted && !huge) return null; // a region added to regions, as before
     let sel;
     try { sel = (prev.selection || pickSelection(p, prev)).slice(); } catch (err) { return null; }
@@ -12195,6 +12423,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     // owner saw no keys at all until it was done
     const done = coreTask('planJoints', [p.positions, p.indices, req]).then((joints) => {
       if (!live()) return null;
+      pick.cover = joints.cover || null; if (pick.comp) pick.comp = null;
       if (joints.paths) pick.paths = joints.paths; else { pick.loops = joints.loops; pick.loop = joints.loops[0]; } // a sliced pick's lines run through new vertices: drawn from their points, and the pick keeps the lines on the part itself
       pick.perLoop = joints.perLoop; pick.frames = joints.frames; pick.draw = joints.draw;
       pick.keys = joints.perLoop.flatMap(per => per.keys); pick.plugs = joints.perLoop.flatMap(per => per.plugs);
@@ -12287,7 +12516,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const picked = new Set(pick && pick.partId === p.id && pick.regions && !pick.painted ? pick.regions : []); // a painted pick's [1] names its own two-region labelling, not the part's regions
     // lines picked by hand: the piece they would split off (side 1, the smaller side) is tinted, kept on the pick
     let lineSel = null;
-    if (pick && pick.partId === p.id && pick.painted && pick.selection && !state.paint.on) lineSel = pick.selection; // a filled pick: its own selection, not the part's regions
+    if (pick && pick.partId === p.id && pick.cover && !state.paint.on) lineSel = pick.cover; // (1.83) a limb's flat end: what the cut will take, past the regions picked
+    else if (pick && pick.partId === p.id && pick.painted && pick.selection && !state.paint.on) lineSel = pick.selection; // a filled pick: its own selection, not the part's regions
     else if (pick && pick.partId === p.id && !pick.regions && !pick.painted && pick.loops && pick.loops.length && pick.loops.every(l => l.closed)) {
       if (pick.tintSel === undefined) { try { pick.tintSel = K.loopSelection(p.positions, p.indices, pick.loops); } catch (err) { pick.tintSel = null; } }
       lineSel = pick.tintSel;
@@ -12304,7 +12534,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const anyPick = picked.size > 0 || lineSel !== null, dim = anyPick ? 0.78 : 1;
     let comp = null;
     if (anyPick) {
-      const key = lineSel ? 'lines' : [...picked].sort((x, y) => x - y).join(',');
+      const key = lineSel ? (pick.cover ? 'cover' : 'lines') : [...picked].sort((x, y) => x - y).join(',');
       if (!pick.comp || pick.comp.key !== key) { try { pick.comp = { key, ...K.pickComponents(p.positions, p.indices, seg.groupOf, picked, lineSel) }; } catch (err) { pick.comp = { key, label: null, count: 1 }; } }
       comp = pick.comp;
     }
@@ -12663,6 +12893,12 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     state.cfg.smoothCut = !!e.target.checked;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
   });
+  $('#minPiece').addEventListener('change', (e) => {
+    const v = +e.target.value; state.cfg.minPiece = v > 0 ? Math.min(20, v) : 0; syncMinPiece(); savePrefs();
+    const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
+    if (p && planeShown()) scheduleAnalysis(0);
+  });
+  syncMinPiece();
   $('#sinkDepth').addEventListener('change', (e) => {
     state.cfg.sink = Math.max(0, +e.target.value || 0); e.target.value = state.cfg.sink;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);

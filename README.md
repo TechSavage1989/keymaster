@@ -15,6 +15,8 @@
 
 ## Features
 
+- **Limbs end at the joint.** At Balanced a sleeve or a leg stays a part of its own, and splitting it off cuts flat across the limb where it meets the body, so a cape or a cuff above it isn't cut into thin flaps.
+- **No knife-thin edges.** A cut that would leave a blade-thin edge along its rim, or anything thinner than the new **Thinnest piece** setting, is flagged before it is made (you can still cut it anyway).
 - **The same parts at any size.** Regions come from the model's shape, never its size: scaling the model evenly (to 1000%, or down to a miniature) gives exactly the same regions, triangle for triangle, and only the keys follow the real millimetres. Turning, stretching one axis, sculpting or reducing works the regions out afresh.
 - **A made object keeps all of its pieces.** Small bits of a prop that the grouping puts elsewhere (a lip under a book's cover, flush with the robe) go back to the prop when they lie on its outline facing out; a hand or a cuff resting on it, which faces into it, stays its own.
 - **A made object owns the surface it lies flush with.** A book's recessed page block ran on into the robe it rested against with no crease between them, so a pick of the book's underside, in Parts, Sections or Paint with Fill, took a strip of robe with it. Now a made object is worked out as one shape (its covers, straps and page block, a millimetre or two apart), and the surface round it that lies on that shape is the object's: the book picks whole, the robe beside it picks without the book, and the hand on it picks alone. With Fill on, a click paints exactly the region shown, so nothing shut in between two regions comes along as a hole.
