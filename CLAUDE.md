@@ -401,6 +401,14 @@ The owner, after 1.89, brushing the raised arm with its cross at Extrude 5, Tape
 - **Specks of holes in Fill paint fill**: `fillSelectionGaps(..., { maxFrac })` fills only holes under that share of the selection; `previewPainted` with Fill on passes 0.02 (gaps between fingers), so a hand on a book is still left as painted.
 - Tested: the saddle cylinder's tapered plug ends in one flat face; a narrow line winding 16 mm gets no plug.
 
+## Plugs on the book, and drawn while painting (1.91)
+
+The owner, after 1.90, brushing the arm with the book at Extrude 5, Taper 20, Extra key None: "there is no plug showing. also no plug or extrusion on the book at all. i'm tired of this."
+- **Drawn while painting**: `previewPainted` had returned before planning anything when the key type was None; it now plans (and draws the extrusion) whenever Extrude is on.
+- **The book's lines get plugs**: their outline, a jagged CAD edge, couldn't be offset into a clean ring (`insetRing` gave up), and that ring was only needed to say where to measure room; `nudgeIn` moves each point in along the eased line instead, with no ring check.
+- **A few thin points don't spoil the flat end**: the plane is fitted to the points with room for at least the shallowest depth wanted, when they are nine in ten of the line (the robe behind the book's edge is too thin at 7 of 316), and at the others the floor dips to stay inside the solid. The book's back now ends in one level face 12 mm into the robe.
+- Known: two short book lines (where the book's underside and side meet the skirt) have solid behind almost none of their points, so they get no plug; and on the book's jagged outline the taper folds the floor ring at every angle, so its plug has straight sides.
+
 ## Versions
 
 `VERSION` holds the version shown next to the app's name, with a short build code that `tools/build.py` works out from the sources (the same sources always give the same code). **Bump `VERSION` in every pull request** (1.14 to 1.15 and so on), so the owner can refresh the live page and see the new version has arrived.
