@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.88, build f75314. After an update, refresh the page and check this changes.">v1.88 · f75314</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.89, build b62d77. After an update, refresh the page and check this changes.">v1.89 · b62d77</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -6225,7 +6225,11 @@ const KMCore = (() => {
           an = side === cfg.pegSide ? an0 : analyzeLoop(P, I, loop, lcfg, D);
           per.pegSide = side; per.cfg = lcfg;
           out.frames.push(an.frame);
-          if (cfg.type === 'plug') {
+          if (cfg.type === 'plug' && an.curved && an.curved.sunk && an.curved.sunk.column) {
+            // (1.89) the cut is already extruded into a plug: a second plug on its floor added nothing and, on a steeply
+            // tapered floor, came away as a slab of its own; the extruded plug is this line's plug
+            per.plugs = []; per.extruded = true;
+          } else if (cfg.type === 'plug') {
             const pl = planPlugs(an, lcfg);
             per.plugs = pl.filter(q => q.ok);
             if (!per.plugs.length && !out.noKeys) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
@@ -6383,7 +6387,10 @@ const KMCore = (() => {
     try { first = run(true, true); } catch (err) { first = null; }
     // joints must never make pieces of their own: a pocket that breaks through a thin wall nicks off a crumb
     // (a plug on one of the owner's Aysil limbs left a 0.01 cm³ scrap); then the joints go and the cut stands alone
-    const crumbs = (r) => { const v = r.parts.map(q => Math.abs(q.volume)), tot = v.reduce((a, b) => a + b, 0); return v.some(x => x < 0.01 * tot && x < 0.2 * Math.min(...v.filter(y => y >= 0.01 * tot))); };
+    // (1.89) nor a piece of their own: a plug on a tapered plug's floor came away whole as a 29 cm³ slab, all of it new
+    // faces, joined to neither piece; such a piece has no point of the model's surface
+    let orig = null; const onlyNew = (q) => { if (!orig) { orig = new Set(); for (let i = 0; i < P.length; i += 3) orig.add(Math.fround(P[i]) + ',' + Math.fround(P[i + 1]) + ',' + Math.fround(P[i + 2])); } const Q = q.positions; for (let i = 0; i < Q.length; i += 3) if (orig.has(Math.fround(Q[i]) + ',' + Math.fround(Q[i + 1]) + ',' + Math.fround(Q[i + 2]))) return false; return true; };
+    const crumbs = (r) => { const v = r.parts.map(q => Math.abs(q.volume)), tot = v.reduce((a, b) => a + b, 0); return v.some(x => x < 0.01 * tot && x < 0.2 * Math.min(...v.filter(y => y >= 0.01 * tot))) || r.parts.some(onlyNew); };
     if (first && (out.keys || out.plugs) && crumbs(first)) {
       let plain = null; try { plain = run(false, true); } catch (err) { plain = null; }
       if (plain && !crumbs(plain)) { first = plain; dropJoints('crumb'); }
@@ -12537,7 +12544,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   function noKeysText(nk, many, perLoop) {
     if (!nk) return null;
     // (1.85) how many lines have no joint: "one of its lines" read as if the others had one when none did
-    const n = perLoop ? perLoop.length : 0, bare = perLoop ? perLoop.filter(per => !(per.keys && per.keys.length) && !(per.plugs && per.plugs.length)).length : 0;
+    const n = perLoop ? perLoop.length : 0, bare = perLoop ? perLoop.filter(per => !(per.keys && per.keys.length) && !(per.plugs && per.plugs.length) && !per.extruded).length : 0;
+    if (!bare && n) return null; // (1.89) every line has its joint (a line extruded into a plug counts as one)
     const where = !many ? 'this line' : n && bare === n ? (n === 2 ? 'either of its lines' : `any of its ${n} lines`) : bare > 1 ? `${bare} of its ${n} lines` : 'one of its lines';
     const those = !many ? 'that line' : bare > 1 ? 'those lines' : 'that line';
     const p = selectedPart(), size = p ? Math.max(...p.bbox.size) : 0;
@@ -12800,7 +12808,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const vols = pick.result.parts.map(q => fmtVol(q.volume)); // (1.76) a miniature's hand is mm³, not "0.0 cm³"
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
     const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
-    const sinks = (pick.result.sinks || []).filter(s => s > 0.05), sunkLine = sinks.length ? ` The face is sunk ${fmt(Math.max(...sinks))} mm into the other piece${sinks.length < nl ? ' on ' + (sinks.length === 1 ? 'one line' : `${sinks.length} lines`) : ''}, so this piece keeps its thickness to the edge.` : state.cfg.sink > 0 ? ' There’s no room to sink the face here.' : '';
+    const sinks = (pick.result.sinks || []).filter(s => s > 0.05), sunkLine = sinks.length ? ` The cut is extruded up to ${fmt(Math.max(...sinks))} mm into the other piece${state.cfg.sinkTaper > 0 ? `, tapered ${fmt(state.cfg.sinkTaper)}°` : ''}${sinks.length < nl ? ' on ' + (sinks.length === 1 ? 'one line' : `${sinks.length} lines`) : ''}, so this piece ends in a plug that seats in a socket.` : state.cfg.sink > 0 ? ' There’s no room to extrude the cut here.' : '';
     const what = region ? `${painted ? 'The painted area’s' : nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${painted || nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} and leaves ${vols.length === 2 ? vols[1] : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')}`}.`
       : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]}.`
       : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')}.`;

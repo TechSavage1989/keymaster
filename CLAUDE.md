@@ -384,6 +384,14 @@ The owner, after 1.87: "close to what i want, but it needs to be also tapered, a
 - Checked on the page with the real renderer: the owner's arm at Extrude 3, Taper 5: a plug from the cut's edge, leaning in 5°, 15 mm into the shoulder, peg on top, no lip.
 - Known: the plug and its socket share one surface, so they print with no gap between them; the taper lets it seat.
 
+## A plug on a plug, and what the taper looks like (1.89)
+
+The owner, after 1.88, at Extrude 1, Taper 20, Extra key Plug: "it doesn't seem like the extruded bit is tapered at all". Measured on the page's own cut (`lean.js` in the scratchpad: the share of wall area by lean from the frame normal), the walls do lean: mostly 20 to 30° at Taper 20, mostly under 5° at Taper 0. What the owner sees is the end: the shoulder under the capelet holds a column only about 10 mm deep on its outer side, so the floor can't stay level there and climbs, and with Extrude 1 the plug stands only 1 mm proud where the line is highest, so the end reads as a slanted face. And with Plug as the extra key at 10° or more, the plug on the floor came away whole as a 29 cm³ slab of new faces joined to neither piece.
+- **The extrusion is the plug**: `planJoints` plans no second plug on a line whose face is a plug (`an.curved.sunk.column`; `per.extruded`), and `noKeysText` counts such a line as jointed.
+- **Joints never make a piece of their own**: `planPickPieces`'s crumb test also drops the joints when a piece holds no point of the model's surface (`onlyNew`).
+- The pick says "The cut is extruded up to N mm into the other piece, tapered N°", or that there's no room to extrude it.
+- Tested: Plug on the saddle cylinder's 20° plug gives two sealed pieces and no second plug.
+
 ## Versions
 
 `VERSION` holds the version shown next to the app's name, with a short build code that `tools/build.py` works out from the sources (the same sources always give the same code). **Bump `VERSION` in every pull request** (1.14 to 1.15 and so on), so the owner can refresh the live page and see the new version has arrived.
