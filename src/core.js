@@ -4134,6 +4134,32 @@ const KMCore = (() => {
       const tn = Math.tan(deg * f * Math.PI / 180), q = src.map((p, i) => [p[0] + nrm[i][0] * depth[i] * tn, p[1] + nrm[i][1] * depth[i] * tn]);
       const qq = a2 > 0 ? q : q.slice().reverse();
       if (ringOk(qq) && q.every(p => pointInRing(flatPts, p[0], p[1]))) { const out = new Float64Array(2 * n); q.forEach((p, i) => { out[2 * i] = p[0]; out[2 * i + 1] = p[1]; }); return { xy: out, deg: deg * f }; }
+      // (1.92) a jagged outline (a book's edge with its straps and clasps) folds the moved ring at every notch: the
+      // moved ring is eased until it is a clean ring inside the line, so the plug's end is a smooth outline and its
+      // sides lean in from the jagged edge (before, such a plug had straight sides)
+      if (f === 1 && src === e) {
+        let r = q;
+        for (let pass = 0; pass < 60; pass++) {
+          r = r.map((p, i) => { const a = r[(i + n - 1) % n], c = r[(i + 1) % n]; return [(a[0] + 2 * p[0] + c[0]) / 4, (a[1] + 2 * p[1] + c[1]) / 4]; });
+          if (pass % 4 !== 3) continue;
+          // (where the eased ring still crosses a notch of the line, that point stays on the line: a straight side there)
+          // where the eased ring still crosses a notch of the line, that point comes back towards the line as far as
+          // it must (a steeper side there), and so do the points round a crossing that is left; then its neighbours
+          // are held to it, so no point stands out from the ring as a fin
+          const tt = new Float64Array(n).fill(1), at = (i) => [pts[i][0] + (r[i][0] - pts[i][0]) * tt[i], pts[i][1] + (r[i][1] - pts[i][1]) * tt[i]];
+          for (let i = 0; i < n; i++) { while (tt[i] > 0) { const q0 = at(i); if (pointInRing(flatPts, q0[0], q0[1])) break; tt[i] = tt[i] > 0.26 ? tt[i] - 0.25 : 0; } }
+          let r2 = null;
+          for (let fix = 0; fix < 16; fix++) {
+            for (let sweep = 0; sweep < 2; sweep++) for (let i = 0; i < n; i++) { const lo = Math.min(tt[(i + n - 1) % n], tt[(i + 1) % n]); if (tt[i] > lo + 0.25) tt[i] = lo + 0.25; }
+            r2 = pts.map((_, i) => at(i));
+            const hits = findSelfCrossings(flatOf(r2)); if (!hits.length) break;
+            for (const [k, m] of hits) { const inner = m - k, wrap = inner > n / 2, from = wrap ? m : k, cnt = wrap ? n - inner : inner; if (cnt > n / 8) continue; for (let j = -1; j <= cnt + 2; j++) { const i = ((from + j) % n + n) % n; tt[i] = Math.max(0, tt[i] - 0.25); } }
+          }
+          const rr = a2 > 0 ? r2 : r2.slice().reverse();
+          let kept = 0; for (let i = 0; i < n; i++) if (tt[i] > 0.5) kept++;
+          if (kept >= 0.6 * n && ringOk(rr)) { const out = new Float64Array(2 * n); r2.forEach((p, i) => { out[2 * i] = p[0]; out[2 * i + 1] = p[1]; }); return { xy: out, deg: deg * f }; }
+        }
+      }
     }
     return { xy: copy, deg: 0 };
   }
