@@ -5654,8 +5654,11 @@ const KMCore = (() => {
     if (req.sliced) out.paths = loops.map(l => { const a = new Float32Array(3 * l.verts.length); l.verts.forEach((v, i) => { a[3 * i] = P[3 * v]; a[3 * i + 1] = P[3 * v + 1]; a[3 * i + 2] = P[3 * v + 2]; }); return a; }); // the sliced lines' points: their vertices are new, so the app draws them from these
     const closed = loops.length > 0 && loops.every(l => l.closed);
     if (closed && (cfg.type !== 'none' || cfg.sink > 0)) { // (1.90) with no key the extrusion is still worked out, so it can be drawn
+      const longest = Math.max(...loops.map(l => l.length || 0));
       for (const loop of loops) {
         const per = { keys: [], plugs: [] }, draw = { keys: [], plugs: [] };
+        // (1.92) a speck of a line (a spot where a sleeve touches the coat, a twentieth of the longest line) is cut as it is, with no complaint that no joint fits it
+        const tiny = loops.length > 1 && (loop.length || 0) < 0.05 * longest; if (tiny) per.tiny = true;
         let an = null;
         try {
           const an0 = analyzeLoop(P, I, loop, cfg, D), side = curvedSideOf(cfg.pegSide, an0.curved.into2), lcfg = { ...cfg, pegSide: side };
@@ -5672,7 +5675,7 @@ const KMCore = (() => {
             const pcfg = { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) };
             const pl = planPlugs(an, pcfg);
             per.plugs = pl.filter(q => q.ok); per.inset = per.plugs.length > 0; per.cfg = per.inset ? pcfg : lcfg;
-            if (!per.plugs.length && !out.noKeys) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
+            if (!per.plugs.length && !out.noKeys && !tiny) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
             const H = an.curved.heightAt;
             for (const q of per.plugs) { let lo = Infinity, hi = -Infinity; for (const [x, y] of q.mouth) { const z = H(x, y); lo = Math.min(lo, z); hi = Math.max(hi, z); } draw.plugs.push({ base: q.base, top: q.top, z0: q.side > 0 ? lo : hi, tip: (q.side > 0 ? hi : lo) + q.side * q.depth }); }
           } else if (cfg.type === 'none') { /* no key: the extrusion alone */ }
@@ -5683,14 +5686,14 @@ const KMCore = (() => {
           } else if (cfg.type === 'plug') {
             const pl = planPlugs(an, lcfg);
             per.plugs = pl.filter(q => q.ok);
-            if (!per.plugs.length && !out.noKeys) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
+            if (!per.plugs.length && !out.noKeys && !tiny) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
             const H = an.curved.heightAt;
             for (const q of per.plugs) { let lo = Infinity, hi = -Infinity; for (const [x, y] of q.mouth) { const z = H(x, y); lo = Math.min(lo, z); hi = Math.max(hi, z); } draw.plugs.push({ base: q.base, top: q.top, z0: q.side > 0 ? lo : hi, tip: (q.side > 0 ? hi : lo) + q.side * q.depth }); }
           } else {
             const keys = req.sizeSet ? autoPlaceKeys(an, lcfg, req.perArea, new Set()) : autoFitKeys(an, lcfg, req.perArea, new Set());
             const ok = evaluateKeys(an, keys, lcfg, new Set());
             per.keys = keys.filter((k, i) => ok[i].ok);
-            if (!per.keys.length && !out.noKeys) out.noKeys = { code: 'room' };
+            if (!per.keys.length && !out.noKeys && !tiny) out.noKeys = { code: 'room' };
             for (const k of per.keys) { const kc = keyCfg(lcfg, k); draw.keys.push({ k, angle: keyAngle(an.base, 0, kc), lv: keyLevels(an, lcfg, k) }); }
           }
         } catch (err) { out.frames.push(null); an = null; if (!out.noKeys) out.noKeys = { code: 'failed' }; }
