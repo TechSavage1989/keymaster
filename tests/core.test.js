@@ -1920,5 +1920,68 @@ console.log('knife edges after a cut');
   check('planning the joints draws both plugs before the cut', j.draw.length === 2 && j.draw.every(d => d.sink || d.plugs.length), j.draw.map(d => [!!d.sink, d.plugs.length]));
 }
 
+// 1.96: a piece made by a cut keeps the regions its surface had on the part it was cut from, and a region's narrow
+// tongue across a smooth border goes to the region it pokes into.
+{
+  console.log('\nregions carried through a cut, and tongues trimmed');
+  const bar = K.shapeMesh({ kind: 'cube', w: 60, d: 20, h: 20 });
+  const sub = K.subdivideMesh(bar.positions, bar.indices, { maxEdge: 2.5 }), P = sub.positions, I = sub.indices, nt = I.length / 3;
+  const cx = (Q, J, t) => (Q[3 * J[3 * t]] + Q[3 * J[3 * t + 1]] + Q[3 * J[3 * t + 2]]) / 3;
+  const G = new Int32Array(nt); for (let t = 0; t < nt; t++) { const x = cx(P, I, t); G[t] = x < -11.25 ? 0 : x < 11.25 ? 1 : 2; } // three bands along the bar, their borders along the mesh's own lines
+  const seg = K.bordersFromGroups(P, I, G); seg.areas = [0, 0, 0];
+  const area = (Q, J, t) => { const a = 3 * J[3 * t], b = 3 * J[3 * t + 1], c = 3 * J[3 * t + 2]; const u = [Q[b] - Q[a], Q[b + 1] - Q[a + 1], Q[b + 2] - Q[a + 2]], w = [Q[c] - Q[a], Q[c + 1] - Q[a + 1], Q[c + 2] - Q[a + 2]]; return Math.hypot(u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]) / 2; };
+  for (let t = 0; t < nt; t++) seg.areas[G[t]] += area(P, I, t);
+  const carry = (q) => { const src = K.inheritTriangles(P, I, q.positions, q.indices); return { src, seg: K.carryRegions(q.positions, q.indices, G, src, { areas: seg.areas }) }; };
+  // every triangle of the old surface keeps its region; returns [kept, moved, made by the cut]
+  const tally = (q, c) => { let kept = 0, moved = 0, made = 0; for (let t = 0; t < c.src.length; t++) { if (c.src[t] < 0) made++; else if (c.seg.from[c.seg.groupOf[t]] === G[c.src[t]]) kept++; else moved++; } return [kept, moved, made]; };
+  const closedOutlines = (q, c) => K.regionOutlines(q.positions, q.indices, c.seg).every(l => l.closed);
+  // a region split off along its outline, with a face sunk into the other piece
+  const r = K.splitRegions(P, I, seg, [2], { cfg: { type: 'none', sinkTaper: 5 }, sink: 3, minThickness: 0.8, force: true });
+  const c0 = carry(r.parts[0]), c1 = carry(r.parts[1]), t0 = tally(r.parts[0], c0), t1 = tally(r.parts[1], c1);
+  check('the piece split off is its region, cut face and all', r.parts.length === 2 && c0.seg.count === 1 && c0.seg.from[0] === 2 && t0[1] === 0 && t0[2] > 0, { count: c0.seg.count, from: c0.seg.from, t0 });
+  check('the rest keeps its two regions, every triangle in the one it had, and the socket joins the region it was cut from', c1.seg.count === 2 && c1.seg.from.join() === '0,1' && t1[1] === 0 && t1[2] > 0 && t1[0] === nt - G.filter(g => g === 2).length, { count: c1.seg.count, from: c1.seg.from, t1 });
+  {
+    const newIn = new Set(); for (let t = 0; t < c1.src.length; t++) if (c1.src[t] < 0) newIn.add(c1.seg.from[c1.seg.groupOf[t]]);
+    check('no outline runs through the socket, and every outline is closed', newIn.size === 1 && newIn.has(1) && closedOutlines(r.parts[1], c1) && K.regionOutlines(r.parts[1].positions, r.parts[1].indices, c1.seg).filter(l => l.region === 0).length === 1, [...newIn]);
+  }
+  check('the carried areas add up to each piece’s surface', [[r.parts[0], c0], [r.parts[1], c1]].every(([q, c]) => { let a = 0; for (let t = 0; t < c.src.length; t++) a += area(q.positions, q.indices, t); return Math.abs(a - c.seg.areas.reduce((x, y) => x + y, 0)) < 1e-6 * a; }));
+  // a flat cut through the middle band: triangles the plane split are matched by where they lie
+  const f = K.cutMesh(P, I, K.frameFromNormal([1, 0, 0], [0.37, 0, 0]), { scale: 60, cfg: cfgOf({ type: 'none' }) });
+  const fc = f.parts.map(q => ({ q, c: carry(q) })), ft = fc.map(({ q, c }) => tally(q, c));
+  check('a flat cut’s pieces keep their regions too: band and end on each side, the cut face in the band it went through', f.parts.length === 2 && fc.every(({ c }) => c.seg.count === 2 && c.seg.from.includes(1)) && ft.every(x => x[1] === 0 && x[2] > 0) && fc.some(({ c }) => c.seg.from.includes(0)) && fc.some(({ c }) => c.seg.from.includes(2)) && fc.every(({ q, c }) => closedOutlines(q, c)), { ft, from: fc.map(({ c }) => c.seg.from) });
+  {
+    let ok = true; for (const { q, c } of fc) for (let t = 0; t < c.src.length; t++) if (c.src[t] >= 0) { const x = cx(q.positions, q.indices, t), was = x < -11.25 ? 0 : x < 11.25 ? 1 : 2; if (G[c.src[t]] !== was) ok = false; }
+    check('each triangle is matched to the part’s triangle it lies on', ok);
+  }
+  // a smoothed, sliced pick leaves scraps of the picked region along the rim: they join what they lie beside
+  const wavy = new Int32Array(nt); for (let t = 0; t < nt; t++) { const y = (P[3 * I[3 * t] + 1] + P[3 * I[3 * t + 1] + 1] + P[3 * I[3 * t + 2] + 1]) / 3; wavy[t] = cx(P, I, t) > 10 + 3 * Math.sin(y * 0.35) ? 1 : 0; }
+  K.unpinchGroups(P, I, wavy);
+  const wseg = K.bordersFromGroups(P, I, wavy); wseg.areas = [0, 0]; for (let t = 0; t < nt; t++) wseg.areas[wavy[t]] += area(P, I, t);
+  const pp = K.planPick(P, I, { loops: K.groupLoops(P, I, wseg, [1]), regions: [1], seg: wseg, cfg: { type: 'none', margin: 1, pegSide: 'below' }, minThickness: 0.8, sink: 0, smooth: true });
+  if (pp.result) {
+    const cs = pp.result.parts.map(q => { const src = K.inheritTriangles(P, I, q.positions, q.indices); return { q, src, seg: K.carryRegions(q.positions, q.indices, wavy, src, { areas: wseg.areas }) }; });
+    let scraps = 0; for (const c of cs) for (let t = 0; t < c.src.length; t++) if (c.src[t] >= 0 && wavy[c.src[t]] !== c.seg.from[0]) scraps++;
+    check('a sliced pick: its line leaves scraps of each region on the other piece, and each piece is still one region, sealed', pp.result.parts.length === 2 && allClosed(pp.result.parts) && scraps > 0 && cs.every(c => c.seg.count === 1) && cs[0].seg.from[0] === 1 && cs[1].seg.from[0] === 0, { scraps, segs: cs.map(c => [c.seg.count, c.seg.from]) });
+  } else check('a sliced pick cuts', false, pp.error);
+  // a tongue: a flat plate in two halves, the left one poking a narrow strip into the right
+  const plate = K.shapeMesh({ kind: 'cube', w: 60, d: 40, h: 4 }), ps = K.subdivideMesh(plate.positions, plate.indices, { maxEdge: 1.5 }), Q = ps.positions, J = ps.indices, nq = J.length / 3;
+  const cen = (t) => [0, 1, 2].map(k => (Q[3 * J[3 * t] + k] + Q[3 * J[3 * t + 1] + k] + Q[3 * J[3 * t + 2] + k]) / 3);
+  const inTongue = (c) => c[2] > 1.99 && c[0] >= 0 && c[0] < 12 && Math.abs(c[1]) < 1.6;
+  const H = new Int32Array(nq), tongue = []; for (let t = 0; t < nq; t++) { const c = cen(t); H[t] = c[0] < 0 || inTongue(c) ? 0 : 1; if (inTongue(c) && c[0] > 2) tongue.push(t); }
+  const H1 = H.slice(), moved = K.trimTongues(Q, J, H1);
+  let others = 0; for (let t = 0; t < nq; t++) if (H1[t] !== H[t] && !inTongue(cen(t)) && Math.abs(cen(t)[0]) > 1) others++; // (a lone triangle on the zigzag border may straighten)
+  check('a narrow tongue across a smooth border goes to the region it pokes into, and nothing else moves', tongue.length > 20 && moved > 0 && tongue.every(t => H1[t] === 1) && others === 0, { tongue: tongue.length, moved, left: tongue.filter(t => H1[t] !== 1).length, others });
+  const hard = new Uint8Array(nq); for (let t = 0; t < nq; t++) if (inTongue(cen(t))) hard[t] = 1;
+  const H2 = H.slice(); K.trimTongues(Q, J, H2, { hard });
+  check('a strip of made surface in a sculpted one is no tongue: it stays', tongue.every(t => H2[t] === 0));
+  // a strip bounded by creases stays as well: a rib standing on the plate, its top and sides in the left half's region
+  const rib = K.booleanShape(plate.positions, plate.indices, { kind: 'cube', w: 12, d: 3, h: 4, edge: 'sharp', pos: [6, 0, 3], rot: [0, 0, 0] }, 'union');
+  const rs = K.subdivideMesh(rib.positions, rib.indices, { maxEdge: 1.5 }), R = rs.positions, RI = rs.indices, nr = RI.length / 3;
+  const rc = (t) => [0, 1, 2].map(k => (R[3 * RI[3 * t] + k] + R[3 * RI[3 * t + 1] + k] + R[3 * RI[3 * t + 2] + k]) / 3);
+  const RG = new Int32Array(nr), ribTop = []; for (let t = 0; t < nr; t++) { const c = rc(t), up = c[2] > 2.001; RG[t] = c[0] < 0 || up ? 0 : 1; if (up && c[2] > 4.9 && c[0] > 2) ribTop.push(t); }
+  const RG1 = RG.slice(); K.trimTongues(R, RI, RG1);
+  check('a narrow strip bounded by creases is a feature, not a tongue: it stays', ribTop.length > 5 && ribTop.every(t => RG1[t] === 0), { n: ribTop.length, left: ribTop.filter(t => RG1[t] === 0).length });
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);
