@@ -4622,7 +4622,7 @@
           }
           refused++;
           const why = pick ? pick.forced || pick.error || '' : '';
-          if (!/hook|held at more than one end/.test(why)) break; // only a hooked or wedged refusal is worth trying with a neighbour
+          if (!/hook|held in \d+ places/.test(why)) break; // only a hooked or wedged refusal is worth trying with a neighbour
         }
         if (cut) break;
       }

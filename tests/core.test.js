@@ -1121,9 +1121,9 @@ console.log('form: the parts of a figure by thickness');
     const req = { loops: K.groupLoops(P, I, ps, [armR]), regions: [armR], seg: { groupOf: ps.groupOf, count: ps.count, borders: ps.borders, areas: ps.areas }, cfg: { type: 'none' }, minThickness: 0.8, sink: 0, perArea: 1, numberJoints: false, joint: 1, smooth: true };
     const pk = K.planPick(P, I, req), parts = pk.result ? pk.result.parts : [], vol = parts.reduce((a, q) => a + q.volume, 0);
     check('splitting off the arm with its flat end gives sealed pieces whose volumes add up', parts.length === 2 && parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(vol - K.volume(P, I)) / K.volume(P, I) < 0.002, { error: pk.error, n: parts.length, vol }); 
-    // (1.86) a painted pick is cut as painted: no flat end replaces its outline (the owner's brushed arm lost a strip of its shoulder pad to the flat end's ring)
-    const clicked = K.pickMesh(P, I, req), painted = K.pickMesh(P, I, { ...req, painted: true });
-    check('a clicked arm gets its flat end, a painted one keeps the outline it was painted with', !!clicked.req.limbEnds && !painted.req.limbEnds, { clicked: clicked.req.limbEnds, painted: painted.req.limbEnds }); }
+    // (1.92) a brushed arm ends flat too (1.86 kept its outline as painted, and the arm came off with the outline's horns): the flat ring must lie on the picked surface, so it never takes a strip of the shoulder pad; `limbEnds: false` keeps the outline
+    const clicked = K.pickMesh(P, I, req), painted = K.pickMesh(P, I, { ...req, painted: true }), asPainted = K.pickMesh(P, I, { ...req, painted: true, limbEnds: false });
+    check('a clicked arm and a brushed one both get the flat end; asked not to, the outline is kept', !!clicked.req.limbEnds && !!painted.req.limbEnds && !asPainted.req.limbEnds, { clicked: clicked.req.limbEnds, painted: painted.req.limbEnds, asPainted: asPainted.req.limbEnds }); }
   // (1.84) sections are pieces of parts: laid over the parts, no section holds triangles of two parts
   { const sc = K.segmentSections(P, I, { fold: 30, angle: 52, minFrac: 0.003, parts: ps.groupOf }), one = new Map();
     let crossing = 0; for (let t = 0; t < nt; t++) { const g = sc.groupOf[t]; if (!one.has(g)) one.set(g, ps.groupOf[t]); else if (one.get(g) !== ps.groupOf[t]) crossing++; }
@@ -1310,11 +1310,11 @@ console.log('curved cuts along a border');
   const anS = K.analyzeLoop(sp.positions, sp.indices, orientedW, { type: 'none', sink: 1, margin: 1 }, 40);
   const smallPlain = Math.min(...cw.parts.map(q => q.volume)), smallSunk = Math.min(...sunk.parts.map(q => q.volume)), faceArea = anS.base.regions[0].area;
   check('a sunk face: full depth, sealed, volume kept', sunk.sink > 0.95 && anS.curved.sink > 0.95 && allClosed(sunk.parts) && Math.abs(sumVol(sunk.parts) - sp.report.volume) / sp.report.volume < 1e-6, [sunk.sink, anS.curved.sink, sumVol(sunk.parts)]);
-  // (1.87, 1.88) the face goes from the line's own edge straight down to one level floor a millimetre below the line's lowest dip, so the cap piece ends in a solid
-  // plug and neither piece thins to an edge where the line rises; where there is no solid below, it comes up
-  const sk = anS.curved.sunk, depths = sk.depth, deepest = anS.curved.into2 > 0 ? Math.max(...sk.h2) : Math.min(...sk.h2);
-  const level = Array.from(sk.h2).filter(v => Math.abs(v - deepest) < 0.05).length;
-  check('a sunk face goes straight in from the line’s edge, with a level floor below its lowest dip along most of it', !!sk.column && level > depths.length * 0.4 && depths.every(d => d >= 0), [!!sk.column, level, depths.length]);
+  // (1.92) the face goes from the line's own edge straight in to a plug's end that is either one level face, or,
+  // where the other piece can't hold that all round (here: the wavy line climbs 8 mm), the cut face pushed in evenly:
+  // every wall the same height, never a point left short (1.90's tilted floor pulled down to the line made a spike)
+  const sk = anS.curved.sunk, depths = sk.depth, dLo = Math.min(...depths), dHi = Math.max(...depths);
+  check('a sunk face goes straight in from the line’s edge to an end that is level or evenly deep, no wall shorter than the least depth', !!sk.column && (sk.flatEnd || sk.even) && dLo >= sk.least - 1e-9 && (sk.even ? dHi - dLo < 1e-9 : true) && sk.floorTilt === 0, [!!sk.column, sk.flatEnd, sk.even, dLo, dHi, sk.least]);
   const capOf = (parts) => parts.reduce((a, b) => (a.bbox.max[2] > b.bbox.max[2] ? a : b)), capPlain = capOf(cw.parts).volume, capSunk = capOf(sunk.parts).volume;
   check('the cap piece gains the plug', capSunk - capPlain > 0.3 * faceArea, [capSunk - capPlain, faceArea]);
   // the slab really is there: along the frame normal, the smaller piece is at least a millimetre thick at the line
@@ -1759,10 +1759,10 @@ console.log('regions by folds, and splitting off a region');
   for (let t = 0; t < ntF; t++) { let x = 0, y = 0, z = 0; for (let k = 0; k < 3; k++) { const v = 3 * frame.indices[3 * t + k]; x += frame.positions[v] / 3; y += frame.positions[v + 1] / 3; z += frame.positions[v + 2] / 3; } const w = 1.2 * (Math.sin(2 * y) + Math.sin(2 * z)); gBar[t] = z > 15.5 && x > 7 + w && x < 13 + w ? 1 : 0; }
   const segF = K.bordersFromGroups(frame.positions, frame.indices, gBar), lF = K.regionLoops(frame.positions, frame.indices, segF, 1);
   let wedged = ''; try { K.splitRegion(frame.positions, frame.indices, segF, 1); } catch (e) { wedged = e.message; }
-  check('a bar bridging two walls of one piece, with wavy cut faces, is refused and told to split a neighbour first', lF.length === 2 && /held at more than one end/.test(wedged) && /neighbours first/.test(wedged), [lF.length, wedged]);
+  check('a bar bridging two walls of one piece, with wavy cut faces, is refused and told to split a neighbour first', lF.length === 2 && /held in \d+ places/.test(wedged) && /neighbours first/.test(wedged), [lF.length, wedged]);
   // the owner can force a cut: the refusal becomes a warning on the result, and the pieces are still sealed
   const forced = K.splitRegion(frame.positions, frame.indices, segF, 1, { force: true });
-  check('forced, the bridging bar still comes off, sealed, with the refusal as a warning', forced.parts.length >= 2 && allClosed(forced.parts) && forced.warnings.length === 1 && forced.warnings[0].code === 'locked' && /held at more than one end/.test(forced.warnings[0].message) && Math.abs(sumVol(forced.parts) - frame.report.volume) / frame.report.volume < 1e-6, [forced.parts.length, forced.warnings]);
+  check('forced, the bridging bar still comes off, sealed, with the refusal as a warning', forced.parts.length >= 2 && allClosed(forced.parts) && forced.warnings.length === 1 && forced.warnings[0].code === 'locked' && /held in \d+ places/.test(forced.warnings[0].message) && Math.abs(sumVol(forced.parts) - frame.report.volume) / frame.report.volume < 1e-6, [forced.parts.length, forced.warnings]);
   check('the region under a point, and none far from the surface', K.regionAtPoint(bell.positions, bell.indices, segB, [2.5, 0, 30]) === bar && K.regionAtPoint(bell.positions, bell.indices, segB, [500, 0, 0]) === -1);
 }
 
