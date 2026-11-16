@@ -4189,7 +4189,7 @@
   function noKeysText(nk, many, perLoop) {
     if (!nk) return null;
     // (1.85) how many lines have no joint: "one of its lines" read as if the others had one when none did
-    const n = perLoop ? perLoop.length : 0, bare = perLoop ? perLoop.filter(per => !(per.keys && per.keys.length) && !(per.plugs && per.plugs.length) && !per.extruded).length : 0;
+    const real = perLoop ? perLoop.filter(per => !per.tiny) : [], n = real.length, bare = real.filter(per => !(per.keys && per.keys.length) && !(per.plugs && per.plugs.length) && !per.extruded).length; // (1.92: a speck of a line isn't counted)
     if (!bare && n) return null; // (1.89) every line has its joint (a line extruded into a plug counts as one)
     const where = !many ? 'this line' : n && bare === n ? (n === 2 ? 'either of its lines' : `any of its ${n} lines`) : bare > 1 ? `${bare} of its ${n} lines` : 'one of its lines';
     const those = !many ? 'that line' : bare > 1 ? 'those lines' : 'that line';
@@ -4199,10 +4199,32 @@
     if (nk.code === 'room') return `No room for keys inside ${where} at these settings, so ${those} will be cut without them.${small}`;
     return 'Keys couldn’t be placed on this line, so it will be cut without them.';
   }
+  // (1.92) What joint each line of a pick gets, in a sentence: the owner read "no plug" in a warning about a speck of
+  // a line while the cut did carry plugs, and nothing said which line got what
+  function pickJointText(pick) {
+    const r = pick.result, per = pick.perLoop || [], n = pick.loops.length, made = (r && r.plugsMade) || [];
+    let edge = 0, inset = 0, keyed = 0, tiny = 0, lo = Infinity, hi = 0, flat = 0, shared = false;
+    for (let i = 0; i < n; i++) {
+      const q = made[i], pl = per[i] || {};
+      if (q) { edge++; lo = Math.min(lo, q.least || q.depth); hi = Math.max(hi, q.depth); if (q.flat) flat++; if (q.shared) shared = true; }
+      else if (pl.plugs && pl.plugs.length) inset++;
+      else if (pl.tiny && !(pl.keys && pl.keys.length)) tiny++;
+      if (pl.keys && pl.keys.length) keyed++;
+    }
+    const bare = pick.loops.filter((l, i) => !made[i] && !((per[i] || {}).plugs || []).length && !((per[i] || {}).keys || []).length && !(per[i] || {}).tiny).length, bits = [], lines = (k) => (n === 1 ? '' : k === n ? (n === 2 ? ' on both lines' : ` on all ${n} lines`) : ` on ${k === 1 ? 'one line' : `${k} lines`}`);
+    const taper = state.cfg.sinkTaper > 0 && made.some(q => q && q.taper > 0) ? `, sides leaning in ${fmt(Math.max(...made.filter(Boolean).map(q => q.taper)))}°` : '';
+    if (edge) bits.push(`a plug from the cut’s edge${lines(edge)}, ${hi - lo > 0.2 ? `${fmt(lo)} to ${fmt(hi)}` : fmt(hi)} mm into the other piece${taper}${flat === edge ? ', with a flat end' : ''}${shared ? ', along the one way the pieces slide apart' : ''}`);
+    const deep = (pick.plugs || []).length ? `, ${fmt(Math.max(...pick.plugs.map(q => q.depth)))} mm deep` : '', nkeys = (pick.keys || []).length;
+    if (inset) bits.push(`a plug set in from the edge${lines(inset)}${deep}${state.cfg.sink > 0 ? ' (the other piece is too thin there for one from the edge)' : ''}`);
+    if (keyed) bits.push(`${nkeys} ${{ peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key'}${nkeys === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}${lines(keyed)}`);
+    if (!bits.length) return state.cfg.sink > 0 || state.cfg.type !== 'none' ? (n === 1 ? 'The cut is flat, with no joint: there’s no room for one here.' : 'The lines are cut flat, with no joint: there’s no room for one here.') : '';
+    const rest = bare + tiny ? ` ${bare + tiny === 1 ? 'The other line is' : `The other ${bare + tiny} lines are`} cut flat${tiny && !bare ? ' (too small for a joint)' : ''}.` : '';
+    return `Joint: ${bits.join('; ')}.${rest}`;
+  }
   function droppedText(d) {
     const what = d.what === 'plug' ? 'A plug' : 'Keys', it = d.what === 'plug' ? 'one' : 'them';
     if (d.code === 'crumb') return `${what} would have broken through a thin wall and nicked off a scrap, so it will be cut without ${it}.`;
-    return d.code === 'locked' ? `${what} would make the pieces slide straight apart, and here they’d catch on each other, so it will be cut without ${it}.` : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`;
+    return d.code === 'locked' ? (d.some ? `${what} on every line would lock the pieces together (they only slide apart one way), so one line keeps its joint and the rest are cut flat.` : `${what} here would lock the pieces together, so the cut is made flat, without ${it}.`) : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`;
   }
   function drawPickLines(p, pick) {
     const v = views.get(p.id);
@@ -4221,7 +4243,10 @@
       const per = pick.perLoop[li], F = pick.frames[li], d = pick.draw && pick.draw[li];
       if (per && F && d && d.keys.length) markers.add(curvedKeyMarkers(d.keys, F, per.cfg || state.cfg));
       if (per && F && d && d.plugs.length) markers.add(curvedPlugMarkers(d.plugs, F));
-      if (F && d && d.sink) markers.add(curvedSinkMarker(d.sink, F));
+      // (1.92) once the cut is checked the plug is drawn as it was made (it may run along the pieces' one pull direction, or not fit at all); before that, as planned
+      const made = pick.result && pick.result.plugsMade ? pick.result.plugsMade[li] : undefined;
+      if (made) markers.add(plugMadeMarker(made));
+      else if (made === undefined && F && d && d.sink) markers.add(curvedSinkMarker(d.sink, F));
     });
     v.pickLine = g; v.mesh.add(g);
     if (markers.children.length) { v.pickKeys = markers; v.mesh.add(markers); }
@@ -4324,6 +4349,22 @@
   // A plug on a curved cut, drawn standing on the face that follows the line, as deep as it will be.
   // (1.90) the cut's extrusion drawn before the cut, in the keys' blue: a see-through skin from the line down to the
   // plug's flat end, and the end's outline, so it shows even with no extra key
+  // The plug as the cut made it: its sides as a see-through skin, its end as a filled face with an outline
+  function plugMadeMarker(pm) {
+    const g = new THREE.Group(), n = pm.floor.length / 3, pos = [], end = [], c0 = [0, 0, 0];
+    for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) c0[k] += pm.floor[3 * i + k] / n;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, a = pm.line.slice(3 * i, 3 * i + 3), b = pm.line.slice(3 * j, 3 * j + 3), c = pm.floor.slice(3 * i, 3 * i + 3), e = pm.floor.slice(3 * j, 3 * j + 3);
+      pos.push(...a, ...b, ...c, ...b, ...e, ...c, ...c, ...e, ...c0);
+      end.push(new THREE.Vector3(...c));
+    }
+    const geom = new THREE.BufferGeometry(); geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); if (geom.computeVertexNormals) geom.computeVertexNormals();
+    const skin = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: KEY_MARK, roughness: 0.5, transparent: true, opacity: 0.45, depthTest: false, side: THREE.DoubleSide }));
+    skin.renderOrder = 8; g.add(skin);
+    const ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(end), new THREE.LineBasicMaterial({ color: KEY_MARK, depthTest: false }));
+    ring.renderOrder = 9; g.add(ring);
+    return g;
+  }
   function curvedSinkMarker(sk, F) {
     const g = new THREE.Group(), n = sk.h.length, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z);
     const pos = [], end = [];
@@ -4462,7 +4503,7 @@
       renderAction(); return;
     }
     if (pick.preview) {
-      const pk = pick.plugs.length ? ` The plug is drawn in blue.` : pick.keys.length ? ` The keys are drawn in blue.` : '';
+      const pk = pick.plugs.length || (pick.draw || []).some(d => d && d.sink) ? ` The plug is drawn in blue.` : pick.keys.length ? ` The keys are drawn in blue.` : '';
       el.innerHTML = `<p class="status ok">${ICONS.check}<span>Painted area with ${nl === 1 ? 'an outline' : `an outline of ${nl} lines`}, ${len} in all.${pk} Keep painting, or split it off: the cut is checked then.</span></p>${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}${pickShowHTML()}`;
       applyPickShow();
       renderAction();
@@ -4470,15 +4511,15 @@
     }
     const vols = pick.result.parts.map(q => fmtVol(q.volume)); // (1.76) a miniature's hand is mm³, not "0.0 cm³"
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
-    const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
-    const sinks = (pick.result.sinks || []).filter(s => s > 0.05), sunkLine = sinks.length ? ` The cut is extruded up to ${fmt(Math.max(...sinks))} mm into the other piece${state.cfg.sinkTaper > 0 ? `, tapered ${fmt(state.cfg.sinkTaper)}°` : ''}${sinks.length < nl ? ' on ' + (sinks.length === 1 ? 'one line' : `${sinks.length} lines`) : ''}, so this piece ends in a plug that seats in a socket.` : state.cfg.sink > 0 ? ' There’s no room to extrude the cut here.' : '';
+    const keyLine = ''; // (1.92: the joints are said per line by pickJointText)
+    const sunkLine = ' ' + pickJointText(pick);
     const what = region ? `${painted ? 'The painted area’s' : nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${painted || nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} and leaves ${vols.length === 2 ? vols[1] : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')}`}.`
       : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]}.`
       : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')}.`;
     const drawMore = state.draw.on && !state.draw.points.length ? `<p class="status muted">Drag across the part or click points again to add a line: it will be cut together with the ${nl === 1 ? 'line' : `${nl} lines`} already picked.</p>` : '';
     el.innerHTML = `${drawMore}${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}${sunkLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}${sunkLine}</span></p>`}
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
-      <div class="btn-row move-line">${state.edit ? '' : `<button class="btn small" data-act="edit-seam" title="Turn the line into handles you can drag along the surface">Edit ${nl === 1 ? 'the line' : 'the lines'}</button>`}<span class="lbl">Move</span><button class="btn small" data-act="move-in" title="Move the line into the piece being split off, along the surface">In</button><button class="btn small" data-act="move-out" title="Move the line outward, along the surface">Out</button><label class="inline-num"><span class="lbl">by</span><input type="number" id="moveLineBy" min="0.1" step="0.5" value="${state.moveBy || 1}" aria-label="Move the line by this much"><span class="unit">mm</span></label><button class="btn small" data-act="flat-here" title="A flat cut through the line’s plane instead, cutting only this area">Flat cut here</button></div><div class="btn-row fill-gaps"><button class="btn small" data-act="fill-gaps" title="Complete the pick: fill the narrow gaps between the picked pieces and every patch they surround">Fill gaps</button><label class="inline-num"><span class="lbl">up to</span><input type="number" id="fillGapBy" min="0.1" step="0.5" value="${state.fillGap || fillGapDefault()}" aria-label="Fill gaps up to this wide"><span class="unit">mm</span></label></div>${pickShowHTML()}${painted || state.edit ? '' : addHint}`;
+      <details class="rp-more" data-sec="pickAdjust"${state.ui.pickAdjust ? ' open' : ''}><summary>Adjust the line</summary><div class="btn-row move-line">${state.edit ? '' : `<button class="btn small" data-act="edit-seam" title="Turn the line into handles you can drag along the surface">Edit ${nl === 1 ? 'the line' : 'the lines'}</button>`}<span class="lbl">Move</span><button class="btn small" data-act="move-in" title="Move the line into the piece being split off, along the surface">In</button><button class="btn small" data-act="move-out" title="Move the line outward, along the surface">Out</button><label class="inline-num"><span class="lbl">by</span><input type="number" id="moveLineBy" min="0.1" step="0.5" value="${state.moveBy || 1}" aria-label="Move the line by this much"><span class="unit">mm</span></label><button class="btn small" data-act="flat-here" title="A flat cut through the line’s plane instead, cutting only this area">Flat cut here</button></div><div class="btn-row fill-gaps"><button class="btn small" data-act="fill-gaps" title="Complete the pick: fill the narrow gaps between the picked pieces and every patch they surround">Fill gaps</button><label class="inline-num"><span class="lbl">up to</span><input type="number" id="fillGapBy" min="0.1" step="0.5" value="${state.fillGap || fillGapDefault()}" aria-label="Fill gaps up to this wide"><span class="unit">mm</span></label></div></details>${pickShowHTML()}${painted || state.edit ? '' : addHint}`;
     applyPickShow();
     renderAction();
   }
@@ -4622,7 +4663,7 @@
           }
           refused++;
           const why = pick ? pick.forced || pick.error || '' : '';
-          if (!/hook|held at more than one end/.test(why)) break; // only a hooked or wedged refusal is worth trying with a neighbour
+          if (!/hook|held in \d+ places/.test(why)) break; // only a hooked or wedged refusal is worth trying with a neighbour
         }
         if (cut) break;
       }
@@ -4685,7 +4726,10 @@
     const numberLine = numbered ? ` ${numbered === 1 ? `The joint is numbered ${state.joint}` : `The joints are numbered ${state.joint} to ${state.joint + numbered - 1}`}.` : '';
     if (numbered) state.joint += pick.perLoop.length;
     if (pick.painted) setPainting(false);
-    toast(`${pick.painted ? `Split off the painted area: ${n} pieces` : pick.regions ? `Split off the ${pick.regions.length === 1 ? 'region' : 'regions'}: ${n} pieces` : `Cut along the ${pick.loops.length === 1 ? 'line' : 'lines'} into ${n} pieces`}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}.${numberLine} Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
+    // (1.92) the pieces stand apart at once, so the plug and its socket can be seen (the owner looked at two pieces still together and saw no plug)
+    if (state.explode < 0.3) { state.explode = 0.3; const ex = $('#explode'); if (ex) ex.value = state.explode; const eo = $('#explodeOut'); if (eo) eo.textContent = '30%'; }
+    applyExplode(); markDirty();
+    toast(`${pick.painted ? `Split off the painted area: ${n} pieces` : pick.regions ? `Split off the ${pick.regions.length === 1 ? 'region' : 'regions'}: ${n} pieces` : `Cut along the ${pick.loops.length === 1 ? 'line' : 'lines'} into ${n} pieces`}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}.${numberLine} The pieces are shown apart (Exploded view, bottom left). Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
   }
   $('#seamSmooth').addEventListener('input', (e) => { $('#seamSmoothOut').textContent = e.target.value; });
   $('#seamSmooth').addEventListener('change', (e) => { smoothSeam(+e.target.value); });

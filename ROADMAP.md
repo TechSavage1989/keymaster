@@ -43,6 +43,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - Plug as the extra key on an extruded cut: the extrusion is the plug; a joint never comes away as a piece of its own (1.89).
 - The extruded plug's end is always one flat face (level where it fits, tilted where it must), it shows in blue before the cut, and lines round crevices or specks aren't extruded (1.90).
 - The extrusion shows while painting with Extra key None, and a made object's jagged outline (the book) gets its flat plug too (1.91).
+- A plug's end is level or evenly deep, never tilted or pulled to a point; a brushed limb ends flat like a clicked one; plugs on several lines share the one way the pieces slide apart, or the joints that would lock are left off; where the other piece is too thin for a plug from the edge, the plug is set in; the pieces stand apart after a cut; the Regions panel folds its lesser options (1.92).
 - One tool for picking (Regions with Pick by: Click | Brush), and Sections as the smaller pieces within each part, never running into another part (1.84).
 - Limbs kept whole at Balanced and ended in a flat cut at the joint (no flaps under a cape, no spike on the arm), knife-thin edges flagged before a cut, a Thinnest piece setting (1.83).
 - The same regions at any size (they are found from the shape as it opened, so 100% and 1000% agree triangle for triangle; only the keys go by millimetres), and the strips between a book's clasps go with the book (1.82).

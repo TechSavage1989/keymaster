@@ -375,6 +375,10 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .sec > summary::before { border-color: var(--accent); }
 .sec > summary, .sec-head { display: flex; align-items: center; gap: 8px; padding: 8px 16px; cursor: pointer; list-style: none; user-select: none; font-weight: 600; font-size: 13.5px; }
 .sec > summary::-webkit-details-marker { display: none; }
+.rp-more { margin: 2px 0 4px; }
+.rp-more > summary { cursor: pointer; user-select: none; font-size: 12.5px; color: var(--muted, #6b7280); padding: 3px 0; }
+.rp-more > summary:hover { color: var(--accent); }
+.rp-more[open] > summary { margin-bottom: 4px; }
 .sec > summary::before { content: ""; width: 7px; height: 7px; border-right: 1.6px solid var(--muted); border-bottom: 1.6px solid var(--muted); transform: rotate(-45deg); transition: transform .12s; margin: 0 4px 0 1px; }
 .sec[open] > summary::before { transform: rotate(45deg); margin-top: -3px; }
 .sec > summary:hover { background: var(--panel-2); }
@@ -561,7 +565,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.91, build 7430d7. After an update, refresh the page and check this changes.">v1.91 · 7430d7</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.92, build c9f56b. After an update, refresh the page and check this changes.">v1.92 · c9f56b</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -663,18 +667,23 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
     <div class="rp-row rp-by"><span class="lbl">Find</span><div class="seg" role="group" aria-label="Find"><button type="button" data-act="regions-by" data-value="form" aria-pressed="true" title="Parts: whole parts of the figure: a limb, a head, the torso, a hat, armour, a book, a weapon, a base. Detail sets how finely they are told apart">Parts</button><button type="button" data-act="regions-by" data-value="folds" aria-pressed="false" title="Sections: the smaller pieces within each part, wherever a border or a fold runs across it (a cuff on a sleeve, a collar, a belt, a plate of armour, a book's cover). A section never runs into another part">Sections</button></div><output id="regionsCount"></output></div>
     <div class="rp-row rp-ratio"><span class="lbl" title="How finely the model is split into parts">Detail</span><div class="seg" role="group" aria-label="Detail" id="regionsDetail"><button type="button" data-act="regions-detail" data-value="coarse" aria-pressed="false" title="Only the big parts: head, limbs, body, base">Big</button><button type="button" data-act="regions-detail" data-value="balanced" aria-pressed="true" title="The parts a kit would have: head, hands, feet, hat, clothing">Balanced</button><button type="button" data-act="regions-detail" data-value="fine" aria-pressed="false" title="Smaller parts too: ears, fingers, buttons, straps">Fine</button></div></div>
     <div class="rp-row rp-fold" hidden><label class="slider" title="How big the sections are: left for a few large ones, right for many small ones (the surface is split where it creases, and where a hard surface such as a book or a buckle meets cloth or skin)"><span class="lbl">Section size</span><input type="range" id="regionsAngle" min="0" max="100" step="5" value="55" aria-label="Section size, from large (left) to small (right)"><output id="regionsAngleOut">Medium</output></label></div>
-    <div class="btn-row"><label class="inline-num" title="The cut goes from its edge straight into the other piece, at least this far past the line&#39;s deepest point, so the piece ends in a solid plug that seats in a matching socket, with no thin or sharp rim. 0 turns it off."><span class="lbl">Extrude</span><input type="number" id="sinkDepth" min="0" step="0.5" value="1" aria-label="How far the cut goes into the other piece past the line, in mm"><span class="unit">mm</span></label><label class="inline-num" title="The plug&#39;s sides lean in by this angle so it slides home. 0 for straight sides."><span class="lbl">Taper</span><input type="number" id="sinkTaper" min="0" max="20" step="1" value="5" aria-label="Taper of the plug&#39;s sides in degrees"><span class="unit">°</span></label><label class="inline-num" title="An extra key on the plug&#39;s end, or none. The same choice as in Joints."><span class="lbl">Extra key</span><select id="extraKey" aria-label="Extra key on the cut"><option value="peg">Pegs</option><option value="dowel">Dowels</option><option value="magnet">Magnets</option><option value="plug">Plug</option><option value="none">None</option></select></label><label class="inline-num" title="No piece may be thinner than this after a cut: a cut that would leave a thinner wall, a sliver or a knife-sharp edge along its rim is flagged before it is made (you can still cut it anyway). Follows the printer until set."><span class="lbl">Thinnest</span><input type="number" id="minPiece" min="0.2" step="0.1" value="1.2" aria-label="The thinnest a piece may be after a cut"><span class="unit">mm</span></label><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div>
+    <div class="btn-row"><label class="inline-num" title="The cut goes from its edge straight into the other piece, at least this far past the line&#39;s deepest point, so the piece ends in a solid plug that seats in a matching socket, with no thin or sharp rim. 0 turns it off."><span class="lbl">Extrude</span><input type="number" id="sinkDepth" min="0" step="0.5" value="1" aria-label="How far the cut goes into the other piece past the line, in mm"><span class="unit">mm</span></label><label class="inline-num" title="The plug&#39;s sides lean in by this angle so it slides home. 0 for straight sides."><span class="lbl">Taper</span><input type="number" id="sinkTaper" min="0" max="20" step="1" value="5" aria-label="Taper of the plug&#39;s sides in degrees"><span class="unit">°</span></label><label class="inline-num" title="An extra key on the plug&#39;s end, or none. The same choice as in Joints."><span class="lbl">Extra key</span><select id="extraKey" aria-label="Extra key on the cut"><option value="peg">Pegs</option><option value="dowel">Dowels</option><option value="magnet">Magnets</option><option value="plug">Plug</option><option value="none">None</option></select></label><label class="inline-num" title="No piece may be thinner than this after a cut: a cut that would leave a thinner wall, a sliver or a knife-sharp edge along its rim is flagged before it is made (you can still cut it anyway). Follows the printer until set."><span class="lbl">Thinnest</span><input type="number" id="minPiece" min="0.2" step="0.1" value="1.2" aria-label="The thinnest a piece may be after a cut"><span class="unit">mm</span></label></div>
+    <details class="rp-more" data-sec="cutMore"><summary>More cut options</summary><div class="btn-row"><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div></details>
     <div id="paintTools" class="paint-tools" hidden>
-      <div class="btn-row"><label class="inline-num" title="Brush size"><span class="lbl">Brush</span><input type="number" id="brushSize" min="0.2" step="0.5" value="3" aria-label="Brush size in millimetres"><span class="unit">mm</span></label><input type="range" id="brushSlider" class="brush-slider" min="0" max="100" step="1" value="40" aria-label="Brush size" title="Brush size: drag to change ([ and ] too)"><button class="btn small" id="eraseBtn" aria-pressed="false" title="Erase paint instead of adding it (or hold Shift while painting)">Erase</button><button class="btn small" id="brushModeBtn" data-act="paint-mode" aria-pressed="false" title="Surface follows connected faces and stops at the edge of a layer; Sphere paints every face within reach, layers behind included">Surface</button><button class="btn small" id="fillBtn" data-act="paint-fill" aria-pressed="false" title="A click paints the whole surface region under the brush">Fill</button></div>
-      <div class="btn-row"><button class="btn small" data-act="paint-grow" title="Grow the painted area outward by one brush width">Grow</button><button class="btn small" data-act="paint-shrink" title="Shrink the painted area by one brush width">Shrink</button><button class="btn small" data-act="paint-tidy" title="Smooth the painted area's edge: drop thin tongues and fill notches">Tidy edge</button><button class="btn small" data-act="paint-fill-gaps" title="Fill the gaps in the paint: channels narrower than the brush between painted pieces, and every patch the paint surrounds">Fill gaps</button><button class="btn small" data-act="paint-snap" title="Snap the paint to the surface regions: a region at least half painted is painted whole, the rest cleared">Snap to borders</button><button class="btn small" data-act="paint-clear" title="Remove all paint">Clear</button><button class="btn small" id="isolateBtn" data-act="paint-isolate" aria-pressed="false" title="Hide everything but the painted area, so the rest of the model stays out of the way of the brush and clicks">Isolate</button></div>
+      <div class="btn-row"><label class="inline-num" title="Brush size"><span class="lbl">Brush</span><input type="number" id="brushSize" min="0.2" step="0.5" value="3" aria-label="Brush size in millimetres"><span class="unit">mm</span></label><input type="range" id="brushSlider" class="brush-slider" min="0" max="100" step="1" value="40" aria-label="Brush size" title="Brush size: drag to change ([ and ] too)"><button class="btn small" id="eraseBtn" aria-pressed="false" title="Erase paint instead of adding it (or hold Shift while painting)">Erase</button><button class="btn small" id="brushModeBtn" data-act="paint-mode" aria-pressed="false" title="Surface follows connected faces and stops at the edge of a layer; Sphere paints every face within reach, layers behind included">Surface</button><button class="btn small" id="fillBtn" data-act="paint-fill" aria-pressed="false" title="A click paints the whole surface region under the brush">Fill</button><button class="btn small" data-act="paint-clear" title="Remove all paint">Clear</button><button class="btn small" id="isolateBtn" data-act="paint-isolate" aria-pressed="false" title="Hide everything but the painted area, so the rest of the model stays out of the way of the brush and clicks">Isolate</button></div>
+      <details class="rp-more" data-sec="paintMore"><summary>Adjust the painted area</summary>
+      <div class="btn-row"><button class="btn small" data-act="paint-grow" title="Grow the painted area outward by one brush width">Grow</button><button class="btn small" data-act="paint-shrink" title="Shrink the painted area by one brush width">Shrink</button><button class="btn small" data-act="paint-tidy" title="Smooth the painted area's edge: drop thin tongues and fill notches">Tidy edge</button><button class="btn small" data-act="paint-fill-gaps" title="Fill the gaps in the paint: channels narrower than the brush between painted pieces, and every patch the paint surrounds">Fill gaps</button><button class="btn small" data-act="paint-snap" title="Snap the paint to the surface regions: a region at least half painted is painted whole, the rest cleared">Snap to borders</button></div>
+      </details>
     </div>
     <div id="cutLineInfo" class="cut-line-info"></div>
     <div id="seamTools" class="paint-tools" hidden>
       <div class="btn-row"><label class="inline-num" title="Ease the line: each step moves every handle towards its neighbours"><span class="lbl">Smooth</span><input type="range" id="seamSmooth" min="0" max="10" step="1" value="0" aria-label="Smooth the line"><output id="seamSmoothOut">0</output></label><label class="inline-num" title="A handle dragged near a region border lands on it"><input type="checkbox" id="seamSnap" checked> Snap to borders</label><button class="btn small" data-act="seam-done" title="Keep the line as it is and put the handles away">Done</button></div>
     </div>
     <div id="inlayTools" class="paint-tools" hidden>
+      <details class="rp-more" data-sec="inlay"><summary>Inlay cut: an insert in another colour</summary>
       <p class="status muted inlay-help">Inlay cut: the picked area comes out as an insert of its own and a pocket is cut for it, so an eye, a gem or a badge prints in another colour and presses back in.</p>
-      <div class="btn-row"><span class="lbl">Inlay</span><label class="inline-num" title="How deep the pocket goes, and how thick the inlay is"><span class="lbl">Depth</span><input type="number" id="inlayDepth" min="0.5" step="0.5" value="3" aria-label="Inlay depth in millimetres"><span class="unit">mm</span></label><label class="inline-num" title="The gap round the inlay: increase it if the inlay needs forcing, decrease it if it rattles"><span class="lbl">Fit</span><input type="number" id="inlayFit" min="0" step="0.05" value="0.2" aria-label="Fit gap in millimetres"><span class="unit">mm</span></label><label class="inline-num" title="One level base under the inlay, so it prints flat; untick for a floor that follows the surface"><input type="checkbox" id="inlayFlat" checked> Flat floor</label><button class="btn small cut" data-act="inlay-cut" title="Make the picked area a separate insert, and cut a matching pocket in the model for it to press into: for an eye, a gem or a badge in another colour">Inlay cut</button></div>
+      <div class="btn-row"><span class="lbl">Inlay</span><label class="inline-num" title="How deep the pocket goes, and how thick the inlay is"><span class="lbl">Depth</span><input type="number" id="inlayDepth" min="0.5" step="0.5" value="3" aria-label="Inlay depth in millimetres"><span class="unit">mm</span></label><label class="inline-num" title="The gap round the inlay: increase it if the inlay needs forcing, decrease it if it rattles"><span class="lbl">Fit</span><input type="number" id="inlayFit" min="0" step="0.05" value="0.2" aria-label="Fit gap in millimetres"><span class="unit">mm</span></label><label class="inline-num" title="One level base under the inlay, so it prints flat; untick for a floor that follows the surface"><input type="checkbox" id="inlayFlat" checked> Flat floor</label><button class="btn small" data-act="inlay-cut" title="Make the picked area a separate insert, and cut a matching pocket in the model for it to press into: for an eye, a gem or a badge in another colour">Make the inlay</button></div>
+      </details>
     </div>
   </div>
 </div>
@@ -4831,7 +4840,7 @@ const KMCore = (() => {
         return r;
       }
     }
-    return sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, false, null);
+    return null; // (1.92) no plug fits: the face is left as it is (sunk point by point it kept a slanted, thin rim), and the joint is a plug pulled in from the edge instead (`planJoints`)
   }
   // Each point of a ring moved in on its plane by d, along the inward direction of the ring eased smooth (no check
   // that the result is a clean ring: it only says where to look for room)
@@ -4859,6 +4868,35 @@ const KMCore = (() => {
       const tn = Math.tan(deg * f * Math.PI / 180), q = src.map((p, i) => [p[0] + nrm[i][0] * depth[i] * tn, p[1] + nrm[i][1] * depth[i] * tn]);
       const qq = a2 > 0 ? q : q.slice().reverse();
       if (ringOk(qq) && q.every(p => pointInRing(flatPts, p[0], p[1]))) { const out = new Float64Array(2 * n); q.forEach((p, i) => { out[2 * i] = p[0]; out[2 * i + 1] = p[1]; }); return { xy: out, deg: deg * f }; }
+      // (1.92) a jagged outline (a book's edge with its straps and clasps) folds the moved ring at every notch: the
+      // moved ring is eased until it is a clean ring inside the line, so the plug's end is a smooth outline and its
+      // sides lean in from the jagged edge (before, such a plug had straight sides)
+      if (f === 1 && src === e) {
+        let r = q;
+        for (let pass = 0; pass < 60; pass++) {
+          r = r.map((p, i) => { const a = r[(i + n - 1) % n], c = r[(i + 1) % n]; return [(a[0] + 2 * p[0] + c[0]) / 4, (a[1] + 2 * p[1] + c[1]) / 4]; });
+          if (pass % 4 !== 3) continue;
+          // (where the eased ring still crosses a notch of the line, that point stays on the line: a straight side there)
+          // where the eased ring still crosses a notch of the line, that point comes back towards the line as far as
+          // it must (a steeper side there), and so do the points round a crossing that is left; then its neighbours
+          // are held to it, so no point stands out from the ring as a fin
+          const tt = new Float64Array(n).fill(1), at = (i) => [pts[i][0] + (r[i][0] - pts[i][0]) * tt[i], pts[i][1] + (r[i][1] - pts[i][1]) * tt[i]];
+          for (let i = 0; i < n; i++) { while (tt[i] > 0) { const q0 = at(i); if (pointInRing(flatPts, q0[0], q0[1])) break; tt[i] = tt[i] > 0.26 ? tt[i] - 0.25 : 0; } }
+          let r2 = null;
+          for (let fix = 0; fix < 16; fix++) {
+            for (let sweep = 0; sweep < 2; sweep++) for (let i = 0; i < n; i++) { const lo = Math.min(tt[(i + n - 1) % n], tt[(i + 1) % n]); if (tt[i] > lo + 0.25) tt[i] = lo + 0.25; }
+            r2 = pts.map((_, i) => at(i));
+            const hits = findSelfCrossings(flatOf(r2)); if (!hits.length) break;
+            for (const [k, m] of hits) { const inner = m - k, wrap = inner > n / 2, from = wrap ? m : k, cnt = wrap ? n - inner : inner; if (cnt > n / 8) continue; for (let j = -1; j <= cnt + 2; j++) { const i = ((from + j) % n + n) % n; tt[i] = Math.max(0, tt[i] - 0.25); } }
+          }
+          // (the blending and the crossings' fix move points again: none may end outside the line)
+          for (let i = 0; i < n; i++) { while (tt[i] > 0) { const q0 = at(i); if (pointInRing(flatPts, q0[0], q0[1])) break; tt[i] = tt[i] > 0.26 ? tt[i] - 0.25 : 0; } }
+          r2 = pts.map((_, i) => at(i));
+          const rr = a2 > 0 ? r2 : r2.slice().reverse();
+          let kept = 0; for (let i = 0; i < n; i++) if (tt[i] > 0.5) kept++;
+          if (kept >= 0.6 * n && ringOk(rr)) { const out = new Float64Array(2 * n); r2.forEach((p, i) => { out[2 * i] = p[0]; out[2 * i + 1] = p[1]; }); return { xy: out, deg: deg * f }; }
+        }
+      }
     }
     return { xy: copy, deg: 0 };
   }
@@ -4940,49 +4978,65 @@ const KMCore = (() => {
       }
       return null;
     }
-    // (1.87) stepped in: every point goes as deep as the solid holds it with a wall to spare (one line through the
-    // model from the ledge), up to the line's deepest point plus `want`, so where there is room the floor is flat
-    let top = -Infinity; if (column) for (let i = 0; i < n; i++) top = Math.max(top, h[i] * into2);
+    // (1.87) a plug: how far the solid holds each point's line through the model, with a wall to spare
     const roomOf = new Float64Array(n);
     for (let i = 0; column && i < n; i++) {
       const r = roomAt(xy[2 * i], xy[2 * i + 1], h[i] + into2 * 1e-3 * wall);
       roomOf[i] = r ? r[0] - wall : -Infinity;
-      depth[i] = r ? Math.max(0, Math.min(top - h[i] * into2 + want, r[0] - wall)) : 0;
     }
-    // (1.90) the plug's end is one flat face: the owner's arm, where the shoulder held a column only part of the way
-    // round, came off with its end sloping to a point. The floor is the plane, level if it can be and tilted up to 35°
-    // if it must, that stays inside the solid at every point and goes deepest (up to `want` past the line's highest
-    // point), found over a grid of tilts; only where no plane goes a useful depth is each point sunk by itself
     if (column) { // a point whose line grazes the surface reads no room at all: it takes its nearer neighbours' room
       for (let i = 0; i < n; i++) if (roomOf[i] === -Infinity) { let l = -Infinity, r = -Infinity; for (let k = 1; k <= 3 && l === -Infinity; k++) l = roomOf[(i + n - k) % n]; for (let k = 1; k <= 3 && r === -Infinity; k++) r = roomOf[(i + k) % n]; roomOf[i] = Math.min(l, r); }
     }
-    if (column) {
-      let mx = 0, my = 0; for (let i = 0; i < n; i++) { mx += xy[2 * i] / n; my += xy[2 * i + 1] / n; }
-      // (1.91) a few points where the other piece is thin (the robe behind the book's edge: 7 of 316) don't set the
-      // plane: it is fitted to the rest, as long as they are nine in ten of the line, and dips there to stay inside
-      const need = Math.min(want, Math.max(0.3 * want, 0.5 * wall)), use = Array.from(roomOf, v => v >= need), nUse = use.filter(Boolean).length;
-      if (nUse < 0.9 * n) use.fill(true);
-      let best = null;
-      for (let bi = -14; bi <= 14; bi++) for (let ci = -14; ci <= 14; ci++) {
-        const b = bi * 0.05, c = ci * 0.05, tilt = Math.hypot(b, c); if (tilt > 0.7) continue;
-        let aUp = Infinity, aW = -Infinity;
-        for (let i = 0; i < n; i++) { if (!use[i]) continue; const sl = b * (xy[2 * i] - mx) + c * (xy[2 * i + 1] - my), lv = h[i] * into2; aUp = Math.min(aUp, lv + roomOf[i] - sl); aW = Math.max(aW, lv + want - sl); }
-        if (!(aUp > -Infinity)) continue;
-        const a = Math.min(aUp, aW); let dmin = Infinity;
-        for (let i = 0; i < n; i++) if (use[i]) dmin = Math.min(dmin, a + b * (xy[2 * i] - mx) + c * (xy[2 * i + 1] - my) - h[i] * into2);
-        const score = Math.min(dmin, want) - 0.3 * want * tilt;
-        if (!best || score > best.score + 1e-9) best = { score, a, b, c, dmin };
+    if (column) return plugFloor();
+    // (1.92) The plug's end, with no tilt and no point left short: the owner's arm came off with its end a tall
+    // spike, because the floor was a plane tilted up to 35° to fit the shoulder and then pulled down to the line
+    // wherever a point lacked room. Now the end is level (square to the plug's axis) `w` past the line's deepest
+    // point if the other piece holds that all round; otherwise the cut face itself pushed in by `w` (its own shape,
+    // smooth); `w` is Extrude, then less, never under `dMin`. A point whose line only grazes the other piece's
+    // surface reads a dip in the room that its neighbours don't have: a dip of a point or two is read past (the room
+    // there is its neighbours'), a longer one is real and the plug must fit it. Null when nothing fits.
+    function plugFloor() {
+      let per = 0; const seg = new Float64Array(n);
+      for (let i = 0; i < n; i++) { const j = (i + 1) % n; seg[i] = Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1], h[j] - h[i]); per += seg[i]; }
+      // the room as the solid holds it, past one- or two-point dips (each point's room is at least the lower of the
+      // best rooms within two points either side: a lone grazing reading lifts to its neighbours', a real narrowing
+      // that spans more points stays)
+      const room = Float64Array.from(roomOf), reach = Math.min(3 * wall, Math.max(2 * wall, 0.015 * per)); // (never past a real narrowing: three walls at most)
+      for (let i = 0; n >= 12 && i < n; i++) { // (by length along the line, not by count: sliced lines crowd points)
+        let l = -Infinity, r = -Infinity, run = 0;
+        for (let k = 1; k < n / 2; k++) { run += seg[(i + n - k) % n]; if (run > reach) break; l = Math.max(l, roomOf[(i + n - k) % n]); }
+        run = 0; for (let k = 1; k < n / 2; k++) { run += seg[(i + k - 1) % n]; if (run > reach) break; r = Math.max(r, roomOf[(i + k) % n]); }
+        if (l > -Infinity && r > -Infinity) room[i] = Math.max(roomOf[i], Math.min(l, r));
       }
-      if (best && best.dmin >= need) {
-        for (let i = 0; i < n; i++) depth[i] = Math.max(0, Math.min(best.a + best.b * (xy[2 * i] - mx) + best.c * (xy[2 * i + 1] - my) - h[i] * into2, roomOf[i] > -Infinity ? roomOf[i] : 0));
-        var planeFloor = { tilt: Math.atan(Math.hypot(best.b, best.c)) * 180 / Math.PI };
+      const lv = new Float64Array(n); let top = -Infinity;
+      for (let i = 0; i < n; i++) { lv[i] = h[i] * into2; top = Math.max(top, lv[i]); }
+      const dMin = Math.min(want, Math.max(wall, 0.4)); // (a miniature's 2 mm limb holds a plug of half a millimetre, no more)
+      const ws = [want, 0.75 * want, 0.5 * want, 0.35 * want, 0.2 * want].filter(w => w >= dMin - 1e-9);
+      if (!ws.length) ws.push(want);
+      const faceHolds = (d) => { // the face over the floor must have solid beyond it too, under its middle
+        const xy2 = Float64Array.from(xy), h2 = new Float64Array(n); for (let i = 0; i < n; i++) h2[i] = h[i] + d[i] * into2;
+        const H = capHeight(xy2, h2), L = makeLoop(ring, [], xy2), base = { loops: [L], regions: buildRegions([L]) }, rooms = [];
+        for (const q of regionSamples(base, 0, 150)) { const r = roomAt(q.x, q.y, H(q.x, q.y)); rooms.push(r ? r[0] : 0); }
+        rooms.sort((a, b) => a - b);
+        return !rooms.length || rooms[Math.floor(0.1 * rooms.length)] >= 0.75 * wall ? { xy2, h2 } : null;
+      };
+      for (const kind of ['level', 'even']) for (const w of ws) { // (a level end at any depth before an even one: an even plug on a saddle-shaped line keeps the line's horns)
+        const d = new Float64Array(n); let shortLen = 0; // (a stray point or two still short, under 2% of the line, doesn't stop a plug)
+        for (let i = 0; i < n; i++) { d[i] = kind === 'level' ? top + w - lv[i] : w; if (!(room[i] >= d[i] - 0.5 * wall)) shortLen += (seg[i] + seg[(i + n - 1) % n]) / 2; }
+        if (shortLen > Math.min(4 * wall, Math.max(2 * wall, 0.02 * per))) continue;
+        const f = faceHolds(d);
+        if (!f) continue;
+        let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, d[i]);
+        return { xy2: f.xy2, h2: f.h2, depth: Array.from(d), max, least: w, flatEnd: kind === 'level', even: kind === 'even', floorTilt: 0 };
       }
+      return null;
     }
-    for (let i = 0; !column && i < n; i++) {
+    // (an inlay's sunk face, or one sunk without a plug) each point as deep as the solid holds it
+    for (let i = 0; i < n; i++) {
       let s = want;
       for (let tries = 0; tries < 5 && s > 0.02; tries++) {
         const r = roomAt(xy[2 * i] + s * dirs[i][0], xy[2 * i + 1] + s * dirs[i][1], h[i] + s * dirs[i][2]);
-        if (r && r[0] >= wall && (column ? r[1] >= s - 1e-3 * wall : r[1] >= 0.05)) break;
+        if (r && r[0] >= wall && r[1] >= 0.05) break;
         s /= 2;
         if (tries === 4) s = 0;
       }
@@ -4991,21 +5045,9 @@ const KMCore = (() => {
     // smoothed along the line: no deeper than its neighbours within a wall's length, then averaged over the same
     const len = new Float64Array(n); for (let i = 0; i < n; i++) { const j = (i + 1) % n; len[i] = Math.hypot(xy[2 * j] - xy[2 * i], xy[2 * j + 1] - xy[2 * i + 1], h[j] - h[i]); }
     const window = (i, f) => { let acc = f.init, run = 0; for (let k = 0; k <= n / 2; k++) { if (k > 0 && (run += len[(i + k - 1) % n]) > wall) break; acc = f.step(acc, depth[(i + k) % n]); } run = 0; for (let k = 1; k <= n / 2; k++) { if ((run += len[(i + n - k) % n]) > wall) break; acc = f.step(acc, depth[(i + n - k) % n]); } return f.done(acc); };
-    if (column && planeFloor) { // a flat floor is kept as it is: smoothing would bend it
-      let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, depth[i]);
-      const xy2 = Float64Array.from(xy), h2 = new Float64Array(n); for (let i = 0; i < n; i++) h2[i] = h[i] + depth[i] * into2;
-      const H = capHeight(xy2, h2), L = makeLoop(ring, [], xy2), base = { loops: [L], regions: buildRegions([L]) }, rooms = [];
-      for (const q of regionSamples(base, 0, 150)) { const r = roomAt(q.x, q.y, H(q.x, q.y)); rooms.push(r ? r[0] : 0); }
-      rooms.sort((a, b) => a - b);
-      if (!rooms.length || rooms[Math.floor(0.1 * rooms.length)] >= 0.75 * wall) return { xy2, h2, depth: Array.from(depth), max, flatEnd: true, floorTilt: planeFloor.tilt };
-      for (let i = 0; i < n; i++) depth[i] = roomOf[i] > -Infinity ? Math.max(0, Math.min(top - h[i] * into2 + want, roomOf[i])) : 0; // (no room under its middle: sunk point by point after all)
-    }
-    if (column) for (let i = 0; i < n; i++) depth[i] = depth[i] > 0 ? h[i] * into2 + depth[i] : -Infinity; // (stepped: the floor's level is what is smoothed, so a level floor stays level; a point with no room holds its neighbours back)
-    if (column) { let lo = Infinity; for (let i = 0; i < n; i++) if (depth[i] > -Infinity) lo = Math.min(lo, depth[i]); if (lo === Infinity) return null; for (let i = 0; i < n; i++) if (depth[i] === -Infinity) depth[i] = h[i] * into2; }
     const lows = new Float64Array(n); for (let i = 0; i < n; i++) lows[i] = window(i, { init: Infinity, step: Math.min, done: (a) => a });
     depth.set(lows);
     const smooth = new Float64Array(n); for (let i = 0; i < n; i++) smooth[i] = window(i, { init: [0, 0], step: (a, v) => [a[0] + v, a[1] + 1], done: (a) => a[0] / a[1] });
-    if (column) for (let i = 0; i < n; i++) smooth[i] = Math.max(0, smooth[i] - h[i] * into2);
     let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, smooth[i]);
     if (max < 0.05) return null;
     const xy2 = new Float64Array(2 * n), h2 = new Float64Array(n);
@@ -5380,7 +5422,7 @@ const KMCore = (() => {
   }
   function cutAlongLoop(P, I, loop, opts = {}) {
     const r = cutAlongLoops(P, I, [loop], opts);
-    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings, sinks: r.sinks, sink: r.sinks[0] };
+    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings, sinks: r.sinks, sink: r.sinks[0], floors: r.floors, plugsMade: r.plugsMade, sinkNote: r.sinkNote };
   }
   /* Cut along several closed lines at once. Side 1 is whatever lies on the left of the lines as they run (the
      triangles holding the lines' own directed edges); side 2 is the rest, and may come apart into several pieces.
@@ -5435,13 +5477,39 @@ const KMCore = (() => {
       let clash = keep.length < n;
       for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) if (surf.has(ek(cap[i + k], cap[i + (k + 1) % 3]))) { clash = true; break; }
       const per = opts.perLoop ? opts.perLoop[li] || {} : opts, into2 = wantCCW ? 1 : -1;
-      const lcfg = per.pegSide && per.pegSide !== cfg.pegSide ? { ...cfg, pegSide: per.pegSide } : cfg; // which piece the pegs or plug stand on, per line
+      const lcfg = per.inset && per.cfg ? per.cfg : per.pegSide && per.pegSide !== cfg.pegSide ? { ...cfg, pegSide: per.pegSide } : cfg; // which piece the pegs or plug stand on, per line (an inset plug brings its own settings)
       // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
       // keys and its checks then all work on the sunk ring
-      const sinkWall = opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, sunk = !(opts.sink > 0) ? null : opts.sinkStep === false || opts.sinkFlat ? sunkRingAt(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, !!opts.sinkFlat, opts.sinkPlane || null) : sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, false, null, opts.sinkTaper !== undefined ? opts.sinkTaper : cfg.sinkTaper || 0);
-      const faceOf = (fxy, fh) => { const sec = { loops: [makeLoop(ring, [], fxy)] }; sec.regions = buildRegions(sec.loops); return { xy: fxy, h: fh, sec, step: capStep(fxy), H: capHeight(fxy, fh) }; };
-      const plain = faceOf(xy, lf.h), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, cfg: lcfg, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2), { sunk }) : null };
-      c.use = (which) => { const f = which === 'sunk' && c.sunkFace ? c.sunkFace : c.plain; Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0 }); c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length; };
+      const sinkWall = opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, taper = opts.sinkTaper !== undefined ? opts.sinkTaper : cfg.sinkTaper || 0;
+      const sunk = !(opts.sink > 0) ? null : opts.sinkStep === false || opts.sinkFlat ? sunkRingAt(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, !!opts.sinkFlat, opts.sinkPlane || null) : sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, false, null, taper);
+      // every face carries its frame: a plug may run along another axis than its line's own (1.92: the pieces' one
+      // pull direction), and the face, its walls, its cap and its checks are then all worked in that frame
+      const own = { F, xy, h: lf.h, cap, clash, xyOf, wantCCW };
+      const faceOf = (fxy, fh, fr) => { const sec = { loops: [makeLoop(ring, [], fxy)] }; sec.regions = buildRegions(sec.loops); return { xy: fxy, h: fh, sec, step: capStep(fxy), H: capHeight(fxy, fh), fr }; };
+      const plain = faceOf(xy, lf.h, own), c = { ring, n, lf, F, xy, wantCCW, cap, clash, xyOf, into2, plain, cfg: lcfg, sunkFace: sunk ? Object.assign(faceOf(sunk.xy2, sunk.h2, own), { sunk }) : null, axisFace: null };
+      // the plug along the axis e (a unit vector into side 2), or null where the line, seen along e, isn't a clean ring
+      c.along = (e) => {
+        if (!(opts.sink > 0) || opts.sinkStep === false || opts.sinkFlat) return null;
+        const en = [into2 * e[0], into2 * e[1], into2 * e[2]]; // the frame's normal, on the same side as the line's own
+        if (en[0] * F.n[0] + en[1] * F.n[1] + en[2] * F.n[2] < 0.5) return null; // more than 60° off the line's own axis
+        const Fe = frameFromNormal(norm3(en), lf.centre), exy = new Float64Array(2 * n), eh = new Float64Array(n);
+        for (let i = 0; i < n; i++) { const p = 3 * ring[i], d = [P[p] - Fe.o[0], P[p + 1] - Fe.o[1], P[p + 2] - Fe.o[2]]; exy[2 * i] = d[0] * Fe.u[0] + d[1] * Fe.u[1] + d[2] * Fe.u[2]; exy[2 * i + 1] = d[0] * Fe.v[0] + d[1] * Fe.v[1] + d[2] * Fe.v[2]; eh[i] = d[0] * Fe.n[0] + d[1] * Fe.n[1] + d[2] * Fe.n[2]; }
+        let a2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += exy[2 * i] * exy[2 * j + 1] - exy[2 * j] * exy[2 * i + 1]; }
+        if (!(a2 > 0) !== wantCCW || untangledRing(exy).length < n) return null; // turned over, or folded, seen along e
+        const es = sunkRing(P, I, Fe, ring, exy, eh, into2, opts.sink, sinkWall, false, null, taper);
+        if (!es || !es.column) return null;
+        const ef = [], eids = []; for (let i = 0; i < n; i++) { eids.push(ring[i]); ef.push(exy[2 * i], exy[2 * i + 1]); }
+        const eloc = earcut(ef, []), ecap = []; let esum = 0; for (let i = 0; i < eloc.length; i += 3) esum += tri2(ef, eloc[i], eloc[i + 1], eloc[i + 2]);
+        const eflip = wantCCW ? esum < 0 : esum > 0; for (let i = 0; i < eloc.length; i += 3) { if (eflip) ecap.push(eids[eloc[i]], eids[eloc[i + 2]], eids[eloc[i + 1]]); else ecap.push(eids[eloc[i]], eids[eloc[i + 1]], eids[eloc[i + 2]]); }
+        const exyMap = new Map(ring.map((v, i) => [v, [exy[2 * i], exy[2 * i + 1]]]));
+        fixTJunctions(ecap, ring); splitThroughPoints(ecap, [ring], (id) => exyMap.get(id)); patchCap(ecap, [ring], (id) => exyMap.get(id), wantCCW);
+        return Object.assign(faceOf(es.xy2, es.h2, { F: Fe, xy: exy, h: eh, cap: ecap, clash: false, xyOf: (id) => exyMap.get(id), wantCCW }), { sunk: es });
+      };
+      c.use = (which) => {
+        const f = which === 'sunk' && c.sunkFace ? c.sunkFace : which === 'axis' && c.axisFace ? c.axisFace : c.plain;
+        Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0, F: f.fr.F, xy: f.fr.xy, h: f.fr.h, cap: f.fr.cap, clash: f.fr.clash, xyOf: f.fr.xyOf });
+        c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = f.fr.F !== lf.F ? [] : markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); /* (marks were laid out in the line's own frame: none on a face worked in another) */ c.plugs = cfg.type === 'plug' || per.inset ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length;
+      };
       c.use('sunk');
       return c;
     });
@@ -5454,7 +5522,7 @@ const KMCore = (() => {
       let src = pos;
       caps.forEach((c, li) => {
         const { ring, n, F, xy, wantCCW, cap, sunk } = c;
-        if (c.joined || c.marks.length) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.lf.h, F, wantCCW, c.keys.concat(c.marks), c.cfg, surf, ek, c.plugs, sunk); src = r.V; pins.push(...r.pins); }
+        if (c.joined || c.marks.length) { const r = curvedLoopCap(src, tris, ring, copy, xy, c.h, F, wantCCW, c.keys.concat(c.marks), c.cfg, surf, ek, c.plugs, sunk, fine); src = r.V; pins.push(...r.pins); }
         else {
           const xyMap = new Map([[extra + 2 * li, null]]);
           // the new points on the face that follows the line, each with a copy for the other piece
@@ -5521,7 +5589,7 @@ const KMCore = (() => {
     };
     const buildParts = () => {
       let parts = makeParts(caps.map(c => c.clash));
-      if (!joined && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(c => c.clash), false); // a grid cap didn't seal: plain caps
+      if (!parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(c => c.clash), false); // a grid cap didn't seal: plain caps (1.92: round keys and plugs too: a plug on a limb's flat end came out open and was dropped)
       if (!joined && caps.some(c => !c.clash) && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(() => true), false); // a flat cap didn't seal: fan them instead
       if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // a line rings a dip, so the "piece" would be empty air
         throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
@@ -5529,39 +5597,84 @@ const KMCore = (() => {
       return parts;
     };
     const tol = Math.max(1e-4, diag(bounds(P)) * 2e-6);
-    // Sunk faces at both ends of a piece trap it between two recesses (a sleeve sunk into the shoulder and the
-    // cuff), so when the pieces lock the longest line alone is sunk, then none, before the refusal stands.
-    const sinkPlans = [caps.map(c => (c.sunkFace ? 'sunk' : 'plain'))];
-    if (caps.filter(c => c.sunkFace).length > 1) { const longest = caps.reduce((b, c) => (c.sunkFace && (b < 0 || c.xy.length > caps[b].xy.length) ? caps.indexOf(c) : b), -1); sinkPlans.push(caps.map((c, i) => (i === longest ? 'sunk' : 'plain'))); }
-    if (caps.some(c => c.sunkFace)) sinkPlans.push(caps.map(() => 'plain'));
-    let parts, warnings;
-    for (let pi = 0; pi < sinkPlans.length; pi++) {
-      const last = pi === sinkPlans.length - 1;
-      caps.forEach((c, i) => c.use(sinkPlans[pi][i]));
-      parts = buildParts();
-      try { warnings = checkPieces(parts, last); break; } catch (e) { if (last || e.code !== 'locked') throw e; }
+    // The plugs, plan by plan, until the pieces pass (a lock, or a piece too thin, moves on to the next plan):
+    // 1. each line's plug along its own axis, when the lines' axes agree (a plug only slides out straight, so plugs
+    //    that point different ways always lock);
+    // 2. (1.92) one pull direction: the pieces are built without plugs, the way they come apart is found
+    //    (`pullWays`), and every line between them gets its plug along that way (an arm held at the shoulder and at
+    //    the hand on the hip comes out between the two, so both plugs lean that way);
+    // 3. the longest line's plug alone; 4. no plugs, where the refusal stands (or, forced, becomes a warning).
+    const sunkCaps = caps.filter(c => c.sunkFace), axisOf = (c) => c.lf.F.n.map(x => x * c.into2);
+    const agree = sunkCaps.every(a => sunkCaps.every(b => { const p = axisOf(a), q = axisOf(b); return p[0] * q[0] + p[1] * q[1] + p[2] * q[2] > Math.cos(Math.PI / 6); }));
+    let parts = null, warnings, plainParts = null, sinkNote = null;
+    const attempt = (plan, canForce) => { caps.forEach((c, i) => c.use(plan[i])); const p = plan.every(x => x === 'plain') && plainParts ? plainParts : buildParts(); const w = checkPieces(p, canForce); parts = p; warnings = w; return true; };
+    const soft = (e) => { if (e.code !== 'locked' && e.code !== 'thin') throw e; sinkNote = sinkNote || e.code; return false; };
+    let done = false;
+    if (!sunkCaps.length) done = attempt(caps.map(() => 'plain'), true);
+    if (!done && agree) try { done = attempt(caps.map(c => (c.sunkFace ? 'sunk' : 'plain')), false); } catch (e) { done = soft(e); }
+    if (!done && !caps.some(c => c.joined)) { // (keys were planned on each line's own face, so a line with keys keeps its own axis)
+      caps.forEach(c => c.use('plain')); plainParts = buildParts();
+      const ways = pullWays(plainParts);
+      const tried = agree; // (a way that is the line's own axis was step 1: not built again)
+      caps.forEach((c, i) => { const q = axisOf(c), w = ways[i]; c.axisFace = c.sunkFace && w && !(tried && w[0] * q[0] + w[1] * q[1] + w[2] * q[2] > 0.9998) ? c.along(w) : null; });
+      if (caps.some(c => c.axisFace)) try { done = attempt(caps.map(c => (c.axisFace ? 'axis' : 'plain')), false); } catch (e) { done = soft(e); }
     }
-    // (1.87) forced through a lock that no plan frees (a piece held at both ends): cut with the sunk faces after all,
-    // since dropping them only brought the thin rims back
-    // (the plugs only: a face sunk point by point keeps its slant and its thin rim)
-    const stepped = caps.map(c => (c.sunkFace && c.sunkFace.sunk.column ? 'sunk' : 'plain'));
-    if (opts.force && stepped.includes('sunk') && sinkPlans.length > 1 && warnings && warnings.some(w => w.code === 'locked')) {
-      caps.forEach((c, i) => c.use(stepped[i]));
-      try { const p0 = buildParts(), w0 = checkPieces(p0, true); parts = p0; warnings = w0; } catch (e) { caps.forEach((c, i) => c.use(sinkPlans[sinkPlans.length - 1][i])); }
+    if (!done && sunkCaps.length > 1) { const longest = caps.indexOf(sunkCaps.reduce((b, c) => (c.xy.length > b.xy.length ? c : b))); try { done = attempt(caps.map((c, i) => (i === longest ? 'sunk' : 'plain')), false); } catch (e) { done = soft(e); } }
+    if (!done) attempt(caps.map(() => 'plain'), true);
+    // (1.87) forced through a lock that no plan frees (a piece held at both ends): cut with the plugs after all, along
+    // their own axes, since dropping them only brought the thin rims back
+    if (opts.force && sunkCaps.length && caps.every(c => !c.sunk) && warnings && warnings.some(w => w.code === 'locked')) {
+      const stepped = caps.map(c => (c.sunkFace && c.sunkFace.sunk.column ? 'sunk' : 'plain'));
+      if (stepped.includes('sunk')) { const keep = { parts, warnings }; try { attempt(stepped, true); sinkNote = null; } catch (e) { caps.forEach(c => c.use('plain')); parts = keep.parts; warnings = keep.warnings; } }
     }
+    if (caps.some(c => c.sunk)) sinkNote = null;
     parts.sort((x, y) => y.volume - x.volume);
-    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings, sinks: caps.map(c => c.sink), floors: caps.map(c => (c.sunk && c.sunk.plane) || null) };
+    // each line's plug as it was made, in the model's own coordinates (the app draws it from these after the check)
+    const plugsMade = caps.map(c => { if (!c.sunk || !c.sunk.column) return null; const F = c.F, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z); const floor = [], line = []; for (let i = 0; i < c.n; i++) { floor.push(...at(c.sunk.xy2[2 * i], c.sunk.xy2[2 * i + 1], c.sunk.h2[i])); const v = 3 * c.ring[i]; line.push(P[v], P[v + 1], P[v + 2]); } return { floor, line, depth: c.sunk.max, least: c.sunk.least || 0, flat: !!c.sunk.flatEnd, taper: c.sunk.taper || 0, axis: F.n.map(x => x * c.into2), shared: !!c.axisFace && c.sunk === c.axisFace.sunk }; });
+    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings, sinks: caps.map(c => c.sink), floors: caps.map(c => (c.sunk && c.sunk.plane) || null), plugsMade, sinkNote: sunkCaps.length && !caps.some(c => c.sunk) ? sinkNote || 'locked' : null };
+    // the two pieces each line separates: side 1, and the piece of side 2 holding that line's copied vertices
+    function pairsOf(parts) {
+      const keyOf = (x, y, z) => `${x},${y},${z}`;
+      const sets = parts.map(q => { const s = new Set(); for (let i = 0; i < q.positions.length; i += 3) s.add(keyOf(q.positions[i], q.positions[i + 1], q.positions[i + 2])); return s; });
+      return (c) => {
+        const k = keyOf(P[3 * c.ring[0]], P[3 * c.ring[0] + 1], P[3 * c.ring[0] + 2]);
+        const mine = parts.find((q, i) => q.first && sets[i].has(k)), other = parts.find((q, i) => !q.first && sets[i].has(k));
+        return [mine || parts.find(q => q.first), other || parts.find(q => !q.first)];
+      };
+    }
+    // (1.92) Which way the pieces between each line come apart, without plugs: per line, a unit direction into side 2
+    // along which its two pieces slide apart (far enough for the deepest plug between them), or null. The lines
+    // between the same two pieces share one direction, tried in turn: the lines' axes taken together, each line's own,
+    // then leaning up to 40° from them, and from one piece's middle to the other's.
+    function pullWays(prts) {
+      const pair = pairsOf(prts), out = caps.map(() => null), groups = new Map();
+      caps.forEach((c, i) => { if (!c.sunkFace) return; const [a, b] = pair(c), key = prts.indexOf(a) + ':' + prts.indexOf(b); if (!groups.has(key)) groups.set(key, { a, b, idx: [] }); groups.get(key).idx.push(i); });
+      for (const { a, b, idx } of groups.values()) {
+        const axes = idx.map(i => axisOf(caps[i])), lens = idx.map(i => loops[i].length || 1), sum = [0, 0, 0];
+        axes.forEach((e, k) => { for (let j = 0; j < 3; j++) sum[j] += e[j] * lens[k]; });
+        const cands = [];
+        if (Math.hypot(...sum) > 1e-9) cands.push(norm3(sum));
+        idx.map((i, k) => k).sort((x, y) => lens[y] - lens[x]).forEach(k => cands.push(axes[k]));
+        const base = cands[0], F0 = frameFromNormal(base, [0, 0, 0]);
+        for (const deg of [20, 40]) for (let k = 0; k < 8; k++) { const t = (k * Math.PI) / 4, s = Math.sin((deg * Math.PI) / 180), co = Math.cos((deg * Math.PI) / 180); cands.push([0, 1, 2].map(j => F0.n[j] * co + (F0.u[j] * Math.cos(t) + F0.v[j] * Math.sin(t)) * s)); }
+        const ma = volumeCentroid(a.positions, a.indices).centroid, mb = volumeCentroid(b.positions, b.indices).centroid, ap = [mb[0] - ma[0], mb[1] - ma[1], mb[2] - ma[2]];
+        if (Math.hypot(...ap) > 1e-9) cands.push(norm3(ap));
+        const deep = Math.max(3, ...idx.map(i => (caps[i].sunkFace.sunk.max || 0) + 1));
+        for (const e0 of cands) {
+          // the plugs point into side 2: the direction is turned that way, and a line more than 60° off it keeps none
+          const e = e0[0] * base[0] + e0[1] * base[1] + e0[2] * base[2] < 0 ? e0.map(x => -x) : e0;
+          if (!idx.some(i => { const q = axisOf(caps[i]); return e[0] * q[0] + e[1] * q[1] + e[2] * q[2] >= 0.5; })) continue;
+          if (!slidesApart(a, b, e, tol, deep, 0.2)) continue;
+          for (const i of idx) { const q = axisOf(caps[i]); if (e[0] * q[0] + e[1] * q[1] + e[2] * q[2] >= 0.5) out[i] = e; }
+          break;
+        }
+      }
+      return out;
+    }
     // The printability rules on the pieces: a refusal, or with opts.force (the owner's "cut anyway") a warning on the
     // result. Thrown (never a warning) while a sink plan can still be retried.
     function checkPieces(parts, canForce) {
-    // the two pieces each line separates: side 1, and the piece of side 2 holding that line's copied vertices
-    const keyOf = (x, y, z) => `${x},${y},${z}`;
-    const sets = parts.map(q => { const s = new Set(); for (let i = 0; i < q.positions.length; i += 3) s.add(keyOf(q.positions[i], q.positions[i + 1], q.positions[i + 2])); return s; });
-    const pair = (c) => { // the two pieces this line separates
-      const k = keyOf(P[3 * c.ring[0]], P[3 * c.ring[0] + 1], P[3 * c.ring[0] + 2]);
-      const mine = parts.find((q, i) => q.first && sets[i].has(k)), other = parts.find((q, i) => !q.first && sets[i].has(k));
-      return [mine || parts.find(q => q.first), other || parts.find(q => !q.first)];
-    };
+    const pair = pairsOf(parts); // the two pieces each line separates
     const warnings = [], refuse = (message, code, wedged, keyless) => { if (opts.force && canForce) { if (!warnings.some(w => w.code === code)) { const w = { code, message }; if (wedged) w.wedged = true; if (keyless) w.keyless = true; warnings.push(w); } return; } throw guardError(message, code); };
     for (const c of caps) {
       const [p1, p2] = pair(c), F = c.F;
@@ -5580,12 +5693,14 @@ const KMCore = (() => {
       const same = L > 1 ? caps.filter(d => d !== c && (([a, b]) => a === p1 && b === p2)(pair(d))) : [];
       const also = (Math.hypot(...apart) > 1e-9 ? [apart] : []).concat(same.flatMap(d => [d.F.n, d.F.n.map(x => -x)]));
       if (same.length) { const sum = [0, 0, 0]; for (const d of [c, ...same]) for (let k = 0; k < 3; k++) sum[k] += d.into2 * d.F.n[k]; if (Math.hypot(...sum) > 1e-9) also.push(sum); }
-      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined, distance: pullDistance(c.cfg, c.keys, c.plugs), also }).length) {
+      // (1.92) a plug is a key: it only slides out straight along its axis, and only once it has come all the way out
+      const plugged = !!(c.sunk && c.sunk.column);
+      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined && !plugged, distance: Math.max(pullDistance(c.cfg, c.keys, c.plugs), plugged ? c.sink + 1 : 0), also }).length) {
         const wedged = same.length > 0; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
         // with keys the pieces must slide straight; would they come apart at a slant without them? Asked of these
         // same pieces, so a pick needn't build them all again without keys just to find out (half a neck pick's time)
         const keyless = c.joined && opts.force && !lockedPairs([p1, p2], F.n, tol, { anyDirection: true, distance: 3, also }).length;
-        refuse(wedged ? 'This region is held at more than one end by the same piece, so it couldn’t be pulled out after printing. Split off one of its neighbours first, or use a flat cut.'
+        refuse(wedged ? `This piece is held in ${same.length + 1} places by the same neighbour, and no one direction frees them all, so it couldn’t be fitted back on after printing. Split off one of its neighbours first, or pick it in smaller parts held in one place each, or cut it anyway.`
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
           : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked', wedged, keyless);
       }
@@ -5600,7 +5715,7 @@ const KMCore = (() => {
   // shared by both pieces so they meet exactly. Round each key's socket outline the face is the same on both sides;
   // inside it, the peg's piece has a narrow ring of face out to the peg (the fit gap) and then the peg, and the
   // socket's piece has the socket. Keys are straight, along the plane's normal, sized as keyLevels describes.
-  function curvedLoopCap(pos, tris, ring, copy, xy0, hts0, F, wantCCW1, keys, cfg, surf, ek, plugs = [], sunk = null) {
+  function curvedLoopCap(pos, tris, ring, copy, xy0, hts0, F, wantCCW1, keys, cfg, surf, ek, plugs = [], sunk = null, drawFine = true) {
     const V = Array.from(pos), n = ring.length;
     const addV = (q) => { V.push(q[0], q[1], q[2]); return V.length / 3 - 1; };
     const at = (x, y, z) => [F.o[0] + F.u[0] * x + F.v[0] * y + F.n[0] * z, F.o[1] + F.u[1] * x + F.v[1] * y + F.n[1] * z, F.o[2] + F.u[2] * x + F.v[2] * y + F.n[2] * z];
@@ -5668,7 +5783,7 @@ const KMCore = (() => {
     }
     // the face drawn finely, so it follows the line smoothly between the rims
     const xyMap = new Map(), addVertex = (x, y) => { const z = H(x, y), v1 = addV(at(x, y, z)), v2 = addV(at(x, y, z)); other.set(v1, v2); return v1; };
-    let fine = gridCap(rings, xyOf, H, capStep(xy), addVertex, xyMap, wantCCW1);
+    let fine = drawFine ? gridCap(rings, xyOf, H, capStep(xy), addVertex, xyMap, wantCCW1) : null;
     if (fine) for (let i = 0; fine && i < fine.length; i += 3) for (let k = 0; k < 3; k++) { const a = fine[i + k], b = fine[i + (k + 1) % 3]; if (a < pos.length / 3 && b < pos.length / 3 && surf.has(ek(a, b))) { fine = null; break; } }
     if (!fine) fine = cap;
     for (const v of fine) tris[1].push(v);
@@ -6176,8 +6291,10 @@ const KMCore = (() => {
         // ring wrapping both) cut the pad, which the owner never picked
         const near = nearestVertices(P, pts); let onPick = 0; for (const v of near) { for (let j = vt.start[v]; j < vt.start[v + 1]; j++) if (inT[vt.tri[j]]) { onPick++; break; } }
         if (onPick < 0.6 * near.length) continue;
-        let graze = 0; for (const v of near) { let nx = 0, ny = 0, nz = 0; for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const t = vt.tri[j]; nx += N[3 * t] * A[t]; ny += N[3 * t + 1] * A[t]; nz += N[3 * t + 2] * A[t]; } const L = Math.hypot(nx, ny, nz) || 1; graze += Math.abs((nx * ax[0] + ny * ax[1] + nz * ax[2]) / L); }
-        graze /= pts.length;
+        // (1.92) by its worst stretch too, not only on average: a ring square to the sleeve most of the way round but
+        // grazing it along the front (where the sleeve tucks under the cape) left a thin brim on the arm there
+        const gz = []; for (const v of near) { let nx = 0, ny = 0, nz = 0; for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const t = vt.tri[j]; nx += N[3 * t] * A[t]; ny += N[3 * t + 1] * A[t]; nz += N[3 * t + 2] * A[t]; } const L = Math.hypot(nx, ny, nz) || 1; gz.push(Math.abs((nx * ax[0] + ny * ax[1] + nz * ax[2]) / L)); }
+        const mean = gz.reduce((x, y) => x + y, 0) / (gz.length || 1), worst = gz.slice().sort((x, y) => x - y)[Math.floor(0.9 * (gz.length - 1))] || 0, graze = Math.max(mean, 0.85 * worst);
         if (!found || graze < found.graze - 0.05) found = { o, n: ax, F, ring: best, len: bl, graze };
         if (found.graze <= 0.3) break; // (the first that meets the surface squarely enough: nearer the joint is better)
       }
@@ -6245,13 +6362,13 @@ const KMCore = (() => {
       if (sl) return { P: sl.P, I: sl.I, req: { ...req, seg: sl.seg, regions: sl.groups, loops: sl.loops, sliced: true } };
     }
     if (!req.smooth) return { P, I, req };
-    if (req.regions && req.seg && !req.noReroute && !req.noSlice && req.limbEnds !== false && !req.painted) { // (1.83) a limb ends in a flat cut across it (1.86: never a painted pick: the owner's paint is what is cut, as painted)
+    if (req.regions && req.seg && !req.noReroute && !req.noSlice && req.limbEnds !== false) { // (1.92: a brushed pick too: its flat ring must lie on the brushed surface, as 1.86's check makes sure) // (1.83) a limb ends in a flat cut across it (1.86: never a painted pick: the owner's paint is what is cut, as painted)
       let le = null; try { le = limbEndPick(P, I, req.seg, req.regions); } catch (err) { le = null; }
       if (le) {
         let sl = null; try { sl = sliceRegionPick(le.P, le.I, le.seg, [1], { ...(typeof req.smooth === 'object' ? req.smooth : {}), pin: le.pin }); } catch (err) { sl = null; }
         const r = sl || le;
         const flatEnds = le.ends >= le.loops.length; // (every outline a flat limb end: it meets the surface squarely, so the face isn't sunk; sunk, it left a thin collar round the recess)
-        return { P: r.P, I: r.I, req: { ...req, seg: r.seg, regions: r.groups, loops: r.loops, sliced: true, limbEnds: le.ends, cover: le.cover, sink: flatEnds ? 0 : req.sink } };
+        return { P: r.P, I: r.I, req: { ...req, seg: r.seg, regions: r.groups, loops: r.loops, sliced: true, limbEnds: le.ends, cover: le.cover, sink: req.sink } }; // (1.92: a flat end keeps its plug: from the edge where the other piece holds it, pulled in where not)
       }
     }
     if (req.regions && req.seg && !req.noReroute && !req.noSlice) { // a region pick sliced along a smooth curve through the triangles
@@ -6275,8 +6392,11 @@ const KMCore = (() => {
     if (req.sliced) out.paths = loops.map(l => { const a = new Float32Array(3 * l.verts.length); l.verts.forEach((v, i) => { a[3 * i] = P[3 * v]; a[3 * i + 1] = P[3 * v + 1]; a[3 * i + 2] = P[3 * v + 2]; }); return a; }); // the sliced lines' points: their vertices are new, so the app draws them from these
     const closed = loops.length > 0 && loops.every(l => l.closed);
     if (closed && (cfg.type !== 'none' || cfg.sink > 0)) { // (1.90) with no key the extrusion is still worked out, so it can be drawn
+      const longest = Math.max(...loops.map(l => l.length || 0));
       for (const loop of loops) {
         const per = { keys: [], plugs: [] }, draw = { keys: [], plugs: [] };
+        // (1.92) a speck of a line (a spot where a sleeve touches the coat, a twentieth of the longest line) is cut as it is, with no complaint that no joint fits it
+        const tiny = loops.length > 1 && (loop.length || 0) < 0.05 * longest; if (tiny) per.tiny = true;
         let an = null;
         try {
           const an0 = analyzeLoop(P, I, loop, cfg, D), side = curvedSideOf(cfg.pegSide, an0.curved.into2), lcfg = { ...cfg, pegSide: side };
@@ -6285,7 +6405,18 @@ const KMCore = (() => {
           out.frames.push(an.frame);
           const sk = an.curved && an.curved.sunk; // (1.90) the extruded plug drawn before the cut: its floor ring, and where each wall starts
           if (sk && sk.column) draw.sink = { floor: Array.from(sk.xy2), h: Array.from(sk.h2), line: sk.lineXY, lineH: sk.lineH };
-          if (cfg.type === 'none') { /* no key: the extrusion alone */ }
+          // (1.92) where the other piece can't hold a plug from the cut's edge (a shoulder that slopes away right above
+          // the line), the plug is pulled in from the edge by a wall instead, tapered and as deep as Extrude asks:
+          // the owner's arm ended in bare horns, or in nothing, where the edge plug didn't fit
+          const inset = cfg.sink > 0 && cfg.sinkStep !== false && !(sk && sk.column) && (cfg.type === 'none' || cfg.type === 'plug');
+          if (inset) {
+            const pcfg = cfg.type === 'plug' ? lcfg : { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) }; // (a plug chosen as the key keeps its own settings)
+            const pl = planPlugs(an, pcfg);
+            per.plugs = pl.filter(q => q.ok); per.inset = per.plugs.length > 0; per.cfg = per.inset ? pcfg : lcfg;
+            if (!per.plugs.length && !out.noKeys && !tiny) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
+            const H = an.curved.heightAt;
+            for (const q of per.plugs) { let lo = Infinity, hi = -Infinity; for (const [x, y] of q.mouth) { const z = H(x, y); lo = Math.min(lo, z); hi = Math.max(hi, z); } draw.plugs.push({ base: q.base, top: q.top, z0: q.side > 0 ? lo : hi, tip: (q.side > 0 ? hi : lo) + q.side * q.depth }); }
+          } else if (cfg.type === 'none') { /* no key: the extrusion alone */ }
           else if (cfg.type === 'plug' && sk && sk.column) {
             // (1.89) the cut is already extruded into a plug: a second plug on its floor added nothing and, on a steeply
             // tapered floor, came away as a slab of its own; the extruded plug is this line's plug
@@ -6293,14 +6424,14 @@ const KMCore = (() => {
           } else if (cfg.type === 'plug') {
             const pl = planPlugs(an, lcfg);
             per.plugs = pl.filter(q => q.ok);
-            if (!per.plugs.length && !out.noKeys) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
+            if (!per.plugs.length && !out.noKeys && !tiny) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
             const H = an.curved.heightAt;
             for (const q of per.plugs) { let lo = Infinity, hi = -Infinity; for (const [x, y] of q.mouth) { const z = H(x, y); lo = Math.min(lo, z); hi = Math.max(hi, z); } draw.plugs.push({ base: q.base, top: q.top, z0: q.side > 0 ? lo : hi, tip: (q.side > 0 ? hi : lo) + q.side * q.depth }); }
           } else {
             const keys = req.sizeSet ? autoPlaceKeys(an, lcfg, req.perArea, new Set()) : autoFitKeys(an, lcfg, req.perArea, new Set());
             const ok = evaluateKeys(an, keys, lcfg, new Set());
             per.keys = keys.filter((k, i) => ok[i].ok);
-            if (!per.keys.length && !out.noKeys) out.noKeys = { code: 'room' };
+            if (!per.keys.length && !out.noKeys && !tiny) out.noKeys = { code: 'room' };
             for (const k of per.keys) { const kc = keyCfg(lcfg, k); draw.keys.push({ k, angle: keyAngle(an.base, 0, kc), lv: keyLevels(an, lcfg, k) }); }
           }
         } catch (err) { out.frames.push(null); an = null; if (!out.noKeys) out.noKeys = { code: 'failed' }; }
@@ -6388,9 +6519,12 @@ const KMCore = (() => {
       }
       if (!total) { out.push({ part: pi, length: 0, knife: 0, rim: 0, sharp: false, points: opts.points ? [] : undefined }); return; }
       // the longest run of knife points along the rim
-      const seen = new Set(); let longest = 0;
-      for (const v0 of knife) { if (seen.has(v0)) continue; let run = 0; const st = [v0]; seen.add(v0); while (st.length) { const v = st.pop(); run += rimLen.get(v) || 0; for (const w of adj.get(v) || []) if (!seen.has(w) && knife.has(w)) { seen.add(w); st.push(w); } } longest = Math.max(longest, run); }
-      out.push({ part: pi, length: longest, knife: knifeLen, rim: total, sharp: longest >= 4 * t, points: opts.points ? [...knife] : undefined });
+      // (1.92) each rim line's own length, so a run is judged against the line it is on: a blade counts from 4·t, and
+      // from a twentieth of its line (a 3 mm nick on a 350 mm figure's 80 mm shoulder line had sent every cut back)
+      const loopOf = new Map(), loopLen = []; for (const v0 of adj.keys()) { if (loopOf.has(v0)) continue; const id = loopLen.length; let len = 0; const st = [v0]; loopOf.set(v0, id); while (st.length) { const v = st.pop(); len += rimLen.get(v) || 0; for (const w of adj.get(v) || []) if (!loopOf.has(w)) { loopOf.set(w, id); st.push(w); } } loopLen.push(len); }
+      const seen = new Set(); let longest = 0, sharp = false;
+      for (const v0 of knife) { if (seen.has(v0)) continue; let run = 0; const st = [v0]; seen.add(v0); while (st.length) { const v = st.pop(); run += rimLen.get(v) || 0; for (const w of adj.get(v) || []) if (!seen.has(w) && knife.has(w)) { seen.add(w); st.push(w); } } longest = Math.max(longest, run); if (run >= Math.max(4 * t, Math.min(10 * t, 0.05 * (loopLen[loopOf.get(v0)] || 0)))) sharp = true; /* (never more than 10·t: a long blade counts on any line) */ }
+      out.push({ part: pi, length: longest, knife: knifeLen, rim: total, sharp, points: opts.points ? [...knife] : undefined });
     });
     return out;
   }
@@ -6433,12 +6567,12 @@ const KMCore = (() => {
     const { P, I, req } = pickMesh(P0, I0, req0); // the same eased lines as planJoints worked on (it is quick and comes out alike)
     const cfg = req.cfg, out = req.planned ? { ...req.planned, result: null, error: null, errorCode: null, forced: null, dropped: null } : planJoints(P, I, req), loops = out.loops;
     pickMeshOf.set(out, P);
-    const run = (withJoints, force) => {
-      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, sinkStep: req.sinkStep, perLoop: withJoints ? out.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
+    const run = (withJoints, force, only = -1) => { // only: the one line that keeps its joints
+      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, sinkStep: req.sinkStep, perLoop: withJoints ? out.perLoop : loops.map((l, i) => (i === only ? out.perLoop[i] : { keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
       if (req.regions) return splitRegions(P, I, req.seg, req.regions, o);
       if (loops.length > 1) return cutAlongLoops(P, I, loops, { ...o, what: 'lines' });
       const p0 = o.perLoop[0] || {};
-      return cutAlongLoop(P, I, loops[0], { ...o, cfg: p0.pegSide ? { ...cfg, pegSide: p0.pegSide } : cfg, keys: p0.keys, plugs: p0.plugs });
+      return cutAlongLoop(P, I, loops[0], { ...o, cfg: p0.inset && p0.cfg ? p0.cfg : p0.pegSide ? { ...cfg, pegSide: p0.pegSide } : cfg, keys: p0.keys, plugs: p0.plugs });
     };
     const dropJoints = (code) => { out.dropped = { code, what: out.plugs ? 'plug' : 'keys' }; out.keys = 0; out.plugs = 0; out.perLoop = loops.map(() => ({ keys: [], plugs: [] })); out.draw = loops.map(() => ({ keys: [], plugs: [] })); };
     // The cut is tried forced first: a forced cut builds the same pieces and turns the thin and locked refusals
@@ -6457,12 +6591,35 @@ const KMCore = (() => {
       if (plain && !crumbs(plain)) { first = plain; dropJoints('crumb'); }
     }
     const guards = (r) => (r.warnings || []).filter(w => w.code === 'thin' || w.code === 'locked');
+    // (1.92) when joints on every line lock the pieces but the cut without any passes: the joints on one line may still
+    // do (the longest that has any first): an arm that goes on along its book's plug keeps that plug and loses only the
+    // stud on its shoulder
+    const keepOne = () => {
+      const withJ = out.perLoop.map((per, i) => i).filter(i => (out.perLoop[i].keys || []).length + (out.perLoop[i].plugs || []).length > 0).sort((a, b) => (loops[b].length || 0) - (loops[a].length || 0));
+      if (withJ.length > 1) for (const i of withJ.slice(0, 2)) {
+        let one = null; try { one = run(false, true, i); } catch (err) { one = null; }
+        if (one && !guards(one).length && !crumbs(one)) {
+          out.perLoop = out.perLoop.map((per, k) => (k === i ? per : { keys: [], plugs: [], pegSide: per.pegSide, tiny: per.tiny })); out.draw = out.draw.map((d, k) => (k === i ? d : { keys: [], plugs: [] }));
+          out.keys = out.perLoop[i].keys.length; out.plugs = out.perLoop[i].plugs.length; out.dropped = { code: 'locked', what: out.plugs ? 'plug' : 'keys', some: true }; out.result = one; return true;
+        }
+      }
+      return false;
+    };
     if (first) {
       const w = guards(first);
       if (!w.length) { out.result = first; return out; }
       if ((out.keys || out.plugs) && !w.some(x => x.code === 'thin') && !w.some(x => x.code === 'locked' && !x.keyless)) { // (1.76: a piece held at both ends too, when it slides out along one of its joints without them) // locked with joints, and the same pieces would come apart at a slant without them: built again without the joints
         let second = null; try { second = run(false, true); } catch (err) { second = null; }
-        if (second) { const w2 = guards(second); dropJoints('locked'); out.result = second; if (w2.length) out.forced = w2[0].message; return out; }
+        if (second) { const w2 = guards(second); if (!w2.length && keepOne()) return out; dropJoints('locked'); out.result = second; if (w2.length) out.forced = w2[0].message; return out; }
+      }
+      // (1.92) locked with joints whichever way it is asked (a stud on an arm's flat end, where the arm only goes on
+      // sideways with its book): if the same cut without the joints passes every check, that is the cut
+      else if ((out.keys || out.plugs) && !w.some(x => x.code === 'thin')) {
+        let second = null; try { second = run(false, true); } catch (err) { second = null; }
+        if (second && !guards(second).length) {
+          if (keepOne()) return out;
+          dropJoints('locked'); out.result = second; return out;
+        }
       }
       out.result = first; out.forced = w[0].message; return out;
     }
@@ -12606,7 +12763,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   function noKeysText(nk, many, perLoop) {
     if (!nk) return null;
     // (1.85) how many lines have no joint: "one of its lines" read as if the others had one when none did
-    const n = perLoop ? perLoop.length : 0, bare = perLoop ? perLoop.filter(per => !(per.keys && per.keys.length) && !(per.plugs && per.plugs.length) && !per.extruded).length : 0;
+    const real = perLoop ? perLoop.filter(per => !per.tiny) : [], n = real.length, bare = real.filter(per => !(per.keys && per.keys.length) && !(per.plugs && per.plugs.length) && !per.extruded).length; // (1.92: a speck of a line isn't counted)
     if (!bare && n) return null; // (1.89) every line has its joint (a line extruded into a plug counts as one)
     const where = !many ? 'this line' : n && bare === n ? (n === 2 ? 'either of its lines' : `any of its ${n} lines`) : bare > 1 ? `${bare} of its ${n} lines` : 'one of its lines';
     const those = !many ? 'that line' : bare > 1 ? 'those lines' : 'that line';
@@ -12616,10 +12773,32 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     if (nk.code === 'room') return `No room for keys inside ${where} at these settings, so ${those} will be cut without them.${small}`;
     return 'Keys couldn’t be placed on this line, so it will be cut without them.';
   }
+  // (1.92) What joint each line of a pick gets, in a sentence: the owner read "no plug" in a warning about a speck of
+  // a line while the cut did carry plugs, and nothing said which line got what
+  function pickJointText(pick) {
+    const r = pick.result, per = pick.perLoop || [], n = pick.loops.length, made = (r && r.plugsMade) || [];
+    let edge = 0, inset = 0, keyed = 0, tiny = 0, lo = Infinity, hi = 0, flat = 0, shared = false;
+    for (let i = 0; i < n; i++) {
+      const q = made[i], pl = per[i] || {};
+      if (q) { edge++; lo = Math.min(lo, q.least || q.depth); hi = Math.max(hi, q.depth); if (q.flat) flat++; if (q.shared) shared = true; }
+      else if (pl.plugs && pl.plugs.length) inset++;
+      else if (pl.tiny && !(pl.keys && pl.keys.length)) tiny++;
+      if (pl.keys && pl.keys.length) keyed++;
+    }
+    const bare = pick.loops.filter((l, i) => !made[i] && !((per[i] || {}).plugs || []).length && !((per[i] || {}).keys || []).length && !(per[i] || {}).tiny).length, bits = [], lines = (k) => (n === 1 ? '' : k === n ? (n === 2 ? ' on both lines' : ` on all ${n} lines`) : ` on ${k === 1 ? 'one line' : `${k} lines`}`);
+    const taper = state.cfg.sinkTaper > 0 && made.some(q => q && q.taper > 0) ? `, sides leaning in ${fmt(Math.max(...made.filter(Boolean).map(q => q.taper)))}°` : '';
+    if (edge) bits.push(`a plug from the cut’s edge${lines(edge)}, ${hi - lo > 0.2 ? `${fmt(lo)} to ${fmt(hi)}` : fmt(hi)} mm into the other piece${taper}${flat === edge ? ', with a flat end' : ''}${shared ? ', along the one way the pieces slide apart' : ''}`);
+    const deep = (pick.plugs || []).length ? `, ${fmt(Math.max(...pick.plugs.map(q => q.depth)))} mm deep` : '', nkeys = (pick.keys || []).length;
+    if (inset) bits.push(`a plug set in from the edge${lines(inset)}${deep}${state.cfg.sink > 0 ? ' (the other piece is too thin there for one from the edge)' : ''}`);
+    if (keyed) bits.push(`${nkeys} ${{ peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key'}${nkeys === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}${lines(keyed)}`);
+    if (!bits.length) return state.cfg.sink > 0 || state.cfg.type !== 'none' ? (n === 1 ? 'The cut is flat, with no joint: there’s no room for one here.' : 'The lines are cut flat, with no joint: there’s no room for one here.') : '';
+    const rest = bare + tiny ? ` ${bare + tiny === 1 ? 'The other line is' : `The other ${bare + tiny} lines are`} cut flat${tiny && !bare ? ' (too small for a joint)' : ''}.` : '';
+    return `Joint: ${bits.join('; ')}.${rest}`;
+  }
   function droppedText(d) {
     const what = d.what === 'plug' ? 'A plug' : 'Keys', it = d.what === 'plug' ? 'one' : 'them';
     if (d.code === 'crumb') return `${what} would have broken through a thin wall and nicked off a scrap, so it will be cut without ${it}.`;
-    return d.code === 'locked' ? `${what} would make the pieces slide straight apart, and here they’d catch on each other, so it will be cut without ${it}.` : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`;
+    return d.code === 'locked' ? (d.some ? `${what} on every line would lock the pieces together (they only slide apart one way), so one line keeps its joint and the rest are cut flat.` : `${what} here would lock the pieces together, so the cut is made flat, without ${it}.`) : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`;
   }
   function drawPickLines(p, pick) {
     const v = views.get(p.id);
@@ -12638,7 +12817,10 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       const per = pick.perLoop[li], F = pick.frames[li], d = pick.draw && pick.draw[li];
       if (per && F && d && d.keys.length) markers.add(curvedKeyMarkers(d.keys, F, per.cfg || state.cfg));
       if (per && F && d && d.plugs.length) markers.add(curvedPlugMarkers(d.plugs, F));
-      if (F && d && d.sink) markers.add(curvedSinkMarker(d.sink, F));
+      // (1.92) once the cut is checked the plug is drawn as it was made (it may run along the pieces' one pull direction, or not fit at all); before that, as planned
+      const made = pick.result && pick.result.plugsMade ? pick.result.plugsMade[li] : undefined;
+      if (made) markers.add(plugMadeMarker(made));
+      else if (made === undefined && F && d && d.sink) markers.add(curvedSinkMarker(d.sink, F));
     });
     v.pickLine = g; v.mesh.add(g);
     if (markers.children.length) { v.pickKeys = markers; v.mesh.add(markers); }
@@ -12741,6 +12923,22 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   // A plug on a curved cut, drawn standing on the face that follows the line, as deep as it will be.
   // (1.90) the cut's extrusion drawn before the cut, in the keys' blue: a see-through skin from the line down to the
   // plug's flat end, and the end's outline, so it shows even with no extra key
+  // The plug as the cut made it: its sides as a see-through skin, its end as a filled face with an outline
+  function plugMadeMarker(pm) {
+    const g = new THREE.Group(), n = pm.floor.length / 3, pos = [], end = [], c0 = [0, 0, 0];
+    for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) c0[k] += pm.floor[3 * i + k] / n;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, a = pm.line.slice(3 * i, 3 * i + 3), b = pm.line.slice(3 * j, 3 * j + 3), c = pm.floor.slice(3 * i, 3 * i + 3), e = pm.floor.slice(3 * j, 3 * j + 3);
+      pos.push(...a, ...b, ...c, ...b, ...e, ...c, ...c, ...e, ...c0);
+      end.push(new THREE.Vector3(...c));
+    }
+    const geom = new THREE.BufferGeometry(); geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); if (geom.computeVertexNormals) geom.computeVertexNormals();
+    const skin = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: KEY_MARK, roughness: 0.5, transparent: true, opacity: 0.45, depthTest: false, side: THREE.DoubleSide }));
+    skin.renderOrder = 8; g.add(skin);
+    const ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(end), new THREE.LineBasicMaterial({ color: KEY_MARK, depthTest: false }));
+    ring.renderOrder = 9; g.add(ring);
+    return g;
+  }
   function curvedSinkMarker(sk, F) {
     const g = new THREE.Group(), n = sk.h.length, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z);
     const pos = [], end = [];
@@ -12879,7 +13077,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       renderAction(); return;
     }
     if (pick.preview) {
-      const pk = pick.plugs.length ? ` The plug is drawn in blue.` : pick.keys.length ? ` The keys are drawn in blue.` : '';
+      const pk = pick.plugs.length || (pick.draw || []).some(d => d && d.sink) ? ` The plug is drawn in blue.` : pick.keys.length ? ` The keys are drawn in blue.` : '';
       el.innerHTML = `<p class="status ok">${ICONS.check}<span>Painted area with ${nl === 1 ? 'an outline' : `an outline of ${nl} lines`}, ${len} in all.${pk} Keep painting, or split it off: the cut is checked then.</span></p>${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}${pickShowHTML()}`;
       applyPickShow();
       renderAction();
@@ -12887,15 +13085,15 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     }
     const vols = pick.result.parts.map(q => fmtVol(q.volume)); // (1.76) a miniature's hand is mm³, not "0.0 cm³"
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
-    const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
-    const sinks = (pick.result.sinks || []).filter(s => s > 0.05), sunkLine = sinks.length ? ` The cut is extruded up to ${fmt(Math.max(...sinks))} mm into the other piece${state.cfg.sinkTaper > 0 ? `, tapered ${fmt(state.cfg.sinkTaper)}°` : ''}${sinks.length < nl ? ' on ' + (sinks.length === 1 ? 'one line' : `${sinks.length} lines`) : ''}, so this piece ends in a plug that seats in a socket.` : state.cfg.sink > 0 ? ' There’s no room to extrude the cut here.' : '';
+    const keyLine = ''; // (1.92: the joints are said per line by pickJointText)
+    const sunkLine = ' ' + pickJointText(pick);
     const what = region ? `${painted ? 'The painted area’s' : nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${painted || nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} and leaves ${vols.length === 2 ? vols[1] : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')}`}.`
       : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]}.`
       : `${nl} lines, ${len} in all. Cutting along them gives ${vols.length} pieces of ${vols.join(', ')}.`;
     const drawMore = state.draw.on && !state.draw.points.length ? `<p class="status muted">Drag across the part or click points again to add a line: it will be cut together with the ${nl === 1 ? 'line' : `${nl} lines`} already picked.</p>` : '';
     el.innerHTML = `${drawMore}${pick.forced ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.forced)}</span></p><p class="status muted">${what}${keyLine}${sunkLine}</p>` : `<p class="status ok">${ICONS.check}<span>${what}${keyLine}${sunkLine}</span></p>`}
       ${pick.noKeys ? `<p class="status warn">${ICONS.alert}<span>${esc(pick.noKeys)}</span></p>` : ''}
-      <div class="btn-row move-line">${state.edit ? '' : `<button class="btn small" data-act="edit-seam" title="Turn the line into handles you can drag along the surface">Edit ${nl === 1 ? 'the line' : 'the lines'}</button>`}<span class="lbl">Move</span><button class="btn small" data-act="move-in" title="Move the line into the piece being split off, along the surface">In</button><button class="btn small" data-act="move-out" title="Move the line outward, along the surface">Out</button><label class="inline-num"><span class="lbl">by</span><input type="number" id="moveLineBy" min="0.1" step="0.5" value="${state.moveBy || 1}" aria-label="Move the line by this much"><span class="unit">mm</span></label><button class="btn small" data-act="flat-here" title="A flat cut through the line’s plane instead, cutting only this area">Flat cut here</button></div><div class="btn-row fill-gaps"><button class="btn small" data-act="fill-gaps" title="Complete the pick: fill the narrow gaps between the picked pieces and every patch they surround">Fill gaps</button><label class="inline-num"><span class="lbl">up to</span><input type="number" id="fillGapBy" min="0.1" step="0.5" value="${state.fillGap || fillGapDefault()}" aria-label="Fill gaps up to this wide"><span class="unit">mm</span></label></div>${pickShowHTML()}${painted || state.edit ? '' : addHint}`;
+      <details class="rp-more" data-sec="pickAdjust"${state.ui.pickAdjust ? ' open' : ''}><summary>Adjust the line</summary><div class="btn-row move-line">${state.edit ? '' : `<button class="btn small" data-act="edit-seam" title="Turn the line into handles you can drag along the surface">Edit ${nl === 1 ? 'the line' : 'the lines'}</button>`}<span class="lbl">Move</span><button class="btn small" data-act="move-in" title="Move the line into the piece being split off, along the surface">In</button><button class="btn small" data-act="move-out" title="Move the line outward, along the surface">Out</button><label class="inline-num"><span class="lbl">by</span><input type="number" id="moveLineBy" min="0.1" step="0.5" value="${state.moveBy || 1}" aria-label="Move the line by this much"><span class="unit">mm</span></label><button class="btn small" data-act="flat-here" title="A flat cut through the line’s plane instead, cutting only this area">Flat cut here</button></div><div class="btn-row fill-gaps"><button class="btn small" data-act="fill-gaps" title="Complete the pick: fill the narrow gaps between the picked pieces and every patch they surround">Fill gaps</button><label class="inline-num"><span class="lbl">up to</span><input type="number" id="fillGapBy" min="0.1" step="0.5" value="${state.fillGap || fillGapDefault()}" aria-label="Fill gaps up to this wide"><span class="unit">mm</span></label></div></details>${pickShowHTML()}${painted || state.edit ? '' : addHint}`;
     applyPickShow();
     renderAction();
   }
@@ -13039,7 +13237,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
           }
           refused++;
           const why = pick ? pick.forced || pick.error || '' : '';
-          if (!/hook|held at more than one end/.test(why)) break; // only a hooked or wedged refusal is worth trying with a neighbour
+          if (!/hook|held in \d+ places/.test(why)) break; // only a hooked or wedged refusal is worth trying with a neighbour
         }
         if (cut) break;
       }
@@ -13102,7 +13300,10 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const numberLine = numbered ? ` ${numbered === 1 ? `The joint is numbered ${state.joint}` : `The joints are numbered ${state.joint} to ${state.joint + numbered - 1}`}.` : '';
     if (numbered) state.joint += pick.perLoop.length;
     if (pick.painted) setPainting(false);
-    toast(`${pick.painted ? `Split off the painted area: ${n} pieces` : pick.regions ? `Split off the ${pick.regions.length === 1 ? 'region' : 'regions'}: ${n} pieces` : `Cut along the ${pick.loops.length === 1 ? 'line' : 'lines'} into ${n} pieces`}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}.${numberLine} Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
+    // (1.92) the pieces stand apart at once, so the plug and its socket can be seen (the owner looked at two pieces still together and saw no plug)
+    if (state.explode < 0.3) { state.explode = 0.3; const ex = $('#explode'); if (ex) ex.value = state.explode; const eo = $('#explodeOut'); if (eo) eo.textContent = '30%'; }
+    applyExplode(); markDirty();
+    toast(`${pick.painted ? `Split off the painted area: ${n} pieces` : pick.regions ? `Split off the ${pick.regions.length === 1 ? 'region' : 'regions'}: ${n} pieces` : `Cut along the ${pick.loops.length === 1 ? 'line' : 'lines'} into ${n} pieces`}${pinsMade ? ` and ${pinsMade} dowel pins` : ''}${pick.forced ? ', against the warning' : ''}.${numberLine} The pieces are shown apart (Exploded view, bottom left). Click another region or line to keep cutting.`, pick.forced ? 'warn' : '');
   }
   $('#seamSmooth').addEventListener('input', (e) => { $('#seamSmoothOut').textContent = e.target.value; });
   $('#seamSmooth').addEventListener('change', (e) => { smoothSeam(+e.target.value); });
