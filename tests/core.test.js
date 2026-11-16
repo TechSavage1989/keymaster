@@ -1981,5 +1981,87 @@ console.log('knife edges after a cut');
   }
 }
 
+// (1.96) The exploded view as an assembly: mates from shared cut faces, the biggest piece still, chains carried,
+// and paths that turn where something is in the way
+{
+  console.log('\nthe exploded view');
+  const box = (w, d, h, pos) => ({ kind: 'cube', w, d, h, edge: 'sharp', pos, rot: [0, 0, 0] });
+  const pullOf = (q, n) => (q.side === 'below' ? n.map(x => -x) : n);
+  const asParts = (list, n) => list.map(q => ({ positions: q.positions, indices: q.indices, pull: pullOf(q, n) }));
+  // is a point inside a solid (by more than a hair)? lines along z through the model
+  const insider = (q) => { const F0 = K.frameFromNormal([0, 0, 1], [0, 0, 0]), g = K.rayGrid(q.positions, q.indices, F0); return (p) => { const X = p[0] * F0.u[0] + p[1] * F0.u[1] + p[2] * F0.u[2], Y = p[0] * F0.v[0] + p[1] * F0.v[1] + p[2] * F0.v[2], runs = K.solidRuns(g, X + 1.3e-5, Y + 0.7e-5); for (let i = 0; i < runs.length; i += 2) if (runs[i] + 0.05 <= p[2] && p[2] <= runs[i + 1] - 0.05) return true; return false; }; };
+  // how many sampled vertices of any piece lie inside another at amount k
+  const clashes = (parts, plan, k) => {
+    const at = K.explodeAt(plan, k), tests = parts.map(insider); let bad = 0;
+    for (let i = 0; i < parts.length; i++) for (let q = 0; q < parts.length; q++) {
+      if (i === q || Math.hypot(at[i][0] - at[q][0], at[i][1] - at[q][1], at[i][2] - at[q][2]) < 1e-9) continue;
+      const P = parts[i].positions, nv = P.length / 3, st = Math.max(1, Math.floor(nv / 500));
+      for (let v = 0; v < nv; v += st) if (tests[q]([P[3 * v] + at[i][0] - at[q][0], P[3 * v + 1] + at[i][1] - at[q][1], P[3 * v + 2] + at[i][2] - at[q][2]])) bad++;
+    }
+    return bad;
+  };
+  // a bar cut twice: the long end stands still, the middle moves off it, the far end off the middle
+  {
+    const bar = K.shapeMesh({ kind: 'cube', w: 20, d: 20, h: 100 }), sub = K.subdivideMesh(bar.positions, bar.indices, { maxEdge: 5 }), n = [0, 0, 1];
+    const c1 = K.cutMesh(sub.positions, sub.indices, K.frameFromNormal(n, [0, 0, 10.3]), { scale: 100, cfg: cfgOf({}) });
+    const lower = c1.parts.find(q => q.side === 'below'), upper = c1.parts.find(q => q.side === 'above');
+    const c2 = K.cutMesh(upper.positions, upper.indices, K.frameFromNormal(n, [0, 0, 30.7]), { scale: 100, cfg: cfgOf({}) });
+    const mid = c2.parts.find(q => q.side === 'below'), top = c2.parts.find(q => q.side === 'above');
+    const parts = asParts([top, lower, mid], n); // the middle's own pull points down, into the long end
+    const plan = K.explodePlan(parts), S = plan.travel;
+    check('pieces that share a cut face are mates, the biggest is the root, and the chain hangs joint by joint', plan.parts[1].parent === -1 && plan.parts[2].parent === 1 && plan.parts[0].parent === 2 && plan.parts[1].legs.length === 0, plan.parts.map(q => q.parent));
+    const z = (k) => K.explodeAt(plan, k).map(a => a[2]);
+    check('nothing moves at 0, and the root never moves', K.explodeAt(plan, 0).every(a => Math.hypot(...a) === 0) && [0.15, 0.5, 1].every(k => Math.hypot(...K.explodeAt(plan, k)[1]) === 0));
+    check('the chain opens joint by joint: the middle off the root, the end off the middle, more with the amount', [0.15, 0.5, 1].every(k => z(k)[2] > 0.9 * k * S && z(k)[0] - z(k)[2] > 0.9 * k * S) && Math.abs(z(1)[0] - 2 * S) < 0.02 * S, [z(0.15), z(0.5), z(1), S]);
+    check('a pull that points into the mate is not followed: the joint decides', plan.parts[2].legs[0].d[2] > 0.99, plan.parts[2].legs);
+    check('no piece is inside another on the way', [0.15, 0.5, 1].every(k => clashes(parts, plan, k) === 0));
+    const quick = K.explodePlan(parts, { quick: true });
+    check('the quick plan has the same tree and directions', quick.parts.every((q, i) => q.parent === plan.parts[i].parent) && K.explodeAt(quick, 1)[0][2] > 1.9 * S);
+    // with pegs the two cut faces are triangulated differently: the mates are still found, from the points
+    const cfg = cfgOf({ type: 'peg', diameter: 5, length: 6 }), F = K.frameFromNormal(n, [0, 0, 10.3]), an = K.analyzePlane(sub.positions, sub.indices, F, cfg, 100), keys = K.autoPlaceKeys(an, cfg, 2, new Set());
+    const cp = K.cutMesh(sub.positions, sub.indices, F, { scale: 100, cfg, keys }), pegged = asParts(cp.parts, n), pp = K.explodePlan(pegged);
+    const moved = pp.parts.findIndex(q => q.parent >= 0);
+    check('pieces joined by pegs are mates, and the smaller leaves along the pegs', keys.length === 2 && cp.parts.length === 2 && moved >= 0 && cp.parts[moved].side === 'above' && pp.parts[moved].legs[0].d[2] > 0.999 && clashes(pegged, pp, 0.5) === 0, [keys.length, pp.parts.map(q => q.parent)]);
+  }
+  // the knot cut by one plane: arches above and arcs below, mated in a ring. An arch can't carry the arc below it
+  // (the next arch lies on that), so every piece hangs on the root and leaves along its own cut
+  {
+    const k = K.prepareMesh(K.torusKnot()), b = K.bounds(k.positions), n = [0, 0, 1];
+    const r = K.cutMesh(k.positions, k.indices, K.frameFromNormal(n, [b.center[0], b.center[1], b.center[2] + 0.37]), { scale: K.diag(b), cfg: cfgOf({}) });
+    const parts = asParts(r.parts, n), plan = K.explodePlan(parts), roots = plan.parts.filter(q => q.parent < 0), at = K.explodeAt(plan, 1);
+    check('a ring of pieces from one cut: one root, and every other piece leaves along its own side of the cut, all the way', parts.length >= 4 && roots.length === 1 && plan.parts.every((q, i) => q.parent < 0 || (Math.abs(at[i][2] - parts[i].pull[2] * plan.travel) < 1e-6 && Math.hypot(at[i][0], at[i][1]) < 1e-6)), [parts.length, at]);
+    check('none of them inside another half way out', clashes(parts, plan, 0.5) === 0);
+  }
+  // a post under a roof, cut off its floor and then in two: it can rise only as far as the roof, then must turn,
+  // and the piece on top of it goes with it without going through the roof
+  {
+    const slab = K.shapeMesh({ kind: 'cube', w: 60, d: 40, h: 10 });
+    let cur = { positions: slab.positions.map((v, i) => (i % 3 === 2 ? v - 5 : v)), indices: slab.indices }; // the floor: z from -10 to 0
+    cur = K.booleanShape(cur.positions, cur.indices, box(10, 40, 55, [-25, 0, 27.5]), 'union'); // a wall: x from -30 to -20, up to z = 55
+    cur = K.booleanShape(cur.positions, cur.indices, box(40, 36, 10, [-5, 0, 45]), 'union'); // the roof: z from 40 to 50, out to x = 15
+    cur = K.booleanShape(cur.positions, cur.indices, box(10, 10, 35, [0, 0, 12.5]), 'union'); // the post: up to z = 30
+    const sub = K.subdivideMesh(cur.positions, cur.indices, { maxEdge: 4 }), n = [0, 0, 1], F = K.frameFromNormal(n, [0, 0, 6.2]);
+    let c1 = null;
+    for (const skip of [0, 1]) { try { const r = K.cutMesh(sub.positions, sub.indices, F, { scale: 80, cfg: cfgOf({}), skip: new Set([skip]) }); if (r.parts.length === 2 && r.parts.some(q => K.volume(q.positions, q.indices) < 3000)) c1 = r; } catch (err) { /* the other area */ } }
+    const post = c1 && c1.parts.find(q => K.volume(q.positions, q.indices) < 3000), body = c1 && c1.parts.find(q => q !== post);
+    const c2 = K.cutMesh(post.positions, post.indices, K.frameFromNormal(n, [0, 0, 18.4]), { scale: 80, cfg: cfgOf({}) });
+    const lower = c2.parts.find(q => q.side === 'below'), top = c2.parts.find(q => q.side === 'above');
+    const parts = [{ positions: body.positions, indices: body.indices, pull: [0, 0, -1] }, { positions: lower.positions, indices: lower.indices, pull: [0, 0, -1] }, { positions: top.positions, indices: top.indices, pull: [0, 0, 1] }];
+    const plan = K.explodePlan(parts), S = plan.travel, at1 = K.explodeAt(plan, 1);
+    check('the body is the root, the post’s lower half hangs on it and the upper half on that', plan.parts[0].parent === -1 && plan.parts[1].parent === 0 && plan.parts[2].parent === 1, plan.parts.map(q => q.parent));
+    const l1 = plan.parts[1].legs;
+    check('the post rises only as far as the roof lets it, then turns out from under it', l1.length === 2 && l1[0].d[2] > 0.99 && l1[0].len <= 10 + 1e-6 && l1[0].len > 1 && l1[1].d[2] < 0.3 && Math.hypot(...at1[1]) > 0.6 * S, l1);
+    const ks = []; for (let k = 0.05; k <= 1.0001; k += 0.05) ks.push(Math.min(1, k));
+    const bad = ks.map(k => clashes(parts, plan, k));
+    check('neither half goes through the roof, the body or the other half, all the way out', bad.every(b => b === 0), bad);
+    check('the upper half ends further out than the lower, clear of it', Math.hypot(at1[2][0] - at1[1][0], at1[2][1] - at1[1][1], at1[2][2] - at1[1][2]) > 12 && Math.hypot(...at1[2]) > Math.hypot(...at1[1]), at1);
+    const a = K.explodeAt(plan, 0.5), b = K.explodeAt(plan, 0.5001);
+    check('the offsets change smoothly with the amount', a.every((p, i) => Math.hypot(p[0] - b[i][0], p[1] - b[i][1], p[2] - b[i][2]) < 0.001 * S), [a, b]);
+    // a piece with no mate keeps the old way: along its pull, or out from the middle
+    const ball = uvSphere(4, 16, 12, [60, 0, 20]), withLoose = parts.concat([{ positions: ball.positions, indices: ball.indices, pull: null }]), pl = K.explodePlan(withLoose), far = K.explodeAt(pl, 1)[3];
+    check('a loose piece with no mate moves out from the middle', pl.parts[3].parent === -1 && far[0] > 5 && Math.abs(far[1]) < 1, far);
+  }
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);
