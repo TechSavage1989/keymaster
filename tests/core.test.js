@@ -1920,5 +1920,66 @@ console.log('knife edges after a cut');
   check('planning the joints draws both plugs before the cut', j.draw.length === 2 && j.draw.every(d => d.sink || d.plugs.length), j.draw.map(d => [!!d.sink, d.plugs.length]));
 }
 
+// (1.96) A joint on every line that can hold one. Three things left lines flat in 1.95: the room for a plug from the
+// cut's edge was measured straight down from the rim, though the plug's walls lean in; a plug 1 mm deep at its
+// shallowest was reported as a joint; and once keys or a plug were planned on each line of a piece held in two
+// places, all but one were dropped, since each only lifts out along its own line's axis.
+{
+  console.log('\na joint on every line');
+  // a limb standing on a body that narrows behind the cut: straight down from the rim the body's side is 0.1 mm away
+  const tube = K.shapeMesh({ kind: 'tube', w: 20, d: 20, h: 31 });
+  let cur = { positions: tube.positions.map((v, i) => (i % 3 === 2 ? v + 14.5 : v)), indices: tube.indices }; // z from -1 to 30
+  cur = K.booleanShape(cur.positions, cur.indices, { kind: 'cone', w: 20.2, d: 10, h: 30, edge: 'sharp', pos: [0, 0, -15], rot: [180, 0, 0] }, 'union'); // 20.2 wide at z = 0, 10 at z = -30
+  {
+    const sub = K.subdivideMesh(cur.positions, cur.indices, { maxEdge: 2.5 }), P = sub.positions, I = sub.indices, nt = I.length / 3, sel = new Uint8Array(nt);
+    for (let t = 0; t < nt; t++) if ((P[3 * I[3 * t] + 2] + P[3 * I[3 * t + 1] + 2] + P[3 * I[3 * t + 2] + 2]) / 3 > 1e-6) sel[t] = 1;
+    const seg = K.selectionSeg(P, I, sel), lines = K.groupLoops(P, I, seg, [1]), vol = K.volume(P, I);
+    const lean = K.splitRegions(P, I, seg, [1], { cfg: { type: 'none', sinkTaper: 20 }, sink: 3, minThickness: 0.8 }), straight = K.splitRegions(P, I, seg, [1], { cfg: { type: 'none', sinkTaper: 0 }, sink: 3, minThickness: 0.8 });
+    const pm = (lean.plugsMade || [])[0], ps = (straight.plugsMade || [])[0];
+    check('a plug leaning in 20° goes its full depth where a straight one has no room', lines.length === 1 && pm && pm.least >= 3 - 1e-6 && pm.taper === 20 && pm.flat && (!ps || ps.least < 1.5) && lean.jointsMade[0].kind === 'edge', { lean: pm && [pm.least, pm.depth, pm.taper], straight: ps && [ps.least, ps.depth] });
+    check('its pieces are sealed and keep the volume', [lean, straight].every(r => r.parts.length === 2 && allClosed(r.parts) && r.parts.every(q => q.volume > 0) && Math.abs(sumVol(r.parts) - vol) / vol < 1e-6), [sumVol(lean.parts), sumVol(straight.parts), vol]);
+    // the leaning plug's floor ring lies inside the body, a wall from its side
+    let worst = Infinity; for (let i = 0; pm && i < pm.floor.length; i += 3) { const z = pm.floor[i + 2], rBody = 10.1 + (5.1 * z) / 30; worst = Math.min(worst, rBody - Math.hypot(pm.floor[i], pm.floor[i + 1])); }
+    check('the plug’s floor keeps a wall of the body round it', worst >= 0.75, worst);
+    // with straight sides the edge plug is a shallow one, and the pick takes a plug set in from the edge instead
+    const cfg = { type: 'none', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1, taper: 0, sizeMode: 'auto', sizeMin: 2, pegSide: 'below', perArea: 1, plugSlope: 5, plugDepthMode: 'auto', sink: 3, sinkTaper: 0, sizeMax: 5 };
+    const out = K.planPick(P, I, { loops: lines, regions: [1], seg, painted: true, cfg, minThickness: 0.8, sink: 3, perArea: 1, smooth: false });
+    const per = out.perLoop[0] || {};
+    check('a plug only 1 mm deep at the edge gives way to one set in from the edge', !!out.result && !out.forced && per.inset && per.plugs.length === 1 && per.plugs[0].depth >= 1.5 && per.made === 'plug' && !out.result.plugsMade[0] && allClosed(out.result.parts) && out.result.parts.every(q => q.volume > 0), { forced: out.forced, per: { inset: per.inset, made: per.made, depth: per.plugs && per.plugs[0] && per.plugs[0].depth } });
+  }
+  // the brace again (held at the floor and at the wall, 90° apart), now with a key planned on each line
+  const box = (w, d, h, pos, rot = [0, 0, 0]) => ({ kind: 'cube', w, d, h, edge: 'sharp', pos, rot });
+  const slab = K.shapeMesh({ kind: 'cube', w: 60, d: 40, h: 10 });
+  cur = { positions: slab.positions.map((v, i) => (i % 3 === 2 ? v - 5 : v)), indices: slab.indices };
+  cur = K.booleanShape(cur.positions, cur.indices, box(10, 40, 50, [-25, 0, 25]), 'union');
+  cur = K.booleanShape(cur.positions, cur.indices, box(12, 12, 60, [0, 0, 20], [0, -45, 0]), 'union');
+  const sub = K.subdivideMesh(cur.positions, cur.indices, { maxEdge: 2.5 }), P = sub.positions, I = sub.indices, nt = I.length / 3, sel = new Uint8Array(nt);
+  for (let t = 0; t < nt; t++) {
+    const v = [I[3 * t], I[3 * t + 1], I[3 * t + 2]], c = [0, 1, 2].map(k => (P[3 * v[0] + k] + P[3 * v[1] + k] + P[3 * v[2] + k]) / 3);
+    if (c[2] > 1e-6 && c[0] > -20 + 1e-6 && Math.abs(c[1]) <= 8.6 && !v.every(q => Math.abs(P[3 * q + 2]) < 1e-6) && !v.every(q => Math.abs(P[3 * q] + 20) < 1e-6)) sel[t] = 1;
+  }
+  const seg = K.selectionSeg(P, I, sel), lines = K.groupLoops(P, I, seg, [1]), vol = K.volume(P, I);
+  const pick = (type, sink) => {
+    const cfg = { type, shape: type === 'peg' ? 'square' : 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1, taper: 10, taperSocket: true, sizeMode: 'auto', sizeMin: 2, pegSide: 'below', perArea: 1, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', sink, sinkTaper: 5, sizeMax: 5 };
+    return K.planPick(P, I, { loops: lines, regions: [1], seg, painted: true, cfg, minThickness: 0.8, sink, perArea: 1, smooth: false });
+  };
+  const sealed = (out, gap) => !!out.result && out.result.parts.length === 2 && allClosed(out.result.parts) && out.result.parts.every(q => q.volume > 0) && (gap ? sumVol(out.result.parts) <= vol + 1e-6 && (vol - sumVol(out.result.parts)) / vol < 0.01 : Math.abs(sumVol(out.result.parts) - vol) / vol < 1e-6);
+  for (const type of ['peg', 'plug']) {
+    const out = pick(type, 0), per = out.perLoop;
+    // (a key straight into each face locks the brace; 1.95 kept one line's and cut the other flat)
+    check(`${type === 'peg' ? 'pegs' : 'plugs'} that would lock the brace become a sloped boss on each line, unforced`, lines.length === 2 && !out.forced && !out.dropped && !out.noKeys && per.length === 2 && per.every(q => q.made === 'boss' && q.boss && q.plugs.length === 1 && q.plugs[0].depth >= 1 && q.draft >= q.off + 2 && q.draft <= 64 && !q.keys.length) && out.draw.every(d => d.plugs.length === 1 && !d.keys.length) && !(out.result.warnings || []).length, { forced: out.forced, dropped: out.dropped, per: per.map(q => ({ made: q.made, draft: q.draft, off: q.off, plugs: q.plugs.length })) });
+    check('  its pieces are sealed, and lose only the fit gap', sealed(out, true), out.result && [sumVol(out.result.parts), vol]);
+    // each boss stands on the brace and its top is inside its base
+    const ringArea = (r) => Math.abs(r.reduce((sm, q, i) => sm + q[0] * r[(i + 1) % r.length][1] - r[(i + 1) % r.length][0] * q[1], 0)) / 2, span = (r, k) => [Math.min(...r.map(q => q[k])), Math.max(...r.map(q => q[k]))];
+    const tops = per.every(q => q.plugs.every(pl => ringArea(pl.top) > 0.1 * ringArea(pl.base) && ringArea(pl.top) < 0.8 * ringArea(pl.base) && [0, 1].every(k => span(pl.top, k)[0] > span(pl.base, k)[0] && span(pl.top, k)[1] < span(pl.base, k)[1])));
+    check('  each boss narrows to its top', tops, null);
+  }
+  {
+    const out = pick('peg', 3), per = out.perLoop, made = out.result ? out.result.plugsMade : [];
+    check('with Extrude on, both lines carry a plug along the one way on, and the pegs that would lock are left off', !out.forced && !out.dropped && per.every(q => (q.made === 'skew' || q.made === 'edge') && !q.keys.length) && made.every(q => q && q.shared && q.depth >= 3 - 1e-6) && out.draw.every(d => !d.keys.length), { forced: out.forced, dropped: out.dropped, per: per.map(q => q.made) });
+    check('  its pieces are sealed and keep the volume', sealed(out, false), out.result && [sumVol(out.result.parts), vol]);
+  }
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

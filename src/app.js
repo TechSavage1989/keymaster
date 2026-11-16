@@ -4206,23 +4206,26 @@
   // a line while the cut did carry plugs, and nothing said which line got what
   function pickJointText(pick) {
     const r = pick.result, per = pick.perLoop || [], n = pick.loops.length, made = (r && r.plugsMade) || [];
-    let edge = 0, inset = 0, keyed = 0, tiny = 0, lo = Infinity, hi = 0, flat = 0, shared = false;
+    let edge = 0, inset = 0, boss = 0, off = 0, keyed = 0, tiny = 0, lo = Infinity, hi = 0, flat = 0, shared = false, bossDeep = 0, bossDraft = 0, insetDeep = 0;
     for (let i = 0; i < n; i++) {
       const q = made[i], pl = per[i] || {};
       if (q) { edge++; lo = Math.min(lo, q.least || q.depth); hi = Math.max(hi, q.depth); if (q.flat) flat++; if (q.shared) shared = true; }
-      else if (pl.plugs && pl.plugs.length) inset++;
+      else if (pl.boss && pl.plugs && pl.plugs.length) { boss++; bossDeep = Math.max(bossDeep, ...pl.plugs.map(x => x.depth)); bossDraft = Math.max(bossDraft, pl.draft || 0); } // (1.96) a boss drafted to lift out along the pieces' one way on
+      else if (pl.plugs && pl.plugs.length) { inset++; insetDeep = Math.max(insetDeep, ...pl.plugs.map(x => x.depth)); }
+      else if (pl.why === 'off') off++;
       else if (pl.tiny && !(pl.keys && pl.keys.length)) tiny++;
       if (pl.keys && pl.keys.length) keyed++;
     }
     const bare = pick.loops.filter((l, i) => !made[i] && !((per[i] || {}).plugs || []).length && !((per[i] || {}).keys || []).length && !(per[i] || {}).tiny).length, bits = [], lines = (k) => (n === 1 ? '' : k === n ? (n === 2 ? ' on both lines' : ` on all ${n} lines`) : ` on ${k === 1 ? 'one line' : `${k} lines`}`);
     const taper = state.cfg.sinkTaper > 0 && made.some(q => q && q.taper > 0) ? `, sides leaning in ${fmt(Math.max(...made.filter(Boolean).map(q => q.taper)))}°` : '';
     if (edge) bits.push(`a plug from the cut’s edge${lines(edge)}, ${hi - lo > 0.2 ? `${fmt(lo)} to ${fmt(hi)}` : fmt(hi)} mm into the other piece${taper}${flat === edge ? ', with a flat end' : made.some(q => q && q.leveled) ? ', its end leveled as far as the other piece holds' : ''}${shared ? ', along the one way the pieces slide apart' : ''}`);
-    const deep = (pick.plugs || []).length ? `, ${fmt(Math.max(...pick.plugs.map(q => q.depth)))} mm deep` : '', nkeys = (pick.keys || []).length;
+    const deep = insetDeep ? `, ${fmt(insetDeep)} mm deep` : '', nkeys = (pick.keys || []).length;
+    if (boss) bits.push(`a locating boss${lines(boss)}, ${fmt(bossDeep)} mm tall, its sides sloped ${fmt(bossDraft)}° so it lifts out the one way the pieces slide apart`);
     if (inset) bits.push(`a plug set in from the edge${lines(inset)}${deep}${state.cfg.sink > 0 ? ' (the other piece is too thin there for one from the edge)' : ''}`);
     if (keyed && state.cfg.block) bits.push(`a block key${lines(keyed)} (a square peg ${fmt(Math.max(...pick.keys.map(k => K.keyCfg(pick.perLoop.find(q => q.cfg) ? pick.perLoop.find(q => q.cfg).cfg : state.cfg, k).diameter)))} mm across, set in the middle of the cut face)`);
     else if (keyed) bits.push(`${nkeys} ${{ peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key'}${nkeys === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}${lines(keyed)}`);
     if (!bits.length) return state.cfg.block || state.cfg.sink > 0 || state.cfg.type !== 'none' ? (n === 1 ? 'The cut is flat, with no joint: there’s no room for one here.' : 'The lines are cut flat, with no joint: there’s no room for one here.') : '';
-    const rest = bare + tiny ? ` ${bare + tiny === 1 ? 'The other line is' : `The other ${bare + tiny} lines are`} cut flat${tiny && !bare ? ' (too small for a joint)' : ''}.` : '';
+    const rest = bare + tiny ? ` ${bare + tiny === 1 ? 'The other line is' : `The other ${bare + tiny} lines are`} cut flat${tiny && !bare ? ' (too small for a joint)' : off && off === bare ? ' (it faces too far from the way the pieces slide apart for a joint to come out)' : ''}.` : '';
     return `Joint: ${bits.join('; ')}.${rest}`;
   }
   function droppedText(d) {
