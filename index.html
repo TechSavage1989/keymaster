@@ -565,7 +565,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.92, build c9f56b. After an update, refresh the page and check this changes.">v1.92 · c9f56b</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.93, build e8f3dd. After an update, refresh the page and check this changes.">v1.93 · e8f3dd</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -668,7 +668,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
     <div class="rp-row rp-ratio"><span class="lbl" title="How finely the model is split into parts">Detail</span><div class="seg" role="group" aria-label="Detail" id="regionsDetail"><button type="button" data-act="regions-detail" data-value="coarse" aria-pressed="false" title="Only the big parts: head, limbs, body, base">Big</button><button type="button" data-act="regions-detail" data-value="balanced" aria-pressed="true" title="The parts a kit would have: head, hands, feet, hat, clothing">Balanced</button><button type="button" data-act="regions-detail" data-value="fine" aria-pressed="false" title="Smaller parts too: ears, fingers, buttons, straps">Fine</button></div></div>
     <div class="rp-row rp-fold" hidden><label class="slider" title="How big the sections are: left for a few large ones, right for many small ones (the surface is split where it creases, and where a hard surface such as a book or a buckle meets cloth or skin)"><span class="lbl">Section size</span><input type="range" id="regionsAngle" min="0" max="100" step="5" value="55" aria-label="Section size, from large (left) to small (right)"><output id="regionsAngleOut">Medium</output></label></div>
     <div class="btn-row"><label class="inline-num" title="The cut goes from its edge straight into the other piece, at least this far past the line&#39;s deepest point, so the piece ends in a solid plug that seats in a matching socket, with no thin or sharp rim. 0 turns it off."><span class="lbl">Extrude</span><input type="number" id="sinkDepth" min="0" step="0.5" value="1" aria-label="How far the cut goes into the other piece past the line, in mm"><span class="unit">mm</span></label><label class="inline-num" title="The plug&#39;s sides lean in by this angle so it slides home. 0 for straight sides."><span class="lbl">Taper</span><input type="number" id="sinkTaper" min="0" max="20" step="1" value="5" aria-label="Taper of the plug&#39;s sides in degrees"><span class="unit">°</span></label><label class="inline-num" title="An extra key on the plug&#39;s end, or none. The same choice as in Joints."><span class="lbl">Extra key</span><select id="extraKey" aria-label="Extra key on the cut"><option value="peg">Pegs</option><option value="dowel">Dowels</option><option value="magnet">Magnets</option><option value="plug">Plug</option><option value="none">None</option></select></label><label class="inline-num" title="No piece may be thinner than this after a cut: a cut that would leave a thinner wall, a sliver or a knife-sharp edge along its rim is flagged before it is made (you can still cut it anyway). Follows the printer until set."><span class="lbl">Thinnest</span><input type="number" id="minPiece" min="0.2" step="0.1" value="1.2" aria-label="The thinnest a piece may be after a cut"><span class="unit">mm</span></label></div>
-    <details class="rp-more" data-sec="cutMore"><summary>More cut options</summary><div class="btn-row"><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div></details>
+    <details class="rp-more" data-sec="cutMore"><summary>More cut options</summary><div class="btn-row"><label class="inline-check" title="Off: the cut follows the seam you picked or painted, where it shows least. On: a limb is ended with a flat cut straight across it instead, a little way in from the seam, which gives a round flat end for a plug but may sit in plain view."><input type="checkbox" id="flatEnds"> End limbs with a flat cut</label><label class="inline-check" title="Ease the cut line along the surface where it zigzags from triangle to triangle, so the cut edge comes out smooth. The pieces still meet exactly."><input type="checkbox" id="smoothCut" checked> Smooth jagged lines</label><label class="inline-check" title="Cut a drawn line or a stroke right where it runs, through the faces, adding new points to the mesh, instead of along the edges the mesh already has"><input type="checkbox" id="sliceDrawn" checked> Slice drawn lines</label></div></details>
     <div id="paintTools" class="paint-tools" hidden>
       <div class="btn-row"><label class="inline-num" title="Brush size"><span class="lbl">Brush</span><input type="number" id="brushSize" min="0.2" step="0.5" value="3" aria-label="Brush size in millimetres"><span class="unit">mm</span></label><input type="range" id="brushSlider" class="brush-slider" min="0" max="100" step="1" value="40" aria-label="Brush size" title="Brush size: drag to change ([ and ] too)"><button class="btn small" id="eraseBtn" aria-pressed="false" title="Erase paint instead of adding it (or hold Shift while painting)">Erase</button><button class="btn small" id="brushModeBtn" data-act="paint-mode" aria-pressed="false" title="Surface follows connected faces and stops at the edge of a layer; Sphere paints every face within reach, layers behind included">Surface</button><button class="btn small" id="fillBtn" data-act="paint-fill" aria-pressed="false" title="A click paints the whole surface region under the brush">Fill</button><button class="btn small" data-act="paint-clear" title="Remove all paint">Clear</button><button class="btn small" id="isolateBtn" data-act="paint-isolate" aria-pressed="false" title="Hide everything but the painted area, so the rest of the model stays out of the way of the brush and clicks">Isolate</button></div>
       <details class="rp-more" data-sec="paintMore"><summary>Adjust the painted area</summary>
@@ -5020,14 +5020,32 @@ const KMCore = (() => {
         rooms.sort((a, b) => a - b);
         return !rooms.length || rooms[Math.floor(0.1 * rooms.length)] >= 0.75 * wall ? { xy2, h2 } : null;
       };
-      for (const kind of ['level', 'even']) for (const w of ws) { // (a level end at any depth before an even one: an even plug on a saddle-shaped line keeps the line's horns)
+      for (const kind of ['level', 'leveled', 'even']) for (const w of ws) { // (a level end at any depth before an even one: an even plug on a saddle-shaped line keeps the line's horns)
         const d = new Float64Array(n); let shortLen = 0; // (a stray point or two still short, under 2% of the line, doesn't stop a plug)
         for (let i = 0; i < n; i++) { d[i] = kind === 'level' ? top + w - lv[i] : w; if (!(room[i] >= d[i] - 0.5 * wall)) shortLen += (seg[i] + seg[(i + n - 1) % n]) / 2; }
         if (shortLen > Math.min(4 * wall, Math.max(2 * wall, 0.02 * per))) continue;
+        if (kind === 'leveled') {
+          // (1.93, the owner: "extrude into the main body part, leveling the extrusion out to a more smooth or flat
+          // plug") where the other piece can't hold a level end all round, the end is level as far as it holds and
+          // comes down smoothly only where it must, never nearer the line than `w`: the line's horns are filled in
+          // between, up to the level, instead of standing bare
+          const cap = (i) => Math.max(w, room[i]), win = Math.max(3 * wall, 0.08 * per);
+          for (let i = 0; i < n; i++) d[i] = Math.min(top + w - lv[i], cap(i));
+          for (let pass = 0; pass < 3; pass++) { // the floor's level eased along the line (lowest within reach, then the mean), held between `w` and the room
+            const lvl = Array.from(d, (v, i) => lv[i] + v), lo = new Float64Array(n), sm = new Float64Array(n);
+            const span = (i, f) => { let acc = f(null, lvl[i]), run = 0; for (let k = 1; k < n / 2; k++) { run += seg[(i + k - 1) % n]; if (run > win) break; acc = f(acc, lvl[(i + k) % n]); } run = 0; for (let k = 1; k < n / 2; k++) { run += seg[(i + n - k) % n]; if (run > win) break; acc = f(acc, lvl[(i + n - k) % n]); } return acc; };
+            for (let i = 0; i < n; i++) lo[i] = pass === 0 ? span(i, (a, v) => (a === null ? v : Math.min(a, v))) : lvl[i];
+            for (let i = 0; i < n; i++) lvl[i] = lo[i];
+            for (let i = 0; i < n; i++) { const a = span(i, (acc, v) => (acc === null ? [v, 1] : [acc[0] + v, acc[1] + 1])); sm[i] = a[0] / a[1]; }
+            for (let i = 0; i < n; i++) d[i] = Math.max(w, Math.min(sm[i] - lv[i], cap(i), top + w - lv[i]));
+          }
+          let dLo = Infinity, dHi = 0; for (let i = 0; i < n; i++) { dLo = Math.min(dLo, d[i]); dHi = Math.max(dHi, d[i]); }
+          if (dHi - dLo < 0.25 * w) continue; // (no deeper anywhere than an even plug: that one will do)
+        }
         const f = faceHolds(d);
         if (!f) continue;
         let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, d[i]);
-        return { xy2: f.xy2, h2: f.h2, depth: Array.from(d), max, least: w, flatEnd: kind === 'level', even: kind === 'even', floorTilt: 0 };
+        return { xy2: f.xy2, h2: f.h2, depth: Array.from(d), max, least: w, flatEnd: kind === 'level', leveled: kind === 'leveled', even: kind === 'even', floorTilt: 0 };
       }
       return null;
     }
@@ -5630,7 +5648,7 @@ const KMCore = (() => {
     if (caps.some(c => c.sunk)) sinkNote = null;
     parts.sort((x, y) => y.volume - x.volume);
     // each line's plug as it was made, in the model's own coordinates (the app draws it from these after the check)
-    const plugsMade = caps.map(c => { if (!c.sunk || !c.sunk.column) return null; const F = c.F, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z); const floor = [], line = []; for (let i = 0; i < c.n; i++) { floor.push(...at(c.sunk.xy2[2 * i], c.sunk.xy2[2 * i + 1], c.sunk.h2[i])); const v = 3 * c.ring[i]; line.push(P[v], P[v + 1], P[v + 2]); } return { floor, line, depth: c.sunk.max, least: c.sunk.least || 0, flat: !!c.sunk.flatEnd, taper: c.sunk.taper || 0, axis: F.n.map(x => x * c.into2), shared: !!c.axisFace && c.sunk === c.axisFace.sunk }; });
+    const plugsMade = caps.map(c => { if (!c.sunk || !c.sunk.column) return null; const F = c.F, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z); const floor = [], line = []; for (let i = 0; i < c.n; i++) { floor.push(...at(c.sunk.xy2[2 * i], c.sunk.xy2[2 * i + 1], c.sunk.h2[i])); const v = 3 * c.ring[i]; line.push(P[v], P[v + 1], P[v + 2]); } return { floor, line, depth: c.sunk.max, least: c.sunk.least || 0, flat: !!c.sunk.flatEnd, leveled: !!c.sunk.leveled, taper: c.sunk.taper || 0, axis: F.n.map(x => x * c.into2), shared: !!c.axisFace && c.sunk === c.axisFace.sunk }; });
     return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings, sinks: caps.map(c => c.sink), floors: caps.map(c => (c.sunk && c.sunk.plane) || null), plugsMade, sinkNote: sunkCaps.length && !caps.some(c => c.sunk) ? sinkNote || 'locked' : null };
     // the two pieces each line separates: side 1, and the piece of side 2 holding that line's copied vertices
     function pairsOf(parts) {
@@ -6294,7 +6312,7 @@ const KMCore = (() => {
         // (1.92) by its worst stretch too, not only on average: a ring square to the sleeve most of the way round but
         // grazing it along the front (where the sleeve tucks under the cape) left a thin brim on the arm there
         const gz = []; for (const v of near) { let nx = 0, ny = 0, nz = 0; for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const t = vt.tri[j]; nx += N[3 * t] * A[t]; ny += N[3 * t + 1] * A[t]; nz += N[3 * t + 2] * A[t]; } const L = Math.hypot(nx, ny, nz) || 1; gz.push(Math.abs((nx * ax[0] + ny * ax[1] + nz * ax[2]) / L)); }
-        const mean = gz.reduce((x, y) => x + y, 0) / (gz.length || 1), worst = gz.slice().sort((x, y) => x - y)[Math.floor(0.9 * (gz.length - 1))] || 0, graze = Math.max(mean, 0.85 * worst);
+        const mean = gz.reduce((x, y) => x + y, 0) / (gz.length || 1), worst = gz.slice().sort((x, y) => x - y)[Math.floor(0.9 * (gz.length - 1))] || 0, graze = mean; // (1.93: by its mean again: judged by its worst stretch the ring moved a step down the sleeve, out from under the cape and into plain view)
         if (!found || graze < found.graze - 0.05) found = { o, n: ax, F, ring: best, len: bl, graze };
         if (found.graze <= 0.3) break; // (the first that meets the surface squarely enough: nearer the joint is better)
       }
@@ -6362,7 +6380,7 @@ const KMCore = (() => {
       if (sl) return { P: sl.P, I: sl.I, req: { ...req, seg: sl.seg, regions: sl.groups, loops: sl.loops, sliced: true } };
     }
     if (!req.smooth) return { P, I, req };
-    if (req.regions && req.seg && !req.noReroute && !req.noSlice && req.limbEnds !== false) { // (1.92: a brushed pick too: its flat ring must lie on the brushed surface, as 1.86's check makes sure) // (1.83) a limb ends in a flat cut across it (1.86: never a painted pick: the owner's paint is what is cut, as painted)
+    if (req.regions && req.seg && !req.noReroute && !req.noSlice && req.limbEnds !== false) { // (1.93: only when asked (the app's End limbs with a flat cut, off by default): the cut follows the seam that was picked or painted, where it shows least; 1.92's flat end on a brushed arm sat in plain view below the shoulder) // (1.83) a limb ends in a flat cut across it (1.86: never a painted pick: the owner's paint is what is cut, as painted)
       let le = null; try { le = limbEndPick(P, I, req.seg, req.regions); } catch (err) { le = null; }
       if (le) {
         let sl = null; try { sl = sliceRegionPick(le.P, le.I, le.seg, [1], { ...(typeof req.smooth === 'object' ? req.smooth : {}), pin: le.pin }); } catch (err) { sl = null; }
@@ -11325,7 +11343,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     // (1.80) with Fill on the paint is whole regions, picked on purpose, so nothing is added: a hand lying on a book, shut in
     // between the book and the cuff, had filled as a hole of the book's region (Fill gaps under the pick still works)
     if (!state.paint.fill) try { const fg = K.fillSelectionGaps(p.positions, p.indices, state.paint.sel, { gap: Math.min(state.paint.size, fillGapDefault() / 2) }); if (fg.added) { state.paint.sel = fg.sel; renderPaint(); } } catch (err) { /* left as painted */ }
-    else try { const fg = K.fillSelectionGaps(p.positions, p.indices, state.paint.sel, { gap: 0, maxFrac: 0.02 }); if (fg.added) { state.paint.sel = fg.sel; renderPaint(); } } catch (err) { /* left as painted */ } // (1.90) with Fill, only specks of holes fill (between fingers): each would be a line of its own, cut and extruded
+    // (1.93) with Fill nothing at all is added: the gaps between the fingers of a hand lying on a book are the book's own faces, and filling them (1.90) put them in the hand's pick; such a gap's outline is a speck of a line now, cut as it is
     let loops = [], error = '';
     try { const seg = K.selectionSeg(p.positions, p.indices, state.paint.sel); loops = K.groupLoops(p.positions, p.indices, seg, [1]); } catch (err) { error = err.message; }
     const pick = { partId: p.id, loops, error, painted: true, preview: true, keys: [], plugs: [], perLoop: [], frames: [], draw: [], selection: state.paint.sel };
@@ -12787,7 +12805,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     }
     const bare = pick.loops.filter((l, i) => !made[i] && !((per[i] || {}).plugs || []).length && !((per[i] || {}).keys || []).length && !(per[i] || {}).tiny).length, bits = [], lines = (k) => (n === 1 ? '' : k === n ? (n === 2 ? ' on both lines' : ` on all ${n} lines`) : ` on ${k === 1 ? 'one line' : `${k} lines`}`);
     const taper = state.cfg.sinkTaper > 0 && made.some(q => q && q.taper > 0) ? `, sides leaning in ${fmt(Math.max(...made.filter(Boolean).map(q => q.taper)))}°` : '';
-    if (edge) bits.push(`a plug from the cut’s edge${lines(edge)}, ${hi - lo > 0.2 ? `${fmt(lo)} to ${fmt(hi)}` : fmt(hi)} mm into the other piece${taper}${flat === edge ? ', with a flat end' : ''}${shared ? ', along the one way the pieces slide apart' : ''}`);
+    if (edge) bits.push(`a plug from the cut’s edge${lines(edge)}, ${hi - lo > 0.2 ? `${fmt(lo)} to ${fmt(hi)}` : fmt(hi)} mm into the other piece${taper}${flat === edge ? ', with a flat end' : made.some(q => q && q.leveled) ? ', its end leveled as far as the other piece holds' : ''}${shared ? ', along the one way the pieces slide apart' : ''}`);
     const deep = (pick.plugs || []).length ? `, ${fmt(Math.max(...pick.plugs.map(q => q.depth)))} mm deep` : '', nkeys = (pick.keys || []).length;
     if (inset) bits.push(`a plug set in from the edge${lines(inset)}${deep}${state.cfg.sink > 0 ? ' (the other piece is too thin there for one from the edge)' : ''}`);
     if (keyed) bits.push(`${nkeys} ${{ peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key'}${nkeys === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}${lines(keyed)}`);
@@ -12848,7 +12866,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   }
   function pickReq(loops, info) {
     const seg = info.seg ? { groupOf: info.seg.groupOf, count: info.seg.count, borders: info.seg.borders, areas: info.seg.areas } : null;
-    return { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint, smooth: state.cfg.smoothCut !== false, sliceDrawn: state.cfg.sliceDrawn !== false };
+    return { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint, smooth: state.cfg.smoothCut !== false, sliceDrawn: state.cfg.sliceDrawn !== false, limbEnds: !!state.cfg.flatEnds };
   }
   function pickLoops(p, loops, info) {
     if (state.selectedId !== p.id) selectPart(p.id); // the pick's part is the chosen one, so its panel and its cut button show
@@ -13364,6 +13382,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     state.cfg.sliceDrawn = !!e.target.checked;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
   });
+  $('#flatEnds').addEventListener('change', (e) => { state.cfg.flatEnds = !!e.target.checked; const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p); });
   $('#smoothCut').addEventListener('change', (e) => {
     state.cfg.smoothCut = !!e.target.checked;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);

@@ -1314,7 +1314,7 @@ console.log('curved cuts along a border');
   // where the other piece can't hold that all round (here: the wavy line climbs 8 mm), the cut face pushed in evenly:
   // every wall the same height, never a point left short (1.90's tilted floor pulled down to the line made a spike)
   const sk = anS.curved.sunk, depths = sk.depth, dLo = Math.min(...depths), dHi = Math.max(...depths);
-  check('a sunk face goes straight in from the line’s edge to an end that is level or evenly deep, no wall shorter than the least depth', !!sk.column && (sk.flatEnd || sk.even) && dLo >= sk.least - 1e-9 && (sk.even ? dHi - dLo < 1e-9 : true) && sk.floorTilt === 0, [!!sk.column, sk.flatEnd, sk.even, dLo, dHi, sk.least]);
+  check('a sunk face goes straight in from the line’s edge to an end that is level, leveled as far as the other piece holds, or evenly deep, no wall shorter than the least depth', !!sk.column && (sk.flatEnd || sk.even || sk.leveled) && dLo >= sk.least - 1e-9 && (sk.even ? dHi - dLo < 1e-9 : true) && sk.floorTilt === 0, [!!sk.column, sk.flatEnd, sk.even, sk.leveled, dLo, dHi, sk.least]);
   const capOf = (parts) => parts.reduce((a, b) => (a.bbox.max[2] > b.bbox.max[2] ? a : b)), capPlain = capOf(cw.parts).volume, capSunk = capOf(sunk.parts).volume;
   check('the cap piece gains the plug', capSunk - capPlain > 0.3 * faceArea, [capSunk - capPlain, faceArea]);
   // the slab really is there: along the frame normal, the smaller piece is at least a millimetre thick at the line
