@@ -1176,6 +1176,7 @@ with sync_playwright() as p:
     check('closing the drawn line picks it: two pieces, drawing off', resD['ok'] and resD['pieces'] == 2 and not resD['drawing'] and 'Cut along this line' in pg.inner_text('#cutAction') and pg.get_attribute('#drawLineBtn', 'aria-pressed') == 'false', (resD, infoD))
     pi = pg.evaluate("KeymasterDebug.pickInfo()")
     check('the drawn line is sliced through the faces (Slice drawn lines is on by default)', pi and pi['sliced'] and pg.is_checked('#sliceDrawn'), pi)
+    pg.evaluate("document.querySelector('details[data-sec=cutMore]').open = true")  # (1.92) Smooth jagged lines and Slice drawn lines sit under More cut options
     pg.uncheck('#sliceDrawn'); pg.wait_for_function("KeymasterDebug.pickInfo() && !KeymasterDebug.pickInfo().pending", timeout=15000); pg.wait_for_timeout(300)
     pi2 = pg.evaluate("KeymasterDebug.pickInfo()")
     check('with Slice drawn lines off, the line follows the mesh edges again', pi2 and not pi2['sliced'] and pi2['ok'], pi2)
