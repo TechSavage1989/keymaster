@@ -619,7 +619,7 @@
     // (1.88) and the plug's settings beside it, which the Joints panel and saved settings can change too
     const sd = $('#sinkDepth'), st = $('#sinkTaper'), ek = $('#extraKey');
     if (sd && document.activeElement !== sd) sd.value = state.cfg.sink; if (st && document.activeElement !== st) st.value = state.cfg.sinkTaper !== undefined ? state.cfg.sinkTaper : 5; if (ek) ek.value = state.cfg.block ? 'block' : state.cfg.type;
-    for (const el of [sd, st]) if (el) { el.disabled = !!state.cfg.block; el.closest('label').classList.toggle('is-off', !!state.cfg.block); } // (a block key sits on the plain cut face: no extruded plug with it)
+    for (const el of [sd, st]) if (el) { el.disabled = false; el.closest('label').classList.remove('is-off'); } // (1.95: Extrude works with a block key: the convex face it stands on)
   }
   // Areas that would leave a sliver too thin to print, among those listed and set to be cut.
   function thinShown() {
@@ -4280,7 +4280,8 @@
     const seg = info.seg ? { groupOf: info.seg.groupOf, count: info.seg.count, borders: info.seg.borders, areas: info.seg.areas } : null;
     const out = { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint, smooth: state.cfg.smoothCut !== false, sliceDrawn: state.cfg.sliceDrawn !== false, limbEnds: !!state.cfg.flatEnds };
     // (1.94) a block key: the plain cut face behind the seam, with one square peg in its middle, as big as half the face's width allows and never rotating in its socket
-    if (state.cfg.block) { const p = selectedPart(), big = Math.max(state.cfg.diameter || 5, Math.min(40, 0.06 * (p ? K.diag(p.bbox) : 100))); out.cfg = { ...out.cfg, type: 'peg', shape: 'square', perArea: 1, sizeMode: 'auto', diameter: big, sizeMax: big, taper: 12, lenRatio: 1.6, taperSocket: true, align: true, turn: 0 }; out.sink = 0; out.sizeSet = false; out.perArea = 1; out.block = true; }
+    if (state.cfg.block) { const p = selectedPart(), big = Math.max(state.cfg.diameter || 5, Math.min(40, 0.06 * (p ? K.diag(p.bbox) : 100))); out.cfg = { ...out.cfg, type: 'peg', shape: 'square', perArea: 1, sizeMode: 'auto', diameter: big, sizeMax: big, taper: 12, lenRatio: 1.6, taperSocket: true, align: true, turn: 0 }; out.sizeSet = false; // (1.95) Extrude stays: the face domes into the other piece and the block stands on it
+    if (state.cfg.block) { out.perArea = 1; out.block = true; } }
     return out;
   }
   function pickLoops(p, loops, info) {
