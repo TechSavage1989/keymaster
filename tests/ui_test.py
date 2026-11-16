@@ -1567,7 +1567,7 @@ with sync_playwright() as p:
     info = pg.inner_text('#cutLineInfo')
     print('    plug on the hem:', info.replace('\n', ' ')[:170])
     # (1.89) with Extrude on, the cut extruded into a plug is the plug (no second one on its floor)
-    check('a curved cut gets a plug too (the extruded plug, or a plug on a flat-faced cut)', bool(res) and res['ok'] and (('With a plug' in info and 'mm deep' in info) or 'ends in a plug' in info), info)
+    check('a curved cut gets a plug too (the extruded plug, or a plug on a flat-faced cut)', bool(res) and res['ok'] and ('a plug' in info and ('mm deep' in info or 'mm into the other piece' in info)), info)
     pg.click('[data-act=cut-line]')
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
     check('cutting along the hem with a plug gives two pieces', pg.locator('#partList li[data-id]').count() == 2)

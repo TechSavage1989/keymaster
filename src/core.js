@@ -4273,8 +4273,8 @@ const KMCore = (() => {
       }
       const lv = new Float64Array(n); let top = -Infinity;
       for (let i = 0; i < n; i++) { lv[i] = h[i] * into2; top = Math.max(top, lv[i]); }
-      const dMin = Math.min(want, Math.max(2 * wall, 1));
-      const ws = [want, 0.75 * want, 0.5 * want, 0.35 * want].filter(w => w >= dMin - 1e-9);
+      const dMin = Math.min(want, Math.max(wall, 0.4)); // (a miniature's 2 mm limb holds a plug of half a millimetre, no more)
+      const ws = [want, 0.75 * want, 0.5 * want, 0.35 * want, 0.2 * want].filter(w => w >= dMin - 1e-9);
       if (!ws.length) ws.push(want);
       const faceHolds = (d) => { // the face over the floor must have solid beyond it too, under its middle
         const xy2 = Float64Array.from(xy), h2 = new Float64Array(n); for (let i = 0; i < n; i++) h2[i] = h[i] + d[i] * into2;
@@ -5672,7 +5672,7 @@ const KMCore = (() => {
           // the owner's arm ended in bare horns, or in nothing, where the edge plug didn't fit
           const inset = cfg.sink > 0 && !(sk && sk.column) && (cfg.type === 'none' || cfg.type === 'plug');
           if (inset) {
-            const pcfg = { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) };
+            const pcfg = cfg.type === 'plug' ? lcfg : { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) }; // (a plug chosen as the key keeps its own settings)
             const pl = planPlugs(an, pcfg);
             per.plugs = pl.filter(q => q.ok); per.inset = per.plugs.length > 0; per.cfg = per.inset ? pcfg : lcfg;
             if (!per.plugs.length && !out.noKeys && !tiny) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };

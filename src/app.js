@@ -4214,8 +4214,9 @@
     const bare = n - edge - inset - keyed - tiny, bits = [], lines = (k) => (n === 1 ? '' : k === n ? (n === 2 ? ' on both lines' : ` on all ${n} lines`) : ` on ${k === 1 ? 'one line' : `${k} lines`}`);
     const taper = state.cfg.sinkTaper > 0 && made.some(q => q && q.taper > 0) ? `, sides leaning in ${fmt(Math.max(...made.filter(Boolean).map(q => q.taper)))}°` : '';
     if (edge) bits.push(`a plug from the cut’s edge${lines(edge)}, ${hi - lo > 0.2 ? `${fmt(lo)} to ${fmt(hi)}` : fmt(hi)} mm into the other piece${taper}${flat === edge ? ', with a flat end' : ''}${shared ? ', along the one way the pieces slide apart' : ''}`);
-    if (inset) bits.push(`a plug set in from the edge${lines(inset)} (the other piece is too thin there for one from the edge)`);
-    if (keyed) bits.push(`${{ peg: 'pegs', dowel: 'dowels', magnet: 'magnets' }[state.cfg.type] || 'keys'}${lines(keyed)}`);
+    const deep = (pick.plugs || []).length ? `, ${fmt(Math.max(...pick.plugs.map(q => q.depth)))} mm deep` : '', nkeys = (pick.keys || []).length;
+    if (inset) bits.push(`a plug set in from the edge${lines(inset)}${deep}${state.cfg.sink > 0 ? ' (the other piece is too thin there for one from the edge)' : ''}`);
+    if (keyed) bits.push(`${nkeys} ${{ peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key'}${nkeys === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}${lines(keyed)}`);
     if (!bits.length) return state.cfg.sink > 0 || state.cfg.type !== 'none' ? (n === 1 ? 'The cut is flat, with no joint: there’s no room for one here.' : 'The lines are cut flat, with no joint: there’s no room for one here.') : '';
     const rest = bare + tiny ? ` ${bare + tiny === 1 ? 'The other line is' : `The other ${bare + tiny} lines are`} cut flat${tiny && !bare ? ' (too small for a joint)' : ''}.` : '';
     return `Joint: ${bits.join('; ')}.${rest}`;
@@ -4510,7 +4511,7 @@
     }
     const vols = pick.result.parts.map(q => fmtVol(q.volume)); // (1.76) a miniature's hand is mm³, not "0.0 cm³"
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
-    const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
+    const keyLine = ''; // (1.92: the joints are said per line by pickJointText)
     const sunkLine = ' ' + pickJointText(pick);
     const what = region ? `${painted ? 'The painted area’s' : nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${painted || nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} and leaves ${vols.length === 2 ? vols[1] : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')}`}.`
       : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]}.`

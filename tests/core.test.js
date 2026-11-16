@@ -1890,5 +1890,35 @@ console.log('knife edges after a cut');
   check('a cut grazing a face at 8° leaves a knife edge; at 45° none', allClosed(graze.parts) && kg.some(k => k.sharp) && !ks.some(k => k.sharp), { graze: kg.map(k => +k.length.toFixed(1)), square: ks.map(k => +k.length.toFixed(1)) });
 }
 
+// (1.92) Plugs that let the pieces go together. A brace leaning from a floor to a wall is held in two places whose
+// faces point different ways: a plug straight into each would lock it for good, so both plugs run along the one way
+// the brace slides out (between the two). Its pieces pass the checks unforced, seal, and keep the volume.
+{
+  console.log('\nplugs along one pull direction');
+  const box = (w, d, h, pos, rot = [0, 0, 0]) => ({ kind: 'cube', w, d, h, edge: 'sharp', pos, rot });
+  const slab = K.shapeMesh({ kind: 'cube', w: 60, d: 40, h: 10 });
+  let cur = { positions: slab.positions.map((v, i) => (i % 3 === 2 ? v - 5 : v)), indices: slab.indices }; // the floor: z from -10 to 0
+  cur = K.booleanShape(cur.positions, cur.indices, box(10, 40, 50, [-25, 0, 25]), 'union'); // the wall: x from -30 to -20
+  cur = K.booleanShape(cur.positions, cur.indices, box(12, 12, 60, [0, 0, 20], [0, -45, 0]), 'union'); // the brace
+  const sub = K.subdivideMesh(cur.positions, cur.indices, { maxEdge: 2.5 }), P = sub.positions, I = sub.indices, nt = I.length / 3, sel = new Uint8Array(nt);
+  for (let t = 0; t < nt; t++) {
+    const v = [I[3 * t], I[3 * t + 1], I[3 * t + 2]], c = [0, 1, 2].map(k => (P[3 * v[0] + k] + P[3 * v[1] + k] + P[3 * v[2] + k]) / 3);
+    if (c[2] > 1e-6 && c[0] > -20 + 1e-6 && Math.abs(c[1]) <= 8.6 && !v.every(q => Math.abs(P[3 * q + 2]) < 1e-6) && !v.every(q => Math.abs(P[3 * q] + 20) < 1e-6)) sel[t] = 1;
+  }
+  const seg = K.selectionSeg(P, I, sel), lines = K.groupLoops(P, I, seg, [1]), vol = K.volume(P, I);
+  const r = K.splitRegions(P, I, seg, [1], { cfg: { type: 'none', sinkTaper: 5 }, sink: 3, minThickness: 0.8 });
+  const made = r.plugsMade || [], dotAxes = made.length === 2 && made[0] && made[1] ? made[0].axis[0] * made[1].axis[0] + made[0].axis[1] * made[1].axis[1] + made[0].axis[2] * made[1].axis[2] : 0;
+  check('a brace held at the floor and at the wall gets both plugs along one direction, between the two, and passes unforced', lines.length === 2 && made.length === 2 && made.every(q => q && q.shared && q.depth >= 3 - 1e-6) && dotAxes > 0.999 && Math.abs(made[0].axis[0] - made[0].axis[2]) < 0.05 && made[0].axis[0] < -0.6 && !(r.warnings || []).length && !r.sinkNote, { lines: lines.length, made: made.map(q => q && { shared: q.shared, axis: q.axis.map(x => +x.toFixed(2)), depth: q.depth }), warnings: r.warnings });
+  check('its pieces are sealed and keep the volume', r.parts.length === 2 && allClosed(r.parts) && r.parts.every(q => q.volume > 0) && Math.abs(sumVol(r.parts) - vol) / vol < 1e-6, [r.parts.length, sumVol(r.parts), vol]);
+  // every plug's end is level or evenly deep, and its floor lies inside the model (each floor point is inside the solid)
+  const g = K.rayGrid(P, I, K.frameFromNormal([0, 0, 1], [0, 0, 0])), F0 = K.frameFromNormal([0, 0, 1], [0, 0, 0]);
+  const inside = (p) => { const X = p[0] * F0.u[0] + p[1] * F0.u[1] + p[2] * F0.u[2], Y = p[0] * F0.v[0] + p[1] * F0.v[1] + p[2] * F0.v[2], runs = K.solidRuns(g, X + 1.3e-7, Y + 0.7e-7); for (let i = 0; i < runs.length; i += 2) if (runs[i] - 1e-6 <= p[2] && p[2] <= runs[i + 1] + 1e-6) return true; return false; };
+  let out = 0, pts = 0; for (const q of made) if (q) for (let i = 0; i < q.floor.length; i += 3) { pts++; if (!inside([q.floor[i], q.floor[i + 1], q.floor[i + 2]])) out++; }
+  check('each plug’s floor stays inside the model', pts > 20 && out === 0, [pts, out]);
+  // a speck of a line beside a real one is cut as it is, with no complaint that no joint fits it
+  const j = K.planJoints(P, I, { loops: lines, regions: [1], seg, painted: true, cfg: { type: 'none', sinkTaper: 5, margin: 1, pegSide: 'below' }, minThickness: 0.8, sink: 3, smooth: false });
+  check('planning the joints draws both plugs before the cut', j.draw.length === 2 && j.draw.every(d => d.sink || d.plugs.length), j.draw.map(d => [!!d.sink, d.plugs.length]));
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

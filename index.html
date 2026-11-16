@@ -561,7 +561,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.91, build 1ee771. After an update, refresh the page and check this changes.">v1.91 · 1ee771</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.91, build 922978. After an update, refresh the page and check this changes.">v1.91 · 922978</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -4998,8 +4998,8 @@ const KMCore = (() => {
       }
       const lv = new Float64Array(n); let top = -Infinity;
       for (let i = 0; i < n; i++) { lv[i] = h[i] * into2; top = Math.max(top, lv[i]); }
-      const dMin = Math.min(want, Math.max(2 * wall, 1));
-      const ws = [want, 0.75 * want, 0.5 * want, 0.35 * want].filter(w => w >= dMin - 1e-9);
+      const dMin = Math.min(want, Math.max(wall, 0.4)); // (a miniature's 2 mm limb holds a plug of half a millimetre, no more)
+      const ws = [want, 0.75 * want, 0.5 * want, 0.35 * want, 0.2 * want].filter(w => w >= dMin - 1e-9);
       if (!ws.length) ws.push(want);
       const faceHolds = (d) => { // the face over the floor must have solid beyond it too, under its middle
         const xy2 = Float64Array.from(xy), h2 = new Float64Array(n); for (let i = 0; i < n; i++) h2[i] = h[i] + d[i] * into2;
@@ -6397,7 +6397,7 @@ const KMCore = (() => {
           // the owner's arm ended in bare horns, or in nothing, where the edge plug didn't fit
           const inset = cfg.sink > 0 && !(sk && sk.column) && (cfg.type === 'none' || cfg.type === 'plug');
           if (inset) {
-            const pcfg = { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) };
+            const pcfg = cfg.type === 'plug' ? lcfg : { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) }; // (a plug chosen as the key keeps its own settings)
             const pl = planPlugs(an, pcfg);
             per.plugs = pl.filter(q => q.ok); per.inset = per.plugs.length > 0; per.cfg = per.inset ? pcfg : lcfg;
             if (!per.plugs.length && !out.noKeys && !tiny) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
@@ -12758,8 +12758,9 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     const bare = n - edge - inset - keyed - tiny, bits = [], lines = (k) => (n === 1 ? '' : k === n ? (n === 2 ? ' on both lines' : ` on all ${n} lines`) : ` on ${k === 1 ? 'one line' : `${k} lines`}`);
     const taper = state.cfg.sinkTaper > 0 && made.some(q => q && q.taper > 0) ? `, sides leaning in ${fmt(Math.max(...made.filter(Boolean).map(q => q.taper)))}°` : '';
     if (edge) bits.push(`a plug from the cut’s edge${lines(edge)}, ${hi - lo > 0.2 ? `${fmt(lo)} to ${fmt(hi)}` : fmt(hi)} mm into the other piece${taper}${flat === edge ? ', with a flat end' : ''}${shared ? ', along the one way the pieces slide apart' : ''}`);
-    if (inset) bits.push(`a plug set in from the edge${lines(inset)} (the other piece is too thin there for one from the edge)`);
-    if (keyed) bits.push(`${{ peg: 'pegs', dowel: 'dowels', magnet: 'magnets' }[state.cfg.type] || 'keys'}${lines(keyed)}`);
+    const deep = (pick.plugs || []).length ? `, ${fmt(Math.max(...pick.plugs.map(q => q.depth)))} mm deep` : '', nkeys = (pick.keys || []).length;
+    if (inset) bits.push(`a plug set in from the edge${lines(inset)}${deep}${state.cfg.sink > 0 ? ' (the other piece is too thin there for one from the edge)' : ''}`);
+    if (keyed) bits.push(`${nkeys} ${{ peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key'}${nkeys === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}${lines(keyed)}`);
     if (!bits.length) return state.cfg.sink > 0 || state.cfg.type !== 'none' ? (n === 1 ? 'The cut is flat, with no joint: there’s no room for one here.' : 'The lines are cut flat, with no joint: there’s no room for one here.') : '';
     const rest = bare + tiny ? ` ${bare + tiny === 1 ? 'The other line is' : `The other ${bare + tiny} lines are`} cut flat${tiny && !bare ? ' (too small for a joint)' : ''}.` : '';
     return `Joint: ${bits.join('; ')}.${rest}`;
@@ -13054,7 +13055,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     }
     const vols = pick.result.parts.map(q => fmtVol(q.volume)); // (1.76) a miniature's hand is mm³, not "0.0 cm³"
     const nk = pick.keys.length, np = pick.plugs.length, kind = { peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key';
-    const keyLine = np ? ` With ${np === 1 ? `a plug ${fmt(pick.plugs[0].depth)} mm deep` : `${np} plugs`}.` : nk ? ` With ${nk} ${kind}${nk === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}.` : '';
+    const keyLine = ''; // (1.92: the joints are said per line by pickJointText)
     const sunkLine = ' ' + pickJointText(pick);
     const what = region ? `${painted ? 'The painted area’s' : nr === 1 ? 'This region’s' : `These ${nr} regions’`} outline is ${nl === 1 ? 'one line' : `${nl} lines`}, ${len} in all. Splitting ${painted || nr === 1 ? 'it' : 'them'} off gives a piece of ${vols[0]} and leaves ${vols.length === 2 ? vols[1] : `${vols.length - 1} pieces of ${vols.slice(1).join(', ')}`}.`
       : nl === 1 ? `A ${len} line all the way round. It splits the part into pieces of ${vols[0]} and ${vols[1]}.`
