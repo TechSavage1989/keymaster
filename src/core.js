@@ -4098,15 +4098,34 @@ const KMCore = (() => {
       if (width < Math.max(4 * wall, 2 * want) || hi - lo > 2 * width) return null; }
     const B = insetRing(xy, Math.max(0.02, 0.25 * wall)) || nudgeIn(xy, Math.max(0.02, 0.25 * wall)); // (1.91) only where the room is measured: a jagged CAD outline (the book's) that can't be offset cleanly is nudged in point by point
     if (B) {
-      const r = sunkRingAt(P, I, F, ring, B, h, into2, want, wall, false, null, true);
-      if (r) {
+      // (1.96) the room is measured along the plug's own leaning walls. Measured straight down from the rim, a sleeve
+      // that bends away below its cuff, or a wrist inside a flared cuff, read as "too thin for a plug from the edge"
+      // (1.4 mm of room on a 23 mm sleeve), though a plug leaning in 20° sits well inside it. The walls as built are
+      // then checked point by point, and where they aren't held the room is measured straight as before.
+      const n = h.length, nrm = taper > 0 ? inwardOf(xy) : null;
+      const tries = taper > 0 ? [taper, 0] : [0], found = [];
+      for (let k = 0; k < tries.length; k++) {
+        const deg = tries[k], lean = deg > 0 ? { nrm, tan: Math.tan(deg * Math.PI / 180) } : null;
+        const r = sunkRingAt(P, I, F, ring, B, h, into2, want, wall, false, null, true, lean);
+        if (!r) continue;
         const t = taperRing(xy, r.depth, taper);
+        if (lean && t.deg < deg - 1e-9 && t.deg > 0 && !tries.includes(t.deg)) tries.splice(k + 1, 0, t.deg); // (the ring folds at the full taper: measured again at the taper it holds)
         r.xy2 = t.xy; r.taper = t.deg; r.column = true; r.lineXY = Array.from(xy); r.lineH = Array.from(h);
-        for (let i = 0; i < h.length; i++) r.h2[i] = h[i] + r.depth[i] * into2;
-        return r;
+        for (let i = 0; i < n; i++) r.h2[i] = h[i] + r.depth[i] * into2;
+        r.held = r.holds(r.xy2, r.h2); delete r.holds;
+        r.score = (r.held ? 1000 : 0) + (r.shallow ? 0 : 400) + (r.flatEnd ? 200 : r.leveled ? 100 : 0) + 10 * Math.min(r.least, 9) + Math.min(r.max, 9) / 10;
+        if (r.held || !lean) found.push(r); // (measured straight and not held as built: 1.95's plug, kept only when nothing better fits)
       }
+      if (found.length) return found.reduce((a, b) => (b.score > a.score ? b : a));
     }
     return null; // (1.92) no plug fits: the face is left as it is (sunk point by point it kept a slanted, thin rim), and the joint is a plug pulled in from the edge instead (`planJoints`)
+  }
+  // The inward direction on the plane at each point of a ring, from the ring eased smooth (as `taperRing` leans its walls)
+  function inwardOf(xy) {
+    const n = xy.length / 2; let a2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
+    const sg = a2 > 0 ? 1 : -1; let e = Array.from({ length: n }, (_, i) => [xy[2 * i], xy[2 * i + 1]]);
+    for (let k = 0; k < 10; k++) e = e.map((p, i) => { const a = e[(i + n - 1) % n], c = e[(i + 1) % n]; return [(a[0] + 2 * p[0] + c[0]) / 4, (a[1] + 2 * p[1] + c[1]) / 4]; });
+    return e.map((p, i) => { const a = e[(i + n - 1) % n], c = e[(i + 1) % n], dx = c[0] - a[0], dy = c[1] - a[1], L = Math.hypot(dx, dy) || 1; return [-dy / L * sg, dx / L * sg]; });
   }
   // Each point of a ring moved in on its plane by d, along the inward direction of the ring eased smooth (no check
   // that the result is a clean ring: it only says where to look for room)
@@ -4201,7 +4220,7 @@ const KMCore = (() => {
     return out;
     }
   }
-  function sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null, column = false) {
+  function sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null, column = false, lean = null) {
     const n = ring.length, g = raysFor(P, I, F), nv = P.length / 3;
     const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2], oz = F.o[0] * F.n[0] + F.o[1] * F.n[1] + F.o[2] * F.n[2];
     // straight into the other piece along the frame normal, so the recess walls are parallel and the piece lifts
@@ -4246,10 +4265,18 @@ const KMCore = (() => {
     }
     // (1.87) a plug: how far the solid holds each point's line through the model, with a wall to spare
     const roomOf = new Float64Array(n);
+    let hTop = -Infinity; for (let i = 0; i < n; i++) hTop = Math.max(hTop, h[i] * into2);
     for (let i = 0; column && i < n; i++) {
       const r = roomAt(xy[2 * i], xy[2 * i + 1], h[i] + into2 * 1e-3 * wall);
       roomOf[i] = r ? r[0] - wall : -Infinity;
+      if (r && lean) { // along the leaning wall: as deep as every point of it is inside the other piece with a wall beyond
+        const far = hTop + want - h[i] * into2 + wall, step = Math.max(0.25, 0.5 * wall, far / 40); let ok = 0;
+        for (let d = Math.min(step, 0.5 * want); d <= far + step; d += step) { const q = roomAt(xy[2 * i] + lean.nrm[i][0] * d * lean.tan, xy[2 * i + 1] + lean.nrm[i][1] * d * lean.tan, h[i] + into2 * d); if (!(q && q[0] >= wall)) break; ok = d; }
+        roomOf[i] = ok > 0 ? ok : Math.min(roomOf[i], 0);
+      }
     }
+    // the plug as built (its floor ring moved in by the taper): held where every floor point, but for a stray 2% of the line, is inside the other piece with half a wall beyond
+    const holds = (xy2, h2) => { let per = 0, short = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n, l = Math.hypot(xy2[2 * j] - xy2[2 * i], xy2[2 * j + 1] - xy2[2 * i + 1], h2[j] - h2[i]); per += l; const q = roomAt(xy2[2 * i], xy2[2 * i + 1], h2[i]); if (!(q && q[0] >= 0.5 * wall)) short += l; } return short <= 0.04 * per; };
     if (column) { // a point whose line grazes the surface reads no room at all: it takes its nearer neighbours' room
       for (let i = 0; i < n; i++) if (roomOf[i] === -Infinity) { let l = -Infinity, r = -Infinity; for (let k = 1; k <= 3 && l === -Infinity; k++) l = roomOf[(i + n - k) % n]; for (let k = 1; k <= 3 && r === -Infinity; k++) r = roomOf[(i + k) % n]; roomOf[i] = Math.min(l, r); }
     }
@@ -4286,7 +4313,11 @@ const KMCore = (() => {
         rooms.sort((a, b) => a - b);
         return !rooms.length || rooms[Math.floor(0.1 * rooms.length)] >= 0.75 * wall ? { xy2, h2 } : null;
       };
-      for (const kind of ['level', 'leveled', 'even']) for (const w of ws) { // (a level end at any depth before an even one: an even plug on a saddle-shaped line keeps the line's horns)
+      // (1.96) a plug 1 mm deep at its shallowest is no key (the owner's book: "1.0 to 18.6 mm"): every kind is tried at
+      // a useful depth first (half of Extrude, or 1.5 mm), and only then the shallow ones, marked `shallow`
+      const good = (w) => w >= Math.min(1.5, 0.5 * want) - 1e-9, order = [];
+      for (const deepOnes of [true, false]) for (const kind of ['level', 'leveled', 'even']) for (const w of ws) if (good(w) === deepOnes) order.push([kind, w]);
+      for (const [kind, w] of order) { // (a level end at any depth before an even one: an even plug on a saddle-shaped line keeps the line's horns)
         const d = new Float64Array(n); let shortLen = 0; // (a stray point or two still short, under 2% of the line, doesn't stop a plug)
         for (let i = 0; i < n; i++) { d[i] = kind === 'level' ? top + w - lv[i] : w; if (!(room[i] >= d[i] - 0.5 * wall)) shortLen += (seg[i] + seg[(i + n - 1) % n]) / 2; }
         if (shortLen > Math.min(4 * wall, Math.max(2 * wall, 0.02 * per))) continue;
@@ -4311,7 +4342,7 @@ const KMCore = (() => {
         const f = faceHolds(d);
         if (!f) continue;
         let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, d[i]);
-        return { xy2: f.xy2, h2: f.h2, depth: Array.from(d), max, least: w, flatEnd: kind === 'level', leveled: kind === 'leveled', even: kind === 'even', floorTilt: 0 };
+        return { xy2: f.xy2, h2: f.h2, depth: Array.from(d), max, least: w, flatEnd: kind === 'level', leveled: kind === 'leveled', even: kind === 'even', floorTilt: 0, shallow: !good(w), holds };
       }
       return null;
     }
@@ -4706,7 +4737,7 @@ const KMCore = (() => {
   }
   function cutAlongLoop(P, I, loop, opts = {}) {
     const r = cutAlongLoops(P, I, [loop], opts);
-    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings, sinks: r.sinks, sink: r.sinks[0], floors: r.floors, plugsMade: r.plugsMade, sinkNote: r.sinkNote };
+    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings, sinks: r.sinks, sink: r.sinks[0], floors: r.floors, plugsMade: r.plugsMade, jointsMade: r.jointsMade, sinkNote: r.sinkNote };
   }
   /* Cut along several closed lines at once. Side 1 is whatever lies on the left of the lines as they run (the
      triangles holding the lines' own directed edges); side 2 is the rest, and may come apart into several pieces.
@@ -4765,7 +4796,7 @@ const KMCore = (() => {
       // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
       // keys and its checks then all work on the sunk ring
       const sinkWall = opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, taper = opts.sinkTaper !== undefined ? opts.sinkTaper : cfg.sinkTaper || 0;
-      const sunk = !(opts.sink > 0) ? null : opts.sinkStep === false || opts.sinkFlat ? sunkRingAt(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, !!opts.sinkFlat, opts.sinkPlane || null) : sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, false, null, taper);
+      const sunk = !(opts.sink > 0) || (per.inset && !opts.sinkFlat && opts.sinkStep !== false) ? null : opts.sinkStep === false || opts.sinkFlat ? sunkRingAt(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, !!opts.sinkFlat, opts.sinkPlane || null) : sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, false, null, taper);
       // every face carries its frame: a plug may run along another axis than its line's own (1.92: the pieces' one
       // pull direction), and the face, its walls, its cap and its checks are then all worked in that frame
       const own = { F, xy, h: lf.h, cap, clash, xyOf, wantCCW };
@@ -4775,7 +4806,7 @@ const KMCore = (() => {
       c.along = (e) => {
         if (!(opts.sink > 0) || opts.sinkStep === false || opts.sinkFlat) return null;
         const en = [into2 * e[0], into2 * e[1], into2 * e[2]]; // the frame's normal, on the same side as the line's own
-        if (en[0] * F.n[0] + en[1] * F.n[1] + en[2] * F.n[2] < 0.5) return null; // more than 60° off the line's own axis
+        if (en[0] * F.n[0] + en[1] * F.n[1] + en[2] * F.n[2] < WAY_COS) return null; // more than 70° off the line's own axis (1.96: was 60°)
         const Fe = frameFromNormal(norm3(en), lf.centre), exy = new Float64Array(2 * n), eh = new Float64Array(n);
         for (let i = 0; i < n; i++) { const p = 3 * ring[i], d = [P[p] - Fe.o[0], P[p + 1] - Fe.o[1], P[p + 2] - Fe.o[2]]; exy[2 * i] = d[0] * Fe.u[0] + d[1] * Fe.u[1] + d[2] * Fe.u[2]; exy[2 * i + 1] = d[0] * Fe.v[0] + d[1] * Fe.v[1] + d[2] * Fe.v[2]; eh[i] = d[0] * Fe.n[0] + d[1] * Fe.n[1] + d[2] * Fe.n[2]; }
         let a2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += exy[2 * i] * exy[2 * j + 1] - exy[2 * j] * exy[2 * i + 1]; }
@@ -4789,16 +4820,44 @@ const KMCore = (() => {
         fixTJunctions(ecap, ring); splitThroughPoints(ecap, [ring], (id) => exyMap.get(id)); patchCap(ecap, [ring], (id) => exyMap.get(id), wantCCW);
         return Object.assign(faceOf(es.xy2, es.h2, { F: Fe, xy: exy, h: eh, cap: ecap, clash: false, xyOf: (id) => exyMap.get(id), wantCCW }), { sunk: es });
       };
-      c.use = (which) => {
+      // (1.96) the locating boss for a line that can't carry a plug along the way the pieces go on: the face's own
+      // shape pulled in from the edge (`planPlugs`), standing along the line's own axis, with sides drafted a little
+      // more than the angle between that axis and the way `e`, so it lifts out along `e` (a cone frees along any
+      // direction inside its own slope). Null where the way is more than 58° off, or nothing fits.
+      const bossCache = new Map();
+      c.boss = (e) => {
+        if (per.tiny) return null;
+        const cs = into2 * (e[0] * F.n[0] + e[1] * F.n[1] + e[2] * F.n[2]), phi = Math.acos(Math.max(-1, Math.min(1, cs))) * 180 / Math.PI;
+        if (phi > 60) return null;
+        const draft = Math.min(64, Math.max(taper || 5, Math.ceil(phi + 3))), key = String(draft);
+        if (bossCache.has(key)) return bossCache.get(key);
+        const depth = opts.sink > 0 ? opts.sink : 0;
+        const pcfg = { ...lcfg, type: 'plug', plugSlope: draft, plugSlopeMax: 64, ...(depth > 0 ? { plugDepthMode: 'set', plugDepth: Math.max(1, depth) } : { plugDepthMode: 'auto' }) };
+        let out = null;
+        try {
+          const an = analyzeLoop(P, I, loops[li], { ...pcfg, sink: 0 }, diag(bounds(P)));
+          const pl = planPlugs(an, pcfg).filter(q => q.ok);
+          if (pl.length) { const H = an.curved.heightAt; out = { plugs: pl, cfg: pcfg, draft, draw: pl.map(q => { let lo = Infinity, hi = -Infinity; for (const [x, y] of q.mouth) { const z = H(x, y); lo = Math.min(lo, z); hi = Math.max(hi, z); } return { base: q.base, top: q.top, z0: q.side > 0 ? lo : hi, tip: (q.side > 0 ? hi : lo) + q.side * q.depth }; }) }; }
+        } catch (err) { out = null; }
+        bossCache.set(key, out);
+        return out;
+      };
+      // which face, and which joints on it: 'own' (the keys or plug planned for this line, in its own frame), 'boss'
+      // (`c.bossPlan`) or 'none'
+      c.use = (which, joints = 'own') => {
         const f = which === 'sunk' && c.sunkFace ? c.sunkFace : which === 'axis' && c.axisFace ? c.axisFace : c.plain;
         Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0, F: f.fr.F, xy: f.fr.xy, h: f.fr.h, cap: f.fr.cap, clash: f.fr.clash, xyOf: f.fr.xyOf });
-        c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = f.fr.F !== lf.F ? [] : markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); /* (marks were laid out in the line's own frame: none on a face worked in another) */ c.plugs = cfg.type === 'plug' || per.inset ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length;
+        const own = joints === 'own' && f.fr.F === lf.F; // (keys and plugs were planned in the line's own frame)
+        c.cfg = lcfg;
+        c.keys = !own || cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = f.fr.F !== lf.F ? [] : markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); /* (marks were laid out in the line's own frame: none on a face worked in another) */ c.plugs = own && (cfg.type === 'plug' || per.inset) ? (per.plugs || []).filter(q => q.ok) : [];
+        c.bossUsed = null;
+        if (joints === 'boss' && c.bossPlan && f === c.plain) { c.plugs = c.bossPlan.plugs; c.cfg = c.bossPlan.cfg; c.bossUsed = c.bossPlan; }
+        c.joined = c.keys.length + c.plugs.length;
       };
-      c.use('sunk');
+      c.tiny = !!per.tiny; c.way = null; c.bossPlan = null;
+      c.use('sunk'); c.ownJoined = c.joined;
       return c;
     });
-    const joined = caps.some(c => c.joined); // the same whichever face is used: keys sit inside both outlines or neither matters
-    const allKeys = caps.flatMap(c => c.keys), allPlugs = caps.flatMap(c => c.plugs);
     const base1 = tris[1].length, base2 = tris[2].length;
     let pins = [];
     const makeParts = (fan, fine = true) => { // fan: per loop, fan the cap from a centre point; fine: draw caps as grids
@@ -4874,13 +4933,14 @@ const KMCore = (() => {
     const buildParts = () => {
       let parts = makeParts(caps.map(c => c.clash));
       if (!parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(c => c.clash), false); // a grid cap didn't seal: plain caps (1.92: round keys and plugs too: a plug on a limb's flat end came out open and was dropped)
+      const joined = caps.some(c => c.joined);
       if (!joined && caps.some(c => !c.clash) && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(() => true), false); // a flat cap didn't seal: fan them instead
       if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // a line rings a dip, so the "piece" would be empty air
         throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
       for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
       return parts;
     };
-    const tol = Math.max(1e-4, diag(bounds(P)) * 2e-6);
+    const tol = Math.max(1e-4, diag(bounds(P)) * 2e-6), WAY_COS = Math.cos(70 * Math.PI / 180);
     // The plugs, plan by plan, until the pieces pass (a lock, or a piece too thin, moves on to the next plan):
     // 1. each line's plug along its own axis, when the lines' axes agree (a plug only slides out straight, so plugs
     //    that point different ways always lock);
@@ -4890,32 +4950,69 @@ const KMCore = (() => {
     // 3. the longest line's plug alone; 4. no plugs, where the refusal stands (or, forced, becomes a warning).
     const sunkCaps = caps.filter(c => c.sunkFace), axisOf = (c) => c.lf.F.n.map(x => x * c.into2);
     const agree = sunkCaps.every(a => sunkCaps.every(b => { const p = axisOf(a), q = axisOf(b); return p[0] * q[0] + p[1] * q[1] + p[2] * q[2] > Math.cos(Math.PI / 6); }));
-    let parts = null, warnings, plainParts = null, sinkNote = null;
-    const attempt = (plan, canForce) => { caps.forEach((c, i) => c.use(plan[i])); const p = plan.every(x => x === 'plain') && plainParts ? plainParts : buildParts(); const w = checkPieces(p, canForce); parts = p; warnings = w; return true; };
-    const soft = (e) => { if (e.code !== 'locked' && e.code !== 'thin') throw e; sinkNote = sinkNote || e.code; return false; };
+    let parts = null, warnings, plainParts = null, sinkNote = null, lastFail = null;
+    const attempt = (plan, canForce) => {
+      caps.forEach((c, i) => c.use(plan[i][0], plan[i][1]));
+      const bare = caps.every(c => c.F === c.lf.F && !c.sunk && !c.joined && !c.marks.length);
+      const p = bare && plainParts ? plainParts : buildParts(); const w = checkPieces(p, canForce); parts = p; warnings = w; return true;
+    };
+    const soft = (e) => { if (e.code !== 'locked' && e.code !== 'thin') throw e; sinkNote = sinkNote || e.code; lastFail = e.code; return false; };
+    const ownPlan = caps.map(c => [c.sunkFace ? 'sunk' : 'plain', 'own']), plainPlan = caps.map(() => ['plain', 'own']);
+    const anyJoint = caps.some(c => c.sunkFace || c.ownJoined);
     let done = false;
-    if (!sunkCaps.length) done = attempt(caps.map(() => 'plain'), true);
-    if (!done && agree) try { done = attempt(caps.map(c => (c.sunkFace ? 'sunk' : 'plain')), false); } catch (e) { done = soft(e); }
-    if (!done && !caps.some(c => c.joined)) { // (keys were planned on each line's own face, so a line with keys keeps its own axis)
-      caps.forEach(c => c.use('plain')); plainParts = buildParts();
+    if (!anyJoint) done = attempt(plainPlan, true);
+    if (!done && (agree || !sunkCaps.length)) try { done = attempt(ownPlan, false); } catch (e) { done = soft(e); }
+    // (1.96) One way on for every line. The pieces are built bare, the ways they come apart are found (`pullWays`,
+    // best for the lines taken together), and each line gets the best joint that lifts out along its way: its own
+    // plug where the way lies inside the plug's taper, a plug along the way where the other piece holds one, else a
+    // boss drafted past the angle between the two (`c.boss`). Before, a line more than 60° off the way, any line
+    // whose plug didn't fit along it, and every line once keys were planned, was simply cut flat.
+    if (!done && anyJoint && lastFail !== 'thin') {
+      caps.forEach(c => c.use('plain', 'none')); plainParts = buildParts();
       const ways = pullWays(plainParts);
-      const tried = agree; // (a way that is the line's own axis was step 1: not built again)
-      caps.forEach((c, i) => { const q = axisOf(c), w = ways[i]; c.axisFace = c.sunkFace && w && !(tried && w[0] * q[0] + w[1] * q[1] + w[2] * q[2] > 0.9998) ? c.along(w) : null; });
-      if (caps.some(c => c.axisFace)) try { done = attempt(caps.map(c => (c.axisFace ? 'axis' : 'plain')), false); } catch (e) { done = soft(e); }
+      let before = agree || !sunkCaps.length ? ownPlan.map(x => x.join()).join() + '|' + caps.map(() => 0).join('') : '';
+      if (ways.some(Boolean)) for (const bossAll of [false, true]) {
+        const plan = caps.map((c, i) => {
+          const e = ways[i], q = axisOf(c); c.way = null; c.wayOff = null;
+          if (!e) return ['plain', 'none'];
+          const phi = Math.acos(Math.max(-1, Math.min(1, e[0] * q[0] + e[1] * q[1] + e[2] * q[2]))) * 180 / Math.PI; c.wayOff = phi;
+          if (phi <= 3) return [c.sunkFace ? 'sunk' : 'plain', 'own']; // (its own axis, near enough: checked along it, with its keys)
+          c.way = e;
+          if (!bossAll && c.sunkFace && phi <= (c.sunkFace.sunk.taper || 0) - 2) return ['sunk', 'none'];
+          if (!bossAll && (c.axisFace = c.along(e))) return ['axis', 'none'];
+          if ((c.bossPlan = c.boss(e))) return ['plain', 'boss'];
+          return ['plain', 'none'];
+        });
+        const sig = plan.map(x => x.join()).join() + '|' + caps.map(c => (c.way ? 1 : 0)).join('');
+        if (sig === before || !plan.some(x => x[0] !== 'plain' || x[1] !== 'none')) { if (bossAll) break; continue; }
+        before = sig;
+        try { done = attempt(plan, false); } catch (e) { done = soft(e); }
+        if (done) break;
+      }
+      if (!done) caps.forEach(c => { c.way = null; c.wayOff = null; });
     }
-    if (!done && sunkCaps.length > 1) { const longest = caps.indexOf(sunkCaps.reduce((b, c) => (c.xy.length > b.xy.length ? c : b))); try { done = attempt(caps.map((c, i) => (i === longest ? 'sunk' : 'plain')), false); } catch (e) { done = soft(e); } }
-    if (!done) attempt(caps.map(() => 'plain'), true);
+    if (!done && sunkCaps.length > 1) { const longest = caps.indexOf(sunkCaps.reduce((b, c) => (c.xy.length > b.xy.length ? c : b))); try { done = attempt(caps.map((c, i) => [i === longest ? 'sunk' : 'plain', 'own']), false); } catch (e) { done = soft(e); } }
+    if (!done) attempt(plainPlan, true);
     // (1.87) forced through a lock that no plan frees (a piece held at both ends): cut with the plugs after all, along
     // their own axes, since dropping them only brought the thin rims back
     if (opts.force && sunkCaps.length && caps.every(c => !c.sunk) && warnings && warnings.some(w => w.code === 'locked')) {
-      const stepped = caps.map(c => (c.sunkFace && c.sunkFace.sunk.column ? 'sunk' : 'plain'));
-      if (stepped.includes('sunk')) { const keep = { parts, warnings }; try { attempt(stepped, true); sinkNote = null; } catch (e) { caps.forEach(c => c.use('plain')); parts = keep.parts; warnings = keep.warnings; } }
+      const stepped = caps.map(c => [c.sunkFace && c.sunkFace.sunk.column ? 'sunk' : 'plain', 'own']);
+      if (stepped.some(x => x[0] === 'sunk')) { const keep = { parts, warnings }; try { attempt(stepped, true); sinkNote = null; } catch (e) { caps.forEach(c => c.use('plain')); parts = keep.parts; warnings = keep.warnings; } }
     }
     if (caps.some(c => c.sunk)) sinkNote = null;
     parts.sort((x, y) => y.volume - x.volume);
     // each line's plug as it was made, in the model's own coordinates (the app draws it from these after the check)
-    const plugsMade = caps.map(c => { if (!c.sunk || !c.sunk.column) return null; const F = c.F, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z); const floor = [], line = []; for (let i = 0; i < c.n; i++) { floor.push(...at(c.sunk.xy2[2 * i], c.sunk.xy2[2 * i + 1], c.sunk.h2[i])); const v = 3 * c.ring[i]; line.push(P[v], P[v + 1], P[v + 2]); } return { floor, line, depth: c.sunk.max, least: c.sunk.least || 0, flat: !!c.sunk.flatEnd, leveled: !!c.sunk.leveled, taper: c.sunk.taper || 0, axis: F.n.map(x => x * c.into2), shared: !!c.axisFace && c.sunk === c.axisFace.sunk }; });
-    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings, sinks: caps.map(c => c.sink), floors: caps.map(c => (c.sunk && c.sunk.plane) || null), plugsMade, sinkNote: sunkCaps.length && !caps.some(c => c.sunk) ? sinkNote || 'locked' : null };
+    const plugsMade = caps.map(c => { if (!c.sunk || !c.sunk.column) return null; const F = c.F, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z); const floor = [], line = []; for (let i = 0; i < c.n; i++) { floor.push(...at(c.sunk.xy2[2 * i], c.sunk.xy2[2 * i + 1], c.sunk.h2[i])); const v = 3 * c.ring[i]; line.push(P[v], P[v + 1], P[v + 2]); } return { floor, line, depth: c.sunk.max, least: c.sunk.least || 0, flat: !!c.sunk.flatEnd, leveled: !!c.sunk.leveled, taper: c.sunk.taper || 0, axis: F.n.map(x => x * c.into2), shared: (!!c.axisFace && c.sunk === c.axisFace.sunk) || !!c.way }; });
+    // (1.96) each line's joint as it was made: 'edge' (a plug from the cut's edge), 'skew' (one along the shared way),
+    // 'boss' (a drafted boss, with its plan for the app to draw), 'plug' / 'keys' (as planned), or null with why
+    const jointsMade = caps.map(c => {
+      const v = 3 * c.ring[0], kind = c.sunk && c.sunk.column ? (c.axisFace && c.sunk === c.axisFace.sunk ? 'skew' : 'edge') : c.bossUsed ? 'boss' : c.plugs.length ? 'plug' : c.keys.length ? 'keys' : null;
+      const j = { at: [P[v], P[v + 1], P[v + 2]], kind, keys: c.keys.length, off: c.way ? c.wayOff : 0 };
+      if (c.bossUsed) Object.assign(j, { plugs: c.bossUsed.plugs, cfg: c.bossUsed.cfg, draft: c.bossUsed.draft, draw: c.bossUsed.draw, depth: Math.max(...c.bossUsed.plugs.map(q => q.depth)) });
+      if (!kind) j.why = c.tiny ? 'tiny' : c.wayOff > 60 ? 'off' : 'room';
+      return j;
+    });
+    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: caps.flatMap(c => c.keys), plugs: caps.flatMap(c => c.plugs), warnings, sinks: caps.map(c => c.sink), floors: caps.map(c => (c.sunk && c.sunk.plane) || null), plugsMade, jointsMade, sinkNote: sunkCaps.length && !caps.some(c => c.sunk) ? sinkNote || 'locked' : null };
     // the two pieces each line separates: side 1, and the piece of side 2 holding that line's copied vertices
     function pairsOf(parts) {
       const keyOf = (x, y, z) => `${x},${y},${z}`;
@@ -4932,24 +5029,35 @@ const KMCore = (() => {
     // then leaning up to 40° from them, and from one piece's middle to the other's.
     function pullWays(prts) {
       const pair = pairsOf(prts), out = caps.map(() => null), groups = new Map();
-      caps.forEach((c, i) => { if (!c.sunkFace) return; const [a, b] = pair(c), key = prts.indexOf(a) + ':' + prts.indexOf(b); if (!groups.has(key)) groups.set(key, { a, b, idx: [] }); groups.get(key).idx.push(i); });
+      caps.forEach((c, i) => { if (c.tiny || !(c.sunkFace || c.ownJoined || opts.sink > 0)) return; const [a, b] = pair(c), key = prts.indexOf(a) + ':' + prts.indexOf(b); if (!groups.has(key)) groups.set(key, { a, b, idx: [] }); groups.get(key).idx.push(i); });
+      const dot = (p, q) => p[0] * q[0] + p[1] * q[1] + p[2] * q[2], ang = (p, q) => Math.acos(Math.max(-1, Math.min(1, dot(p, q)))) * 180 / Math.PI;
       for (const { a, b, idx } of groups.values()) {
         const axes = idx.map(i => axisOf(caps[i])), lens = idx.map(i => loops[i].length || 1), sum = [0, 0, 0];
         axes.forEach((e, k) => { for (let j = 0; j < 3; j++) sum[j] += e[j] * lens[k]; });
+        const byLen = idx.map((i, k) => k).sort((x, y) => lens[y] - lens[x]);
+        // how far off its own axis each line's own plug still lifts out: its taper, less a little
+        const lean = idx.map(i => (caps[i].sunkFace ? Math.max(0, (caps[i].sunkFace.sunk.taper || 0) - 2) : 0));
         const cands = [];
         if (Math.hypot(...sum) > 1e-9) cands.push(norm3(sum));
-        idx.map((i, k) => k).sort((x, y) => lens[y] - lens[x]).forEach(k => cands.push(axes[k]));
+        byLen.forEach(k => cands.push(axes[k]));
+        // (1.96) each line's axis turned towards each other line's as far as its own plug's taper lets it go
+        for (const k of byLen) for (const m of byLen) { if (m === k || lean[k] < 4) continue; const W = ang(axes[k], axes[m]) * Math.PI / 180; if (W < 0.05) continue; for (const f of [0.95, 0.6]) { const t = Math.min(W, f * lean[k] * Math.PI / 180), s1 = Math.sin(W - t) / Math.sin(W), s2 = Math.sin(t) / Math.sin(W); cands.push(norm3([0, 1, 2].map(j => axes[k][j] * s1 + axes[m][j] * s2))); } }
+        if (axes.length > 1) { const un = [0, 0, 0]; axes.forEach(e => { for (let j = 0; j < 3; j++) un[j] += e[j]; }); if (Math.hypot(...un) > 1e-9) { const u = norm3(un); cands.push(u); for (const f of [0.33, 0.67]) cands.push(norm3([0, 1, 2].map(j => u[j] * f + cands[0][j] * (1 - f)))); } }
         const base = cands[0], F0 = frameFromNormal(base, [0, 0, 0]);
         for (const deg of [20, 40]) for (let k = 0; k < 8; k++) { const t = (k * Math.PI) / 4, s = Math.sin((deg * Math.PI) / 180), co = Math.cos((deg * Math.PI) / 180); cands.push([0, 1, 2].map(j => F0.n[j] * co + (F0.u[j] * Math.cos(t) + F0.v[j] * Math.sin(t)) * s)); }
         const ma = volumeCentroid(a.positions, a.indices).centroid, mb = volumeCentroid(b.positions, b.indices).centroid, ap = [mb[0] - ma[0], mb[1] - ma[1], mb[2] - ma[2]];
         if (Math.hypot(...ap) > 1e-9) cands.push(norm3(ap));
-        const deep = Math.max(3, ...idx.map(i => (caps[i].sunkFace.sunk.max || 0) + 1));
-        for (const e0 of cands) {
-          // the plugs point into side 2: the direction is turned that way, and a line more than 60° off it keeps none
-          const e = e0[0] * base[0] + e0[1] * base[1] + e0[2] * base[2] < 0 ? e0.map(x => -x) : e0;
-          if (!idx.some(i => { const q = axisOf(caps[i]); return e[0] * q[0] + e[1] * q[1] + e[2] * q[2] >= 0.5; })) continue;
+        const deep = Math.max(3, ...idx.map(i => ((caps[i].sunkFace ? caps[i].sunkFace.sunk.max : opts.sink) || 0) + 1));
+        // the way that gives the most lines a joint comes first, then the better joints (a line's own plug or keys
+        // count 3, a plug or boss up to 45° off 2, a shallow boss up to 58° off 1), then the longest line's
+        const score = (e) => { let n = 0, sc = 0, first = 0; idx.forEach((i, k) => { const phi = ang(e, axes[k]), c = caps[i]; const p = (c.sunkFace || c.ownJoined) && phi <= Math.max(3, lean[k]) ? 3 : phi <= 45 ? 2 : phi <= 60 ? 1 : 0; if (p) n++; sc += p; if (k === byLen[0]) first = p; }); return [n, sc, first]; };
+        const order = cands.map((e0, k) => { const e = dot(e0, base) < 0 ? e0.map(x => -x) : e0; return { e, k, s: score(e) }; }).filter(x => x.s[0] > 0) // (the plugs point into side 2)
+          .sort((x, y) => y.s[0] - x.s[0] || y.s[1] - x.s[1] || y.s[2] - x.s[2] || x.k - y.k);
+        let tries = 0;
+        for (const { e } of order) {
+          if (++tries > 10) break;
           if (!slidesApart(a, b, e, tol, deep, 0.2)) continue;
-          for (const i of idx) { const q = axisOf(caps[i]); if (e[0] * q[0] + e[1] * q[1] + e[2] * q[2] >= 0.5) out[i] = e; }
+          for (const i of idx) out[i] = e;
           break;
         }
       }
@@ -4976,14 +5084,16 @@ const KMCore = (() => {
       // at both ends may still come out along one of its joints, or between them, so those directions are tried too
       const same = L > 1 ? caps.filter(d => d !== c && (([a, b]) => a === p1 && b === p2)(pair(d))) : [];
       const also = (Math.hypot(...apart) > 1e-9 ? [apart] : []).concat(same.flatMap(d => [d.F.n, d.F.n.map(x => -x)]));
+      for (const d of same) if (d.way) also.push(d.way); // (1.96) the one way on found for the lines between these pieces
       if (same.length) { const sum = [0, 0, 0]; for (const d of [c, ...same]) for (let k = 0; k < 3; k++) sum[k] += d.into2 * d.F.n[k]; if (Math.hypot(...sum) > 1e-9) also.push(sum); }
       // (1.92) a plug is a key: it only slides out straight along its axis, and only once it has come all the way out
       const plugged = !!(c.sunk && c.sunk.column);
-      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined && !plugged, distance: Math.max(pullDistance(c.cfg, c.keys, c.plugs), plugged ? c.sink + 1 : 0), also }).length) {
+      const dir = c.way || F.n; // (1.96) a joint made to lift out along the pieces' one way on is checked along that way
+      if (lockedPairs([p1, p2], dir, tol, { anyDirection: !c.joined && !plugged, distance: Math.max(pullDistance(c.cfg, c.keys, c.plugs), plugged ? c.sink + 1 : 0), also }).length) {
         const wedged = same.length > 0; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
         // with keys the pieces must slide straight; would they come apart at a slant without them? Asked of these
         // same pieces, so a pick needn't build them all again without keys just to find out (half a neck pick's time)
-        const keyless = c.joined && opts.force && !lockedPairs([p1, p2], F.n, tol, { anyDirection: true, distance: 3, also }).length;
+        const keyless = c.joined && opts.force && !lockedPairs([p1, p2], dir, tol, { anyDirection: true, distance: 3, also }).length;
         refuse(wedged ? `This piece is held in ${same.length + 1} places by the same neighbour, and no one direction frees them all, so it couldn’t be fitted back on after printing. Split off one of its neighbours first, or pick it in smaller parts held in one place each, or cut it anyway.`
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
           : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked', wedged, keyless);
@@ -5692,10 +5802,19 @@ const KMCore = (() => {
           // (1.92) where the other piece can't hold a plug from the cut's edge (a shoulder that slopes away right above
           // the line), the plug is pulled in from the edge by a wall instead, tapered and as deep as Extrude asks:
           // the owner's arm ended in bare horns, or in nothing, where the edge plug didn't fit
-          const inset = cfg.sink > 0 && cfg.sinkStep !== false && !(sk && sk.column) && (cfg.type === 'none' || cfg.type === 'plug');
+          // (1.96) and where the edge plug is only a shallow one (under 1.5 mm at its shallowest: the owner's "1.0 to
+          // 18.6 mm" was no key), the plug set in from the edge is taken instead when it goes deeper
+          const shallow = !!(sk && sk.column && sk.shallow);
+          let inset = cfg.sink > 0 && cfg.sinkStep !== false && (!(sk && sk.column) || shallow) && (cfg.type === 'none' || cfg.type === 'plug');
+          const pcfg = cfg.type === 'plug' ? lcfg : { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) }; // (a plug chosen as the key keeps its own settings)
+          let pl = null;
+          if (inset && shallow) {
+            let an2 = null; try { an2 = analyzeLoop(P, I, loop, { ...lcfg, sink: 0 }, D); pl = planPlugs(an2, pcfg); } catch (err) { pl = null; }
+            if (pl && pl.some(q => q.ok && q.depth >= Math.max(1.5, 1.5 * (sk.least || 0)))) { an = an2; out.frames[out.frames.length - 1] = an.frame; delete draw.sink; }
+            else { inset = false; pl = null; }
+          }
           if (inset) {
-            const pcfg = cfg.type === 'plug' ? lcfg : { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) }; // (a plug chosen as the key keeps its own settings)
-            const pl = planPlugs(an, pcfg);
+            if (!pl) pl = planPlugs(an, pcfg);
             per.plugs = pl.filter(q => q.ok); per.inset = per.plugs.length > 0; per.cfg = per.inset ? pcfg : lcfg;
             if (!per.plugs.length && !out.noKeys && !tiny) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
             const H = an.curved.heightAt;
@@ -5847,12 +5966,42 @@ const KMCore = (() => {
     }
     return out;
   }
+  // (1.96) The cut may change a line's joint from the one planned (`cutAlongLoops`: a boss drafted to lift out along
+  // the pieces' one way on in place of keys or a plug that would lock; keys left off a plug that leans). The pick's
+  // per-line plan and what the app draws are brought in step with what was made (`result.jointsMade`, matched to the
+  // pick's lines by position: the cut may take its lines in another order).
   function planPickPieces(P0, I0, req0) {
+    const out = planPickPiecesRaw(P0, I0, req0), r = out.result, P = pickMeshOf.get(out) || P0;
+    if (!r || !r.jointsMade || !out.loops) return out;
+    const key = (x, y, z) => Math.fround(x) + ',' + Math.fround(y) + ',' + Math.fround(z);
+    const sets = out.loops.map(l => new Set(l.verts.map(v => key(P[3 * v], P[3 * v + 1], P[3 * v + 2]))));
+    const made = out.loops.map(() => null), plugsMade = out.loops.map(() => null);
+    r.jointsMade.forEach((j, k) => { const i = sets.findIndex((s, i2) => !made[i2] && s.has(key(j.at[0], j.at[1], j.at[2]))); if (i >= 0) { made[i] = j; plugsMade[i] = (r.plugsMade || [])[k] || null; } });
+    if (made.some(j => !j)) return out;
+    r.jointsMade = made; r.plugsMade = plugsMade;
+    out.perLoop = out.perLoop.map((per, i) => {
+      const j = made[i], q = { ...per, made: j.kind, why: j.why || null, off: j.off || 0 };
+      if (j.kind === 'boss') { Object.assign(q, { keys: [], plugs: j.plugs, inset: true, boss: true, draft: j.draft, cfg: j.cfg, extruded: false }); out.draw[i] = { keys: [], plugs: j.draw }; }
+      else {
+        if (!j.keys && (per.keys || []).length) { q.keys = []; out.draw[i] = { ...out.draw[i], keys: [] }; }
+        if (j.kind !== 'plug' && (per.plugs || []).length) { q.plugs = []; q.inset = false; out.draw[i] = { ...out.draw[i], plugs: [] }; }
+        if (j.kind !== 'edge' && j.kind !== 'skew') { if (q.extruded) q.extruded = false; if (out.draw[i] && out.draw[i].sink) out.draw[i] = { ...out.draw[i], sink: null }; }
+        else q.extruded = true;
+      }
+      return q;
+    });
+    out.keys = out.perLoop.reduce((n, per) => n + (per.keys || []).length, 0); out.plugs = out.perLoop.reduce((n, per) => n + (per.plugs || []).length, 0);
+    const allMade = !out.perLoop.some(per => !per.tiny && per.why !== 'tiny' && !per.made);
+    if (out.noKeys && allMade) out.noKeys = null;
+    if (out.dropped && allMade) out.dropped = null; // (joints were left off as planned, and the cut gave every line one that lifts out)
+    return out;
+  }
+  function planPickPiecesRaw(P0, I0, req0) {
     const { P, I, req } = pickMesh(P0, I0, req0); // the same eased lines as planJoints worked on (it is quick and comes out alike)
     const cfg = req.cfg, out = req.planned ? { ...req.planned, result: null, error: null, errorCode: null, forced: null, dropped: null } : planJoints(P, I, req), loops = out.loops;
     pickMeshOf.set(out, P);
     const run = (withJoints, force, only = -1) => { // only: the one line that keeps its joints
-      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, sinkStep: req.sinkStep, perLoop: withJoints ? out.perLoop : loops.map((l, i) => (i === only ? out.perLoop[i] : { keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
+      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, sinkStep: req.sinkStep, perLoop: withJoints ? out.perLoop : loops.map((l, i) => (i === only ? out.perLoop[i] : { keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide, tiny: out.perLoop[i] && out.perLoop[i].tiny })) };
       if (req.regions) return splitRegions(P, I, req.seg, req.regions, o);
       if (loops.length > 1) return cutAlongLoops(P, I, loops, { ...o, what: 'lines' });
       const p0 = o.perLoop[0] || {};
@@ -6359,7 +6508,7 @@ const KMCore = (() => {
     const out = [];
     if (cfg.type !== 'plug' || !an || an.base.error) return out;
     const sec = an.base, m = cfg.margin, c = cfg.clearance, ca = c + 0.1, floorT = Math.max(0.8, m * 0.75);
-    const tanS = Math.tan((Math.max(0, Math.min(30, cfg.plugSlope === undefined ? 5 : cfg.plugSlope)) * Math.PI) / 180), gs = c * Math.sqrt(1 + tanS * tanS);
+    const tanS = Math.tan((Math.max(0, Math.min(cfg.plugSlopeMax > 30 ? cfg.plugSlopeMax : 30, cfg.plugSlope === undefined ? 5 : cfg.plugSlope)) * Math.PI) / 180), gs = c * Math.sqrt(1 + tanS * tanS);
     const S = cfg.pegSide === 'above' ? -1 : +1, round = Math.max(1, m);
     const src = an._src, F = an.frame, H = an.curved ? an.curved.heightAt : () => 0;
     const g = src ? raysFor(src.P, src.I, F) : null;
@@ -6412,8 +6561,17 @@ const KMCore = (() => {
       // the sloping sides move the top in by depth × tan(slope): where that folds a concave corner over itself, a
       // shallower plug is used instead of none
       let depth = best.depth, top, floor, fine = false;
+      if (tanS > 0.6 && best.inradius > 0) depth = Math.min(depth, Math.max(1, 0.6 * best.inradius / tanS)); // (1.96) a steeply drafted boss ends in a top at least two fifths as wide as its base
       for (let tries = 0; tries < 8 && depth >= 1; tries++) {
         top = offsetRing(base, -depth * tanS); floor = offsetRing(top, gs);
+        if (tanS > 0.6 && best.inradius > 0 && !(ringOk(top) && ringOk(floor))) {
+          // (1.96) a steep draft moves the top in by millimetres, and a ring of many short edges moved in point by point
+          // folds at every wiggle: the top is the base drawn in towards the plug's middle instead (the same shape,
+          // smaller, at least the draft asked at its nearest point), where the base can be seen whole from there
+          const sc = Math.max(0.3, 1 - depth * tanS / best.inradius), fb = flatOf(base);
+          const t2 = base.map(q => [best.x + (q[0] - best.x) * sc, best.y + (q[1] - best.y) * sc]);
+          if (t2.every(q => pointInRing(fb, q[0], q[1]))) { top = t2; floor = t2.map((q, i) => [q[0] + mouth[i][0] - base[i][0], q[1] + mouth[i][1] - base[i][1]]); }
+        }
         if (ringOk(top) && ringOk(floor)) { fine = true; break; }
         depth *= 0.7;
       }
