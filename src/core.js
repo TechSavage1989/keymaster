@@ -2121,6 +2121,67 @@ const KMCore = (() => {
     }
     return changed;
   }
+  // (1.96) Tongues and notches off the regions' borders (the owner: "topology that should not be included in a selection is
+  // still selected and cut"): where two regions meet with no crease between them (a step in thickness, a melted
+  // sliver) the border wanders, and a narrow tongue of one region pokes into the other; cut along it, the piece gets a
+  // paper-thin flap. Each region is opened by a share (`frac`, a quarter) of its own half-width, the furthest any of its
+  // triangles lies from its border measured over the surface, so nothing here goes by the model's size: what the
+  // opening takes off is a tongue, narrower than that against the region itself. A tongue goes to the neighbour it
+  // lies in when most of its border with other regions is smooth: no crease of `sharp` (25°) or more, and no seam
+  // between made and sculpted surface (`hard`). A tongue bounded by creases is a real feature (a strap, a lapel, a
+  // made object's strip) and stays; `fixed` triangles (the made objects) never move. A tube (a sleeve, a finger) is
+  // not narrow in this sense: its triangles lie far from its ends. In place; returns how many triangles moved.
+  function trimTongues(P, I, groupOf, opts = {}) {
+    const nt = I.length / 3, { nb, C } = triangleAdjacency(P, I), frac = opts.frac === undefined ? 0.25 : opts.frac;
+    const cosSharp = Math.cos(((opts.sharp === undefined ? 25 : opts.sharp) * Math.PI) / 180), hard = opts.hard || null, fixed = opts.fixed || null;
+    const N = new Float64Array(3 * nt), A = new Float64Array(nt);
+    for (let t = 0; t < nt; t++) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2], n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]), l = Math.hypot(n[0], n[1], n[2]); A[t] = l / 2; if (l > 0) { N[3 * t] = n[0] / l; N[3 * t + 1] = n[1] / l; N[3 * t + 2] = n[2] / l; } }
+    const elen = (t, k) => { const a = 3 * I[3 * t + k], b = 3 * I[3 * t + (k + 1) % 3]; return Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]); };
+    const cdist = (t, q) => Math.hypot(C[3 * q] - C[3 * t], C[3 * q + 1] - C[3 * t + 1], C[3 * q + 2] - C[3 * t + 2]);
+    let moved = 0; const within = opts.within || null, lock = new Uint8Array(nt); // (a tongue moved once stays: without this a run could go over and come back)
+    for (let round = 0; round < (opts.rounds || 3); round++) {
+      let count = 0; for (let t = 0; t < nt; t++) if (groupOf[t] + 1 > count) count = groupOf[t] + 1;
+      // a heap of (distance, triangle), spreading inside each region only
+      const hd = [], ht = [];
+      const push = (d, t) => { let i = hd.length; hd.push(d); ht.push(t); while (i > 0) { const p = (i - 1) >> 1; if (hd[p] <= d) break; hd[i] = hd[p]; ht[i] = ht[p]; i = p; } hd[i] = d; ht[i] = t; };
+      const pop = () => { const top = ht[0], d = hd.pop(), t = ht.pop(), n = hd.length; if (n) { let i = 0; for (;;) { let c = 2 * i + 1; if (c >= n) break; if (c + 1 < n && hd[c + 1] < hd[c]) c++; if (hd[c] >= d) break; hd[i] = hd[c]; ht[i] = ht[c]; i = c; } hd[i] = d; ht[i] = t; } return top; };
+      const spread = (dist, limit) => { while (hd.length) { const d = hd[0], t = pop(); if (d > dist[t]) continue; for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q < 0 || groupOf[q] !== groupOf[t]) continue; const nd = d + cdist(t, q); if (nd < dist[q] && (!limit || nd <= limit[groupOf[q]])) { dist[q] = nd; push(nd, q); } } } };
+      // how far each triangle lies from its region's border, and each region's half-width
+      const d = new Float64Array(nt).fill(Infinity);
+      for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && groupOf[q] !== groupOf[t]) { const v = cdist(t, q) / 2; if (v < d[t]) d[t] = v; } }
+      for (let t = 0; t < nt; t++) if (d[t] < Infinity) push(d[t], t);
+      spread(d, null);
+      const half = new Float64Array(count); for (let t = 0; t < nt; t++) if (d[t] < Infinity && d[t] > half[groupOf[t]]) half[groupOf[t]] = d[t];
+      // opened: the core (at least frac of the half-width in) grown back by as much
+      const r = half.map(h => frac * h), back = new Float64Array(nt).fill(Infinity), reach = r.map(x => 1.1 * x);
+      for (let t = 0; t < nt; t++) if (d[t] === Infinity || d[t] >= r[groupOf[t]]) { back[t] = 0; push(0, t); } // (a region with no border at all is all core)
+      spread(back, reach);
+      // the runs the opening took off, and their borders with other regions
+      const par = new Int32Array(nt).fill(-1); const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+      for (let t = 0; t < nt; t++) if (back[t] === Infinity) par[t] = t;
+      for (let t = 0; t < nt; t++) if (par[t] >= 0) for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q > t && par[q] >= 0 && groupOf[q] === groupOf[t]) { const x = find(t), y = find(q); if (x !== y) par[x] = y; } }
+      // what the opening kept, in connected pieces: a run that joins two of them is a bridge of its region, not a tongue
+      const kp = new Int32Array(nt).fill(-1); const kfind = (x) => { while (kp[x] !== x) { kp[x] = kp[kp[x]]; x = kp[x]; } return x; };
+      for (let t = 0; t < nt; t++) if (par[t] < 0) kp[t] = t;
+      for (let t = 0; t < nt; t++) if (kp[t] >= 0) for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q > t && kp[q] >= 0 && groupOf[q] === groupOf[t]) { const x = kfind(t), y = kfind(q); if (x !== y) kp[x] = y; } }
+      const runs = new Map(); // root -> { area, out, neck, roots, held, to: Map(region -> smooth length), all: Map(region -> length) }
+      const regArea = new Float64Array(count); for (let t = 0; t < nt; t++) regArea[groupOf[t]] += A[t];
+      for (let t = 0; t < nt; t++) {
+        if (par[t] < 0) continue; const x = find(t); let R = runs.get(x); if (!R) runs.set(x, R = { area: 0, out: 0, neck: 0, roots: new Set(), held: false, to: new Map(), all: new Map() });
+        R.area += A[t]; if (lock[t] || (fixed && fixed[t])) R.held = true;
+        for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q < 0) continue; if (groupOf[q] === groupOf[t]) { if (par[q] < 0) { R.neck += elen(t, k); R.roots.add(kfind(q)); } continue; } const l = elen(t, k); R.out += l; R.all.set(groupOf[q], (R.all.get(groupOf[q]) || 0) + l);
+          const smooth = N[3 * t] * N[3 * q] + N[3 * t + 1] * N[3 * q + 1] + N[3 * t + 2] * N[3 * q + 2] >= cosSharp && !(hard && hard[t] !== hard[q]) && !(fixed && fixed[q]) && !(within && within[t] !== within[q]);
+          if (smooth) R.to.set(groupOf[q], (R.to.get(groupOf[q]) || 0) + l); }
+      }
+      const dest = new Map();
+      for (const [x, R] of runs) { if (R.held || !(R.out > 0) || R.area > 0.1 * regArea[groupOf[x]]) continue; let all = 0, best = -1, bl = 0; for (const [g, l] of R.to) { all += l; if (l > bl) { bl = l; best = g; } } if (best >= 0 && all >= 0.6 * R.out && R.roots.size === 1 && R.neck < 0.5 * R.all.get(best)) dest.set(x, best); } // (one neck, and the border gets shorter by the move: at least halved along the region it goes to)
+      // two runs side by side (a tongue, and the corners of the other region beside its root) would swap and leave islands: the bigger goes, the other is looked at again next round
+      if (dest.size > 1) { const drop = new Set(); for (let t = 0; t < nt; t++) { if (par[t] < 0) continue; const x = find(t); if (!dest.has(x)) continue; for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q < 0 || par[q] < 0) continue; const y = find(q); if (y !== x && dest.has(y)) drop.add(runs.get(x).area < runs.get(y).area ? x : y); } } for (const x of drop) dest.delete(x); }
+      let now = 0; if (dest.size) for (let t = 0; t < nt; t++) if (par[t] >= 0) { const g = dest.get(find(t)); if (g !== undefined) { groupOf[t] = g; lock[t] = 1; now++; } }
+      moved += now; if (!now) break;
+    }
+    return moved;
+  }
   // Hard surface or organic, per triangle (the owner: "determine when a hard surface meets a more organic surface and
   // split accordingly"): cloth, skin and hair bend a little at nearly every edge, each triangle a flat patch of its
   // own, while a modelled object (a book, a buckle, a crucifix, a cylinder's facets) is flat patches of several
@@ -2425,6 +2486,7 @@ const KMCore = (() => {
       if (!merged) break;
     }
     const groupOf = new Int32Array(nt), ids = new Map(); for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
+    if (opts.tongues !== false) trimTongues(P, I, groupOf, { hard: sec.hard || null, within: parts }); // (1.96) tongues go to the section they poke into, within their part
     unpinchGroups(P, I, groupOf);
     const out = bordersFromGroups(P, I, groupOf);
     out.areas = new Array(out.count).fill(0); for (let t = 0; t < nt; t++) out.areas[out.groupOf[t]] += A[t];
@@ -2966,10 +3028,14 @@ const KMCore = (() => {
     // (1.79) the props' enclosed islands (a bevel strip between two panels) join them, and leftover slivers melt
     if (made) carveProps(P, I, groupOf, made, A, pairs, total, minProp, labels);
     if (made && prop) ownObjectPieces(P, I, groupOf, made, prop, A, C, N, pairs); // (1.81)
+    if (made && prop) for (let t = 0; t < nt; t++) if (prop[t] >= 0) made[t] = 1; // (1.80) the objects' claimed surface is hard too, so the seam is pinned round it
+    if (opts.tongues !== false) { // (1.96) narrow tongues across smooth borders go to the region they poke into; the made objects keep what they hold
+      let fixed = null; if (prop) { fixed = new Uint8Array(nt); for (let t = 0; t < nt; t++) if (prop[t] >= 0) fixed[t] = 1; }
+      trimTongues(P, I, groupOf, { hard: made, fixed }); // (no region is emptied: a tongue is at most a tenth of its region)
+    }
     unpinchGroups(P, I, groupOf);
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
-    if (made && prop) for (let t = 0; t < nt; t++) if (prop[t] >= 0) made[t] = 1; // (1.80) the objects' claimed surface is hard too, so the seam is pinned round it
     seg.levels = form.levels; seg.sdf = sdf; seg.hard = made; // (1.77) so a pick's slice can pin the seam where hard meets organic
     return seg;
   }
@@ -3026,6 +3092,162 @@ const KMCore = (() => {
     for (let i = 0; i < pairs.length; i += 4) if (groupOf[pairs[i]] !== groupOf[pairs[i + 1]]) { borders[j++] = pairs[i]; borders[j++] = pairs[i + 1]; borders[j++] = pairs[i + 2]; borders[j++] = pairs[i + 3]; }
     let count = 0; for (let t = 0; t < nt; t++) count = Math.max(count, groupOf[t] + 1);
     return { groupOf, count, borders };
+  }
+  /* ---------- regions carried through a cut ----------
+     The owner, on 1.95: after three cuts a click on a sleeve picked a region that wandered over the capelet, because
+     every piece was segmented afresh, sockets and cut faces and all, and came out differently each time. A piece made
+     by a cut now keeps the regions its surface had on the part it was cut from. */
+  // Which triangle of the part (P0, I0) each triangle of a piece cut from it lies on, or -1 for a triangle the cut
+  // made (a cut face, a wall, a key). Triangles the cut left alone are matched by their corners' positions exactly;
+  // the rest (split by a slice, or with a corner eased along the line) are surface when all three corners lie on the
+  // part's surface, and take the triangle under their middle that faces their way.
+  function inheritTriangles(P0, I0, P, I) {
+    const nt0 = I0.length / 3, nt = I.length / 3, nv0 = P0.length / 3, nv = P.length / 3, src = new Int32Array(nt).fill(-1);
+    if (!nt || !nt0) return src;
+    const F0 = P0 instanceof Float32Array ? P0 : new Float32Array(P0), F = P instanceof Float32Array ? P : new Float32Array(P);
+    const U0 = new Uint32Array(F0.buffer, F0.byteOffset, F0.length), U = new Uint32Array(F.buffer, F.byteOffset, F.length);
+    const hash3 = (a, b, c) => (Math.imul(a, 73856093) ^ Math.imul(b, 19349663) ^ Math.imul(c, 83492791)) >>> 0;
+    let size = 1; while (size < 2 * nv0 + 2) size <<= 1;
+    const vtab = new Int32Array(size).fill(-1), canon = new Int32Array(nv0);
+    for (let v = 0; v < nv0; v++) {
+      const a = U0[3 * v], b = U0[3 * v + 1], c = U0[3 * v + 2]; let h = hash3(a, b, c) & (size - 1);
+      for (;;) { const w = vtab[h]; if (w < 0) { vtab[h] = v; canon[v] = v; break; } if (U0[3 * w] === a && U0[3 * w + 1] === b && U0[3 * w + 2] === c) { canon[v] = w; break; } h = (h + 1) & (size - 1); }
+    }
+    const vmap = new Int32Array(nv);
+    for (let v = 0; v < nv; v++) {
+      const a = U[3 * v], b = U[3 * v + 1], c = U[3 * v + 2]; let h = hash3(a, b, c) & (size - 1), m = -1;
+      for (;;) { const w = vtab[h]; if (w < 0) break; if (U0[3 * w] === a && U0[3 * w + 1] === b && U0[3 * w + 2] === c) { m = w; break; } h = (h + 1) & (size - 1); }
+      vmap[v] = m;
+    }
+    let tsize = 1; while (tsize < 2 * nt0 + 2) tsize <<= 1;
+    const ttab = new Int32Array(tsize).fill(-1), tri0 = new Int32Array(3 * nt0);
+    const turn = (a, b, c, out, o) => { if (a <= b && a <= c) { out[o] = a; out[o + 1] = b; out[o + 2] = c; } else if (b <= a && b <= c) { out[o] = b; out[o + 1] = c; out[o + 2] = a; } else { out[o] = c; out[o + 1] = a; out[o + 2] = b; } };
+    for (let t = 0; t < nt0; t++) {
+      turn(canon[I0[3 * t]], canon[I0[3 * t + 1]], canon[I0[3 * t + 2]], tri0, 3 * t);
+      const a = tri0[3 * t], b = tri0[3 * t + 1], c = tri0[3 * t + 2]; if (a === b || b === c || a === c) continue;
+      let h = hash3(a, b, c) & (tsize - 1);
+      for (;;) { const w = ttab[h]; if (w < 0) { ttab[h] = t; break; } if (tri0[3 * w] === a && tri0[3 * w + 1] === b && tri0[3 * w + 2] === c) break; h = (h + 1) & (tsize - 1); }
+    }
+    const used = new Uint8Array(nt0), q = [0, 0, 0], open = [];
+    for (let t = 0; t < nt; t++) {
+      const x = vmap[I[3 * t]], y = vmap[I[3 * t + 1]], z = vmap[I[3 * t + 2]];
+      if (x >= 0 && y >= 0 && z >= 0) {
+        turn(x, y, z, q, 0); let h = hash3(q[0], q[1], q[2]) & (tsize - 1);
+        for (;;) { const w = ttab[h]; if (w < 0) break; if (tri0[3 * w] === q[0] && tri0[3 * w + 1] === q[1] && tri0[3 * w + 2] === q[2]) { src[t] = w; used[w] = 1; break; } h = (h + 1) & (tsize - 1); }
+      }
+      if (src[t] < 0) open.push(t);
+    }
+    if (!open.length) return src;
+    // the rest by place: the part's triangles no piece triangle matched, near the open ones, in a grid of cells
+    const bb0 = bounds(P0), eps = 1e-5 * diag(bb0);
+    const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (const t of open) for (let k = 0; k < 3; k++) { const v = 3 * I[3 * t + k]; for (let j = 0; j < 3; j++) { if (P[v + j] < mn[j]) mn[j] = P[v + j]; if (P[v + j] > mx[j]) mx[j] = P[v + j]; } }
+    const cands = []; let sum = 0;
+    for (let t = 0; t < nt0; t++) {
+      if (used[t]) continue;
+      const a = 3 * I0[3 * t], b = 3 * I0[3 * t + 1], c = 3 * I0[3 * t + 2]; let out = false, ext = 0;
+      for (let j = 0; j < 3 && !out; j++) { const lo = Math.min(P0[a + j], P0[b + j], P0[c + j]), hi = Math.max(P0[a + j], P0[b + j], P0[c + j]); if (hi < mn[j] - eps || lo > mx[j] + eps) out = true; ext = Math.max(ext, hi - lo); }
+      if (!out) { cands.push(t); sum += ext; }
+    }
+    if (!cands.length) return src;
+    const span = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2], eps);
+    const h = Math.max(1.5 * sum / cands.length, span / 96, 4 * eps), pad = 0.25 * h;
+    const dim = [0, 1, 2].map(j => Math.max(1, Math.ceil((mx[j] - mn[j] + 2 * pad) / h) + 1));
+    const cellOf = (x, j) => Math.max(0, Math.min(dim[j] - 1, Math.floor((x - mn[j] + pad) / h)));
+    const cells = new Map();
+    for (const t of cands) {
+      const a = 3 * I0[3 * t], b = 3 * I0[3 * t + 1], c = 3 * I0[3 * t + 2], lo = [0, 0, 0], hi = [0, 0, 0];
+      for (let j = 0; j < 3; j++) { lo[j] = cellOf(Math.min(P0[a + j], P0[b + j], P0[c + j]) - pad, j); hi[j] = cellOf(Math.max(P0[a + j], P0[b + j], P0[c + j]) + pad, j); }
+      for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) { const k = (x * dim[1] + y) * dim[2] + z; let L = cells.get(k); if (!L) cells.set(k, L = []); L.push(t); }
+    }
+    const at = (Q, v) => [Q[3 * v], Q[3 * v + 1], Q[3 * v + 2]];
+    const near = (p, n) => { // the candidate nearest p (facing along n when given), as [triangle, distance]
+      const L = cells.get((cellOf(p[0], 0) * dim[1] + cellOf(p[1], 1)) * dim[2] + cellOf(p[2], 2)); let best = -1, bd = Infinity;
+      if (L) for (const t of L) {
+        const a = at(P0, I0[3 * t]), b = at(P0, I0[3 * t + 1]), c = at(P0, I0[3 * t + 2]);
+        if (n) { const m = cross3([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]), l = Math.hypot(m[0], m[1], m[2]); if (!(l > 0) || (m[0] * n[0] + m[1] * n[1] + m[2] * n[2]) / l < 0.5) continue; }
+        const cp = closestOnTriangle(p, a, b, c), d = Math.hypot(cp[0] - p[0], cp[1] - p[1], cp[2] - p[2]);
+        if (d < bd) { bd = d; best = t; }
+      }
+      return [best, bd];
+    };
+    const onSurf = new Int8Array(nv); // 1 on the part's surface, -1 off it
+    for (const t of open) {
+      let ok = true;
+      for (let k = 0; k < 3 && ok; k++) { const v = I[3 * t + k]; if (!onSurf[v]) onSurf[v] = vmap[v] >= 0 || near(at(P, v), null)[1] <= eps ? 1 : -1; if (onSurf[v] < 0) ok = false; }
+      if (!ok) continue;
+      const a = at(P, I[3 * t]), b = at(P, I[3 * t + 1]), c = at(P, I[3 * t + 2]);
+      const n = cross3([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]), l = Math.hypot(n[0], n[1], n[2]);
+      if (!(l > 0)) continue;
+      const r = near([(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3], [n[0] / l, n[1] / l, n[2] / l]);
+      if (r[0] >= 0 && r[1] <= pad) src[t] = r[0];
+    }
+    return src;
+  }
+  // The regions of a piece from those of the part it was cut from (`groupOf0`, by the part's triangles; `src` from
+  // `inheritTriangles`). Every triangle of the old surface keeps its region. A scrap of a region left beside a cut
+  // face (under `opts.scrap`, 15%, of that region as it was, `opts.areas`: what a smoothed cut line leaves along the
+  // rim, or the stub past a flat limb end) joins the neighbour it shares the most border with, and so does any crumb
+  // of a region this piece holds under 15% of. Each cut face (its
+  // walls, its plug or socket) then joins the region it shares the most rim with, so the socket takes the place of
+  // what was cut away and no region's outline runs through it: picking the coat takes the socket in it, and the
+  // capelet's outline runs along the rim as it ran along the sleeve. A piece that is all new (a pin) is one region.
+  function carryRegions(P, I, groupOf0, src, opts = {}) {
+    const nt = I.length / 3, pairs = trianglePairs(I), np = pairs.length / 4, areas0 = opts.areas || null, scrap = opts.scrap === undefined ? 0.15 : opts.scrap;
+    const lab = new Int32Array(nt), A = new Float64Array(nt); let count0 = 0;
+    for (let t = 0; t < nt; t++) {
+      lab[t] = src[t] >= 0 ? groupOf0[src[t]] : -1; if (lab[t] + 1 > count0) count0 = lab[t] + 1;
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2], n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]);
+      A[t] = Math.hypot(n[0], n[1], n[2]) / 2;
+    }
+    if (opts.count > count0) count0 = opts.count;
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (lab[a] === lab[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
+    const area = new Float64Array(nt), byFace = new Uint8Array(nt); let anyNew = false;
+    for (let t = 0; t < nt; t++) { area[find(t)] += A[t]; if (lab[t] < 0) anyNew = true; }
+    const out = new Int32Array(nt);
+    if (anyNew) {
+      { const vnew = new Uint8Array(P.length / 3); for (let t = 0; t < nt; t++) if (lab[t] < 0) { vnew[I[3 * t]] = 1; vnew[I[3 * t + 1]] = 1; vnew[I[3 * t + 2]] = 1; }
+        for (let t = 0; t < nt; t++) if (lab[t] >= 0 && (vnew[I[3 * t]] || vnew[I[3 * t + 1]] || vnew[I[3 * t + 2]])) byFace[find(t)] = 1; } // (touching the cut's rim, if only at a point)
+      const here = new Float64Array(count0 + 1); for (let t = 0; t < nt; t++) if (lab[t] >= 0) here[lab[t]] += A[t]; // how much of each region this piece holds
+      const loose = (r) => lab[r] < 0 || (!!areas0 && (byFace[r] ? area[r] : here[lab[r]]) < scrap * (areas0[lab[r]] || 0)); // a cut face; a scrap beside one; or a crumb of a region that went with the other piece
+      const nb = new Map(); // a loose run -> (the run beside it -> the length of border they share)
+      for (let i = 0; i < np; i++) {
+        const x = find(pairs[4 * i]), y = find(pairs[4 * i + 1]); if (x === y) continue;
+        const lx = loose(x), ly = loose(y); if (!lx && !ly) continue;
+        const va = 3 * pairs[4 * i + 2], vb = 3 * pairs[4 * i + 3], l = Math.hypot(P[va] - P[vb], P[va + 1] - P[vb + 1], P[va + 2] - P[vb + 2]);
+        if (lx) { let m = nb.get(x); if (!m) nb.set(x, m = new Map()); m.set(y, (m.get(y) || 0) + l); }
+        if (ly) { let m = nb.get(y); if (!m) nb.set(y, m = new Map()); m.set(x, (m.get(x) || 0) + l); }
+      }
+      // sets of runs: each scrap joins the run it borders most, then each cut face the set it borders most
+      const sp = new Map(); const sf = (x) => { let r = x; while (sp.has(r) && sp.get(r) !== r) r = sp.get(r); return r; };
+      const order = [...nb.keys()].sort((a, b) => (lab[a] < 0) - (lab[b] < 0) || area[a] - area[b]);
+      for (const r of order) {
+        const tally = new Map(); for (const [o, l] of nb.get(r)) { const s = sf(o); if (s === sf(r)) continue; tally.set(s, (tally.get(s) || 0) + l); }
+        let best = -1, bl = 0; for (const [s, l] of tally) if (l > bl) { bl = l; best = s; }
+        if (best >= 0) sp.set(sf(r), best);
+      }
+      // a set's region: that of its one run that isn't loose; of its biggest scrap when it has none; a new one when it is all cut face
+      const setLab = new Map(), setBest = new Map(); let extra = count0;
+      const roots = new Set(); for (let t = 0; t < nt; t++) roots.add(find(t));
+      for (const r of roots) { const s = sf(r); if (lab[r] < 0) continue; const rank = loose(r) ? area[r] : Infinity; if (!(setBest.get(s) >= rank)) { setBest.set(s, rank); setLab.set(s, lab[r]); } }
+      for (const r of roots) { const s = sf(r); if (!setLab.has(s)) setLab.set(s, extra++); }
+      for (let t = 0; t < nt; t++) out[t] = setLab.get(sf(find(t)));
+      unpinchGroups(P, I, out);
+    } else out.set(lab);
+    // numbered in the order the part's regions were, the new ones last
+    let top = 0; for (let t = 0; t < nt; t++) if (out[t] + 1 > top) top = out[t] + 1;
+    const ren = new Int32Array(top).fill(-1); for (let t = 0; t < nt; t++) ren[out[t]] = 0;
+    const from = []; for (let g = 0; g < top; g++) if (ren[g] === 0) { ren[g] = from.length; from.push(anyNew ? -1 : g); }
+    for (let t = 0; t < nt; t++) out[t] = ren[out[t]];
+    if (anyNew) { const tally = from.map(() => new Map()); for (let t = 0; t < nt; t++) if (lab[t] >= 0) { const m = tally[out[t]]; m.set(lab[t], (m.get(lab[t]) || 0) + A[t]); } tally.forEach((m, g) => { let bl = 0; for (const [l, a] of m) if (a > bl) { bl = a; from[g] = l; } }); }
+    const seg = bordersFromGroups(P, I, out);
+    seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[out[t]] += A[t];
+    if (opts.hard) { seg.hard = new Uint8Array(nt); for (let t = 0; t < nt; t++) if (src[t] >= 0 && opts.hard[src[t]]) seg.hard[t] = 1; }
+    if (opts.levels) seg.levels = opts.levels;
+    seg.from = from; seg.carried = true;
+    return seg;
   }
 
   /* ---------- curved cuts along a border ----------
@@ -8423,7 +8645,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh, segmentSections, explodePlan, explodeAt, explodeMates, castFirst, surfaceSamples,
+    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh, segmentSections, explodePlan, explodeAt, explodeMates, castFirst, surfaceSamples, inheritTriangles, carryRegions, trimTongues,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
