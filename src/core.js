@@ -3232,6 +3232,10 @@ const KMCore = (() => {
       const setLab = new Map(), setBest = new Map(); let extra = count0;
       const roots = new Set(); for (let t = 0; t < nt; t++) roots.add(find(t));
       for (const r of roots) { const s = sf(r); if (lab[r] < 0) continue; const rank = loose(r) ? area[r] : Infinity; if (!(setBest.get(s) >= rank)) { setBest.set(s, rank); setLab.set(s, lab[r]); } }
+      // (1.96) a region the cut split into two big runs (a U cut across its arms, a cape across the body) is a region
+      // per run: the biggest keeps the old label, the others get new ones (`from` still names the old region)
+      { const setArea = new Map(); for (const r of roots) { const s = sf(r); setArea.set(s, (setArea.get(s) || 0) + area[r]); }
+        const taken = new Set(); for (const [s, l] of [...setLab].sort((a, b) => setArea.get(b[0]) - setArea.get(a[0]))) { if (taken.has(l)) setLab.set(s, extra++); else taken.add(l); } }
       for (const r of roots) { const s = sf(r); if (!setLab.has(s)) setLab.set(s, extra++); }
       for (let t = 0; t < nt; t++) out[t] = setLab.get(sf(find(t)));
       unpinchGroups(P, I, out);
@@ -5073,7 +5077,7 @@ const KMCore = (() => {
         c.cfg = lcfg;
         c.keys = !own || cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = f.fr.F !== lf.F ? [] : markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); /* (marks were laid out in the line's own frame: none on a face worked in another) */ c.plugs = own && (cfg.type === 'plug' || per.inset) ? (per.plugs || []).filter(q => q.ok) : [];
         c.bossUsed = null;
-        if (joints === 'boss' && c.bossPlan && f === c.plain) { c.plugs = c.bossPlan.plugs; c.cfg = c.bossPlan.cfg; c.bossUsed = c.bossPlan; }
+        if (joints === 'boss' && c.bossPlan && f === c.plain) { c.plugs = c.bossPlan.plugs; c.cfg = c.bossPlan.cfg; c.bossUsed = c.bossPlan; c.marks = []; } // (a boss covers the face: no joint number under it)
         c.joined = c.keys.length + c.plugs.length;
       };
       c.tiny = !!per.tiny; c.way = null; c.bossPlan = null;
@@ -5208,7 +5212,7 @@ const KMCore = (() => {
         const sig = plan.map(x => x.join()).join() + '|' + caps.map(c => (c.way ? 1 : 0)).join('');
         if (sig === before || !plan.some(x => x[0] !== 'plain' || x[1] !== 'none')) { if (bossAll) break; continue; }
         before = sig;
-        try { done = attempt(plan, false); } catch (e) { done = soft(e); }
+        try { done = attempt(plan, false); } catch (e) { done = !e.code && plan.some(x => x[1] === 'boss') ? false : soft(e); } // (a boss plan that didn't seal is a failed plan: the later plans still run)
         if (done) break;
       }
       if (!done) caps.forEach(c => { c.way = null; c.wayOff = null; });
@@ -6790,9 +6794,15 @@ const KMCore = (() => {
           // (1.96) a steep draft moves the top in by millimetres, and a ring of many short edges moved in point by point
           // folds at every wiggle: the top is the base drawn in towards the plug's middle instead (the same shape,
           // smaller, at least the draft asked at its nearest point), where the base can be seen whole from there
-          const sc = Math.max(0.3, 1 - depth * tanS / best.inradius), fb = flatOf(base);
-          const t2 = base.map(q => [best.x + (q[0] - best.x) * sc, best.y + (q[1] - best.y) * sc]);
-          if (t2.every(q => pointInRing(fb, q[0], q[1]))) { top = t2; floor = t2.map((q, i) => [q[0] + mouth[i][0] - base[i][0], q[1] + mouth[i][1] - base[i][1]]); }
+          // (each wall moves in by its line's distance from the middle × (1 − scale), so the scale comes from the
+          // nearest wall line, not the inradius: on an L or a U the inside corner's walls pass much nearer the middle;
+          // where no scale of at least 0.3 gives every wall its draft, the plug is made shallower below)
+          let hmin = Infinity;
+          for (let i = 0; i < base.length; i++) { const a = base[i], b = base[(i + 1) % base.length], ex = b[0] - a[0], ey = b[1] - a[1], L = Math.hypot(ex, ey); if (L < 1e-9) continue; hmin = Math.min(hmin, ((best.x - a[0]) * -ey + (best.y - a[1]) * ex) / L); }
+          if (hmin > 0 && 1 - depth * tanS / hmin < 0.3 && 0.7 * hmin / tanS >= 1) depth = 0.7 * hmin / tanS; // (as deep as a top three tenths the size allows)
+          const sc = hmin > 0 ? 1 - depth * tanS / hmin : -1, fb = flatOf(base);
+          const t2 = sc >= 0.3 - 1e-9 ? base.map(q => [best.x + (q[0] - best.x) * sc, best.y + (q[1] - best.y) * sc]) : null;
+          if (t2 && t2.every(q => pointInRing(fb, q[0], q[1]))) { top = t2; floor = t2.map((q, i) => [q[0] + mouth[i][0] - base[i][0], q[1] + mouth[i][1] - base[i][1]]); }
         }
         if (ringOk(top) && ringOk(floor)) { fine = true; break; }
         depth *= 0.7;
@@ -7319,7 +7329,7 @@ const KMCore = (() => {
     const fmt1 = (v) => (Math.round(v * 10) / 10).toString();
     const byJoint = new Map();
     parts.forEach((p, i) => { for (const j of p.joints || []) { if (!byJoint.has(j.id)) byJoint.set(j.id, []); byJoint.get(j.id).push(i); } });
-    const kindName = { peg: 'pegs', dowel: 'dowels', magnet: 'magnets', plug: 'plug', none: 'no keys' };
+    const kindName = { peg: 'pegs', dowel: 'dowels', magnet: 'magnets', plug: 'plug', boss: 'bosses', none: 'no keys' };
     const pictures = parts.some(p => p.image);
     const rows = parts.map((p, i) => {
       const b = bounds(p.positions), joints = (p.joints || []).map(j => { const others = (byJoint.get(j.id) || []).filter(k => k !== i).map(k => esc(parts[k].name)); return `${j.number != null ? `<b>№ ${esc(j.number)}</b> ` : ''}${others.length ? 'with ' + others.join(', ') : 'with another part'}${j.type ? ` (${kindName[j.type] || esc(j.type)}${j.keys ? `, ${j.keys}` : ''})` : ''}`; });
@@ -8379,6 +8389,27 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
         for (const v of par.keys()) { const pt = patch.get(find(v)); if (!pt) continue; const h = P[3 * v] * pt.n[0] + P[3 * v + 1] * pt.n[1] + P[3 * v + 2] * pt.n[2]; if (h < pt.lo) pt.lo = h; if (h > pt.hi) pt.hi = h; }
         for (const pt of patch.values()) if (pt.a >= 0.05 * q.a[0]) deep = Math.max(deep, pt.hi - pt.lo);
       }
+      // (1.96) and how far either piece reaches past the joint within its outline: a peg, a dowel's boss or a plug
+      // stands out of one piece into the other, and shares no corner with it (the fit gap), so the shared faces alone
+      // read a keyed joint as flat; capped at the joint's own width, so a limb beside it isn't counted
+      {
+        const nn = g.map(x => x / L), h0 = c[0] * nn[0] + c[1] * nn[1] + c[2] * nn[2];
+        const ax = Math.abs(nn[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], b0 = cross3(nn, ax), bl = Math.hypot(b0[0], b0[1], b0[2]), bu = b0.map(x => x / bl), bv = cross3(nn, bu);
+        let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+        for (const v of q.pts) { const x = P[3 * v], y = P[3 * v + 1], z = P[3 * v + 2], a = x * bu[0] + y * bu[1] + z * bu[2], b = x * bv[0] + y * bv[1] + z * bv[2]; if (a < u0) u0 = a; if (a > u1) u1 = a; if (b < v0) v0 = b; if (b > v1) v1 = b; }
+        const span = Math.max(u1 - u0, v1 - v0), mg = 0.02 * span;
+        let reach = 0;
+        for (const [pi, sgn] of [[q.i, 1], [q.j, -1]]) {
+          const Q = pieces[pi].P;
+          for (let v = 0; v < Q.length; v += 3) {
+            const x = Q[v], y = Q[v + 1], z = Q[v + 2], a = x * bu[0] + y * bu[1] + z * bu[2];
+            if (a < u0 - mg || a > u1 + mg) continue;
+            const b = x * bv[0] + y * bv[1] + z * bv[2]; if (b < v0 - mg || b > v1 + mg) continue;
+            const e = sgn * (x * nn[0] + y * nn[1] + z * nn[2] - h0); if (e > reach) reach = e;
+          }
+        }
+        deep = Math.max(deep, Math.min(reach, span));
+      }
       mates.push({ i: q.i, j: q.j, pts: q.pts, centre: c, depth: deep, n: g.map(x => x / L), area: tri > 0 ? tri / 2 : Math.PI * Math.sqrt(Math.max(0, eig[0].l * eig[1].l)) * 2 });
     }
     return mates;
@@ -8621,6 +8652,20 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     for (let i = 0; i < n; i++) if (pieces[i].parent < 0) planPiece(i);
     for (let i = 0; i < n; i++) if (pieces[i].parent < 0) for (const j of subtree(i)) out.order.push(j);
     if (!quick) for (const i of out.order) replan(i);
+    // (1.96) a dowel pin (no joint shared with anything, no pull) sits in a hole in each of two pieces: it goes with the
+    // moving piece whose bounds it overlaps most, at half its pace and from its parent, so it slides out of both holes
+    // along the joint instead of out through the pieces' walls
+    const overlap = (a, b) => { let v = 1; for (let k = 0; k < 3; k++) { const d = Math.min(a.max[k], b.max[k]) - Math.max(a.min[k], b.min[k]); if (!(d > 0)) return 0; v *= d; } return v; };
+    for (let i = 0; i < n; i++) {
+      const p = pieces[i]; if (p.parent >= 0 || p.mates.length || p.pull || p.kids.length) continue;
+      let q = -1, best = 0;
+      for (let j = 0; j < n; j++) { if (j === i || pieces[j].parent < 0 || !pieces[j].total) continue; const o = overlap(p.b, pieces[j].b); if (o > best) { best = o; q = j; } }
+      if (q < 0) continue;
+      const pq = pieces[q];
+      p.parent = pq.parent; pq.parent >= 0 && pieces[pq.parent].kids.push(i);
+      p.legs = pq.legs.map(l => ({ d: l.d.slice(), len: 0.5 * l.len })); p.start = pq.start; p.total = 0.5 * pq.total;
+      out.order.splice(out.order.indexOf(i), 1); out.order.push(i); // (after its new parent)
+    }
     out.parts = pieces.map(p => ({ parent: p.parent, root: p.root, start: p.start, total: p.total, legs: p.legs.map(l => ({ d: l.d.slice(), len: l.len })), mates: p.mates.map(e => e.to) }));
     return out;
   }

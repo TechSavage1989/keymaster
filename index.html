@@ -566,7 +566,7 @@ select.sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px
         <path d="M2 14h24" stroke="#F2B705" stroke-width="2.4" stroke-dasharray="3.5 2"/>
       </svg>
       <span>Keymaster</span>
-      <span class="version" id="appVersion" title="Keymaster version 1.96, build e0d9c4. After an update, refresh the page and check this changes.">v1.96 · e0d9c4</span>
+      <span class="version" id="appVersion" title="Keymaster version 1.96, build e17e31. After an update, refresh the page and check this changes.">v1.96 · e17e31</span>
     </div>
     <div class="bar-mid">
       <button class="btn" id="openBtn" title="Open (Ctrl+O)">Open model</button>
@@ -3967,6 +3967,10 @@ const KMCore = (() => {
       const setLab = new Map(), setBest = new Map(); let extra = count0;
       const roots = new Set(); for (let t = 0; t < nt; t++) roots.add(find(t));
       for (const r of roots) { const s = sf(r); if (lab[r] < 0) continue; const rank = loose(r) ? area[r] : Infinity; if (!(setBest.get(s) >= rank)) { setBest.set(s, rank); setLab.set(s, lab[r]); } }
+      // (1.96) a region the cut split into two big runs (a U cut across its arms, a cape across the body) is a region
+      // per run: the biggest keeps the old label, the others get new ones (`from` still names the old region)
+      { const setArea = new Map(); for (const r of roots) { const s = sf(r); setArea.set(s, (setArea.get(s) || 0) + area[r]); }
+        const taken = new Set(); for (const [s, l] of [...setLab].sort((a, b) => setArea.get(b[0]) - setArea.get(a[0]))) { if (taken.has(l)) setLab.set(s, extra++); else taken.add(l); } }
       for (const r of roots) { const s = sf(r); if (!setLab.has(s)) setLab.set(s, extra++); }
       for (let t = 0; t < nt; t++) out[t] = setLab.get(sf(find(t)));
       unpinchGroups(P, I, out);
@@ -5808,7 +5812,7 @@ const KMCore = (() => {
         c.cfg = lcfg;
         c.keys = !own || cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = f.fr.F !== lf.F ? [] : markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); /* (marks were laid out in the line's own frame: none on a face worked in another) */ c.plugs = own && (cfg.type === 'plug' || per.inset) ? (per.plugs || []).filter(q => q.ok) : [];
         c.bossUsed = null;
-        if (joints === 'boss' && c.bossPlan && f === c.plain) { c.plugs = c.bossPlan.plugs; c.cfg = c.bossPlan.cfg; c.bossUsed = c.bossPlan; }
+        if (joints === 'boss' && c.bossPlan && f === c.plain) { c.plugs = c.bossPlan.plugs; c.cfg = c.bossPlan.cfg; c.bossUsed = c.bossPlan; c.marks = []; } // (a boss covers the face: no joint number under it)
         c.joined = c.keys.length + c.plugs.length;
       };
       c.tiny = !!per.tiny; c.way = null; c.bossPlan = null;
@@ -5943,7 +5947,7 @@ const KMCore = (() => {
         const sig = plan.map(x => x.join()).join() + '|' + caps.map(c => (c.way ? 1 : 0)).join('');
         if (sig === before || !plan.some(x => x[0] !== 'plain' || x[1] !== 'none')) { if (bossAll) break; continue; }
         before = sig;
-        try { done = attempt(plan, false); } catch (e) { done = soft(e); }
+        try { done = attempt(plan, false); } catch (e) { done = !e.code && plan.some(x => x[1] === 'boss') ? false : soft(e); } // (a boss plan that didn't seal is a failed plan: the later plans still run)
         if (done) break;
       }
       if (!done) caps.forEach(c => { c.way = null; c.wayOff = null; });
@@ -7525,9 +7529,15 @@ const KMCore = (() => {
           // (1.96) a steep draft moves the top in by millimetres, and a ring of many short edges moved in point by point
           // folds at every wiggle: the top is the base drawn in towards the plug's middle instead (the same shape,
           // smaller, at least the draft asked at its nearest point), where the base can be seen whole from there
-          const sc = Math.max(0.3, 1 - depth * tanS / best.inradius), fb = flatOf(base);
-          const t2 = base.map(q => [best.x + (q[0] - best.x) * sc, best.y + (q[1] - best.y) * sc]);
-          if (t2.every(q => pointInRing(fb, q[0], q[1]))) { top = t2; floor = t2.map((q, i) => [q[0] + mouth[i][0] - base[i][0], q[1] + mouth[i][1] - base[i][1]]); }
+          // (each wall moves in by its line's distance from the middle × (1 − scale), so the scale comes from the
+          // nearest wall line, not the inradius: on an L or a U the inside corner's walls pass much nearer the middle;
+          // where no scale of at least 0.3 gives every wall its draft, the plug is made shallower below)
+          let hmin = Infinity;
+          for (let i = 0; i < base.length; i++) { const a = base[i], b = base[(i + 1) % base.length], ex = b[0] - a[0], ey = b[1] - a[1], L = Math.hypot(ex, ey); if (L < 1e-9) continue; hmin = Math.min(hmin, ((best.x - a[0]) * -ey + (best.y - a[1]) * ex) / L); }
+          if (hmin > 0 && 1 - depth * tanS / hmin < 0.3 && 0.7 * hmin / tanS >= 1) depth = 0.7 * hmin / tanS; // (as deep as a top three tenths the size allows)
+          const sc = hmin > 0 ? 1 - depth * tanS / hmin : -1, fb = flatOf(base);
+          const t2 = sc >= 0.3 - 1e-9 ? base.map(q => [best.x + (q[0] - best.x) * sc, best.y + (q[1] - best.y) * sc]) : null;
+          if (t2 && t2.every(q => pointInRing(fb, q[0], q[1]))) { top = t2; floor = t2.map((q, i) => [q[0] + mouth[i][0] - base[i][0], q[1] + mouth[i][1] - base[i][1]]); }
         }
         if (ringOk(top) && ringOk(floor)) { fine = true; break; }
         depth *= 0.7;
@@ -8054,7 +8064,7 @@ const KMCore = (() => {
     const fmt1 = (v) => (Math.round(v * 10) / 10).toString();
     const byJoint = new Map();
     parts.forEach((p, i) => { for (const j of p.joints || []) { if (!byJoint.has(j.id)) byJoint.set(j.id, []); byJoint.get(j.id).push(i); } });
-    const kindName = { peg: 'pegs', dowel: 'dowels', magnet: 'magnets', plug: 'plug', none: 'no keys' };
+    const kindName = { peg: 'pegs', dowel: 'dowels', magnet: 'magnets', plug: 'plug', boss: 'bosses', none: 'no keys' };
     const pictures = parts.some(p => p.image);
     const rows = parts.map((p, i) => {
       const b = bounds(p.positions), joints = (p.joints || []).map(j => { const others = (byJoint.get(j.id) || []).filter(k => k !== i).map(k => esc(parts[k].name)); return `${j.number != null ? `<b>№ ${esc(j.number)}</b> ` : ''}${others.length ? 'with ' + others.join(', ') : 'with another part'}${j.type ? ` (${kindName[j.type] || esc(j.type)}${j.keys ? `, ${j.keys}` : ''})` : ''}`; });
@@ -9114,6 +9124,27 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
         for (const v of par.keys()) { const pt = patch.get(find(v)); if (!pt) continue; const h = P[3 * v] * pt.n[0] + P[3 * v + 1] * pt.n[1] + P[3 * v + 2] * pt.n[2]; if (h < pt.lo) pt.lo = h; if (h > pt.hi) pt.hi = h; }
         for (const pt of patch.values()) if (pt.a >= 0.05 * q.a[0]) deep = Math.max(deep, pt.hi - pt.lo);
       }
+      // (1.96) and how far either piece reaches past the joint within its outline: a peg, a dowel's boss or a plug
+      // stands out of one piece into the other, and shares no corner with it (the fit gap), so the shared faces alone
+      // read a keyed joint as flat; capped at the joint's own width, so a limb beside it isn't counted
+      {
+        const nn = g.map(x => x / L), h0 = c[0] * nn[0] + c[1] * nn[1] + c[2] * nn[2];
+        const ax = Math.abs(nn[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], b0 = cross3(nn, ax), bl = Math.hypot(b0[0], b0[1], b0[2]), bu = b0.map(x => x / bl), bv = cross3(nn, bu);
+        let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+        for (const v of q.pts) { const x = P[3 * v], y = P[3 * v + 1], z = P[3 * v + 2], a = x * bu[0] + y * bu[1] + z * bu[2], b = x * bv[0] + y * bv[1] + z * bv[2]; if (a < u0) u0 = a; if (a > u1) u1 = a; if (b < v0) v0 = b; if (b > v1) v1 = b; }
+        const span = Math.max(u1 - u0, v1 - v0), mg = 0.02 * span;
+        let reach = 0;
+        for (const [pi, sgn] of [[q.i, 1], [q.j, -1]]) {
+          const Q = pieces[pi].P;
+          for (let v = 0; v < Q.length; v += 3) {
+            const x = Q[v], y = Q[v + 1], z = Q[v + 2], a = x * bu[0] + y * bu[1] + z * bu[2];
+            if (a < u0 - mg || a > u1 + mg) continue;
+            const b = x * bv[0] + y * bv[1] + z * bv[2]; if (b < v0 - mg || b > v1 + mg) continue;
+            const e = sgn * (x * nn[0] + y * nn[1] + z * nn[2] - h0); if (e > reach) reach = e;
+          }
+        }
+        deep = Math.max(deep, Math.min(reach, span));
+      }
       mates.push({ i: q.i, j: q.j, pts: q.pts, centre: c, depth: deep, n: g.map(x => x / L), area: tri > 0 ? tri / 2 : Math.PI * Math.sqrt(Math.max(0, eig[0].l * eig[1].l)) * 2 });
     }
     return mates;
@@ -9356,6 +9387,20 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     for (let i = 0; i < n; i++) if (pieces[i].parent < 0) planPiece(i);
     for (let i = 0; i < n; i++) if (pieces[i].parent < 0) for (const j of subtree(i)) out.order.push(j);
     if (!quick) for (const i of out.order) replan(i);
+    // (1.96) a dowel pin (no joint shared with anything, no pull) sits in a hole in each of two pieces: it goes with the
+    // moving piece whose bounds it overlaps most, at half its pace and from its parent, so it slides out of both holes
+    // along the joint instead of out through the pieces' walls
+    const overlap = (a, b) => { let v = 1; for (let k = 0; k < 3; k++) { const d = Math.min(a.max[k], b.max[k]) - Math.max(a.min[k], b.min[k]); if (!(d > 0)) return 0; v *= d; } return v; };
+    for (let i = 0; i < n; i++) {
+      const p = pieces[i]; if (p.parent >= 0 || p.mates.length || p.pull || p.kids.length) continue;
+      let q = -1, best = 0;
+      for (let j = 0; j < n; j++) { if (j === i || pieces[j].parent < 0 || !pieces[j].total) continue; const o = overlap(p.b, pieces[j].b); if (o > best) { best = o; q = j; } }
+      if (q < 0) continue;
+      const pq = pieces[q];
+      p.parent = pq.parent; pq.parent >= 0 && pieces[pq.parent].kids.push(i);
+      p.legs = pq.legs.map(l => ({ d: l.d.slice(), len: 0.5 * l.len })); p.start = pq.start; p.total = 0.5 * pq.total;
+      out.order.splice(out.order.indexOf(i), 1); out.order.push(i); // (after its new parent)
+    }
     out.parts = pieces.map(p => ({ parent: p.parent, root: p.root, start: p.start, total: p.total, legs: p.legs.map(l => ({ d: l.d.slice(), len: l.len })), mates: p.mates.map(e => e.to) }));
     return out;
   }
@@ -9495,8 +9540,11 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   // wandered over the capelet. Kept through a scaling, a turn or a move; sculpting, repair and reducing start afresh.
   let findAfresh = false; // while Split into parts runs: each piece's parts are found on the piece itself
   function inheritFrom(parent, made) { if (!findAfresh) for (const q of made) if (q.kind !== 'pin' && !q.shape) q.from = { part: parent, src: null, f: 1 }; return made; }
-  function srcOf(p) { if (!p.from.src) p.from.src = K.inheritTriangles(p.from.part.positions, p.from.part.indices, p.positions, p.indices); return p.from.src; }
-  function keptFrom(p, factor = 1) { return p.from ? { part: p.from.part, src: srcOf(p), f: (p.from.f || 1) * factor } : null; } // before the piece's positions change
+  // (1.96) which of the part's triangles each of a piece's triangles is, worked out the first time its regions are
+  // asked for, from the piece's positions as it was cut (`from.pos`, kept through turns and scalings: the triangle
+  // order never changes, and the match is bit for bit)
+  function srcOf(p) { if (!p.from.src) { p.from.src = K.inheritTriangles(p.from.part.positions, p.from.part.indices, p.from.pos || p.positions, p.indices); p.from.pos = null; } return p.from.src; }
+  function keptFrom(p, factor = 1) { return p.from ? { part: p.from.part, src: p.from.src || null, pos: p.from.src ? null : p.from.pos || p.positions, f: (p.from.f || 1) * factor } : null; } // before the piece's positions change
   function regionsKnown(p) { if (p.from) return true; for (const k of regionCache.keys()) if (k.startsWith(`${p.id}:`)) return true; return false; }
   function carryOpts(p, s0) { const f = p.from.f || 1; return { areas: Array.from(s0.areas, a => a * f * f), hard: s0.hard || null, levels: s0.levels || null, count: s0.count }; }
   // (1.82) The parts of a part are found on the surface as it was before any even scaling or moving (`p.analysis`:
@@ -9762,20 +9810,47 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   // parts are intersecting when exploded"). The plan is worked out once per set of parts: at once for a small
   // model; for a big one a quick plan (the tree, each piece straight along its joint) shows while the full one is
   // worked out in the worker, and the view is set again when it arrives.
-  let explodeCache = null;
+  // (1.96) Plans are kept for the last few sets of parts, matched by each part's positions and pull, so an undo or a
+  // redo finds its plan again; the full plan is worked out at once only for a few small pieces, else the quick plan
+  // shows and the worker works out the full one, one plan at a time and only for the latest parts.
+  let explodeCache = null, explodeBusy = false;
+  const explodeKept = [];
+  const explodeSig = (parts) => parts.flatMap(p => [p.positions, p.pull]);
   function explodeState() {
     const parts = state.parts, c = explodeCache;
     if (c && c.parts === parts && c.sig.length === 2 * parts.length && parts.every((p, i) => c.sig[2 * i] === p.positions && c.sig[2 * i + 1] === p.pull)) return c;
+    const sig = explodeSig(parts);
+    const kept = explodeKept.find(k => k.sig.length === sig.length && k.sig.every((x, i) => x === sig[i]));
+    if (kept) {
+      if (kept.parts !== parts) { kept.parts = parts; kept.index = new Map(parts.map((p, i) => [p.id, i])); }
+      explodeCache = kept;
+      if (!kept.full) queueFullExplode();
+      return kept;
+    }
     const data = parts.map(p => ({ positions: p.positions, indices: p.indices, pull: p.pull, volume: p.volume }));
-    const tris = parts.reduce((n, p) => n + p.tris, 0), now = tris <= 20000 || parts.length < 2;
-    const next = explodeCache = { parts, sig: parts.flatMap(p => [p.positions, p.pull]), index: new Map(parts.map((p, i) => [p.id, i])), plan: null, at: null, atK: -1, full: now };
+    const tris = parts.reduce((n, p) => n + p.tris, 0), now = parts.length < 2 || (tris <= 20000 && parts.length <= 6);
+    const next = explodeCache = { parts, sig, index: new Map(parts.map((p, i) => [p.id, i])), plan: null, at: null, atK: -1, full: now };
+    explodeKept.unshift(next); if (explodeKept.length > 3) explodeKept.length = 3;
     try { next.plan = K.explodePlan(data, now ? {} : { quick: true }); } catch (err) { next.plan = null; next.full = true; }
-    if (!now) coreTask('explodePlan', [data, {}]).then((plan) => {
-      if (explodeCache !== next || !plan || !plan.parts || plan.parts.length !== parts.length) return;
-      next.plan = plan; next.at = null; next.full = true;
-      if (state.explode > 0) applyExplode();
-    }).catch(() => { next.full = true; });
+    if (!now) queueFullExplode();
     return next;
+  }
+  // the full plan for the latest parts, in the worker; while one is being worked out no other is sent, and when it
+  // ends the latest parts are planned if they changed meanwhile
+  function queueFullExplode() {
+    if (explodeBusy) return;
+    const next = explodeCache;
+    if (!next || next.full) return;
+    explodeBusy = true;
+    const parts = next.parts, data = parts.map(p => ({ positions: p.positions, indices: p.indices, pull: p.pull, volume: p.volume }));
+    coreTask('explodePlan', [data, {}]).then((plan) => {
+      if (next.full || !plan || !plan.parts || plan.parts.length !== parts.length) return;
+      next.plan = plan; next.at = null; next.atK = -1; next.full = true;
+      if (explodeCache === next && state.explode > 0) applyExplode();
+    }).catch(() => { next.full = true; }).finally(() => {
+      explodeBusy = false;
+      if (explodeCache && !explodeCache.full) queueFullExplode();
+    });
   }
   // where a part stands at explode amount k
   function explodeOffset(p, k) {
@@ -11104,8 +11179,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   }
 
   /* ---------------- model operations ---------------- */
-  function transformAll(fn, label, factor = 1, even = 0) { // even: the factor of an even scaling (or 1 for a move), which keeps the parts' analysis
-    const parts = state.parts.map(p => { const a = analysisOf(p); return makePart({ ...p, positions: K.transformPositions(p.positions, fn), indices: p.indices.slice(), analysis: even ? { P: a.P, f: a.f * even } : null, from: keptFrom(p, factor) }); }); // new indices too: core keeps what it learns of a mesh (centroids, edge lengths) by its index array
+  function transformAll(fn, label, factor = 1, even = 0, keepFrom = true) { // even: the factor of an even scaling (or 1 for a move), which keeps the parts' analysis; keepFrom: false for an uneven stretch, after which a piece's regions are found afresh
+    const parts = state.parts.map(p => { const a = analysisOf(p); return makePart({ ...p, positions: K.transformPositions(p.positions, fn), indices: p.indices.slice(), analysis: even ? { P: a.P, f: a.f * even } : null, from: keepFrom ? keptFrom(p, factor) : null }); }); // new indices too: core keeps what it learns of a mesh (centroids, edge lengths) by its index array
     parts.scale = modelScale() * factor;
     commit(parts, label);
     state.selectedId = null;
@@ -11122,7 +11197,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   // Stretch along the axes on their own (a size typed with the lock open); the scale % follows the volume
   function scaleAxes(f) {
     if (!f.every(x => x > 0 && isFinite(x))) return;
-    transformAll((x, y, z) => [x * f[0], y * f[1], z * f[2]], 'the size change', Math.cbrt(f[0] * f[1] * f[2]));
+    const same = f[0] === f[1] && f[1] === f[2]; // (1.96) an uneven stretch changes each region's area differently: the pieces' regions start afresh
+    transformAll((x, y, z) => [x * f[0], y * f[1], z * f[2]], 'the size change', Math.cbrt(f[0] * f[1] * f[2]), same ? f[0] : 0, same);
     fitKeySizeToModel();
     renderInspector(); syncScaleBoxes();
   }
@@ -11278,6 +11354,11 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   function partPicture(p) { return picture([{ p, at: [0, 0, 0] }], 320, 240); }
   // The exploded model, as the exploded view at a little over half way
   function assemblyPicture(list) {
+    // (1.96) the full plan, never the quick one a big model shows while the worker works it out
+    if (state.parts.length > 1) {
+      const c = explodeState();
+      if (!c.full) { try { c.plan = K.explodePlan(state.parts.map(p => ({ positions: p.positions, indices: p.indices, pull: p.pull, volume: p.volume })), {}); c.full = true; c.at = null; c.atK = -1; } catch (err) { /* keep the quick plan */ } }
+    }
     const items = list.map(p => ({ p, at: explodeOffset(p, 0.6) }));
     return picture(items, 800, 560);
   }
@@ -13394,7 +13475,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     if (regionCache.has(key)) return regionCache.get(key);
     if (p.from) { // (1.96) a piece of a cut: the regions of the part it was cut from, carried over
       const s0 = await prepareRegions(p.from.part);
-      if (!p.from.src) p.from.src = await coreTask('inheritTriangles', [p.from.part.positions, p.from.part.indices, p.positions, p.indices]);
+      if (!p.from.src) { p.from.src = await coreTask('inheritTriangles', [p.from.part.positions, p.from.part.indices, p.from.pos || p.positions, p.indices]); p.from.pos = null; }
       const carried = await coreTask('carryRegions', [p.positions, p.indices, s0.groupOf, p.from.src, carryOpts(p, s0)]);
       regionCache.set(key, carried);
       return carried;
@@ -13493,6 +13574,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
         }
       }
     }
+    const removing = !!prev && prev.regions.includes(g); // (a Shift-click that takes a region out only ever takes away)
     let regions = prev ? prev.regions.filter(x => x !== g) : []; // a region already in the pick comes out again
     if (!prev || regions.length === prev.regions.length) {
       if (prev && prev.regions.length) { // a Shift-click further along a limb fills in the regions between (the owner's shoulder, then hand)
@@ -13502,8 +13584,8 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
       regions.push(g);
     }
     if (!regions.length) { renderPick(); return; }
-    { // (1.96) what hangs only on the pick goes with it: left behind it would be a loose bit of the other piece (the end of a cross below the fist that holds it). For one clicked region only what is small beside it, so an arm doesn't take its hand
-      const enclosed = enclosedRegions(seg, regions, regions.length > 1 ? 1 : 0.25); if (enclosed.length) { regions.push(...enclosed); toast(regions.length - enclosed.length > 1 ? `Filled in ${enclosed.length === 1 ? 'a region' : `${enclosed.length} regions`} the pick surrounds.` : `Took in ${enclosed.length === 1 ? 'a small region' : `${enclosed.length} small regions`} that only this one holds.`); } }
+    if (!removing) { // (1.96) what hangs only on the pick goes with it: left behind it would be a loose bit of the other piece (the end of a cross below the fist that holds it). For one clicked region only what is small beside it, so an arm doesn't take its hand
+      const enclosed = regions.length > 1 ? enclosedRegions(seg, regions, 1) : enclosedRegions(seg, regions, 0.25, 0.01); if (enclosed.length) { regions.push(...enclosed); toast(regions.length - enclosed.length > 1 ? `Filled in ${enclosed.length === 1 ? 'a region' : `${enclosed.length} regions`} the pick surrounds.` : `Took in ${enclosed.length === 1 ? 'a small region' : `${enclosed.length} small regions`} that only this one holds.`); } }
     const loops = K.groupLoops(p.positions, p.indices, seg, regions);
     if (!loops.length) { pickLoose(p, seg, regions); return Promise.resolve(); }
     return pickLoops(p, loops, { regions, seg });
@@ -13512,18 +13594,29 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
   // (the owner: pick parts at Balanced, then fine-tune at Fine) brings it back as a selection the new regions add to
   // Regions the pick closes round: every neighbour of theirs is picked (or is another such region), and together
   // they are smaller than the pick (a hole in a selection fills, as paint fill in Bambu Studio does)
-  function enclosedRegions(seg, regions, maxFrac = 1) {
+  function enclosedRegions(seg, regions, maxFrac = 1, maxShare = 1) {
     const picked = new Set(regions), nb = new Map(), b = seg.borders;
+    if (!seg.areas) return [];
     for (let i = 0; i < b.length; i += 4) { const x = seg.groupOf[b[i]], y = seg.groupOf[b[i + 1]]; if (x === y) continue; if (!nb.has(x)) nb.set(x, new Set()); if (!nb.has(y)) nb.set(y, new Set()); nb.get(x).add(y); nb.get(y).add(x); }
-    let area = 0; for (const g of regions) area += seg.areas ? seg.areas[g] || 0 : 0;
-    // the unpicked regions, grouped by touching each other; a group touching only the pick is enclosed
-    const seen = new Set(), out = [];
+    let area = 0, total = 0; for (const g of regions) area += seg.areas[g] || 0;
+    for (const a of seg.areas) total += a || 0;
+    // the unpicked regions, grouped by touching each other (across anything but the pick); (1.96) the biggest group is
+    // the rest of the part and always stays, and the others are taken smallest first while together they stay under
+    // `maxFrac` of the pick and `maxShare` of the whole surface (a click on a torso never takes the head or the arms)
+    const seen = new Set(), groups = [];
     for (const [g] of nb) {
       if (picked.has(g) || seen.has(g)) continue;
-      const grp = [], stack = [g]; let open = false, ga = 0; seen.add(g);
-      while (stack.length) { const x = stack.pop(); grp.push(x); ga += seg.areas ? seg.areas[x] || 0 : 0; for (const y of nb.get(x) || []) { if (picked.has(y)) continue; if (!seen.has(y)) { seen.add(y); stack.push(y); } } }
-      for (const x of grp) for (const y of nb.get(x) || []) if (!picked.has(y) && !grp.includes(y)) open = true;
-      if (!open && seg.areas && ga < area * maxFrac && grp.length < nb.size - regions.length) out.push(...grp);
+      const grp = [], stack = [g]; let ga = 0; seen.add(g);
+      while (stack.length) { const x = stack.pop(); grp.push(x); ga += seg.areas[x] || 0; for (const y of nb.get(x) || []) { if (picked.has(y)) continue; if (!seen.has(y)) { seen.add(y); stack.push(y); } } }
+      groups.push({ grp, ga });
+    }
+    if (groups.length < 2) return [];
+    groups.sort((x, y) => x.ga - y.ga);
+    groups.pop();
+    const out = []; let tot = 0;
+    for (const { grp, ga } of groups) {
+      if (tot + ga >= area * maxFrac || tot + ga >= total * maxShare) break;
+      tot += ga; out.push(...grp);
     }
     return out;
   }
@@ -14221,7 +14314,10 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     }
     if (!pick.result) return;
     const numberedHere = pick.perLoop.some(per => per.marks && per.marks.length) ? state.joint : null;
-    const joints = jointOf(p, { type: state.cfg.type, keys: pick.keys.length + pick.plugs.length, number: numberedHere });
+    // (1.96) the joint as it was made: drafted bosses, plugs (from the cut's edge or set in), or the keys chosen
+    const madeKinds = (pick.result.jointsMade || []).map(j => j && j.kind).filter(Boolean);
+    const type = madeKinds.includes('boss') || pick.perLoop.some(per => per.boss) ? 'boss' : (madeKinds.some(k => k === 'edge' || k === 'skew' || k === 'plug') || pick.plugs.length) && !pick.keys.length ? 'plug' : !madeKinds.length && !pick.keys.length && !pick.plugs.length ? 'none' : state.cfg.type;
+    const joints = jointOf(p, { type, keys: pick.keys.length + pick.plugs.length, number: numberedHere });
     const made = pick.result.parts.map((c, i) => makePart({ name: `${p.name} ${String.fromCharCode(65 + i)}`, color: nextColor(), positions: c.positions, indices: c.indices, pull: c.pull || null, joints }));
     (pick.result.pins || []).forEach((pin, i) => made.push(makePart({ name: `${p.name} pin ${i + 1}`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' })));
     inheritFrom(p, made);

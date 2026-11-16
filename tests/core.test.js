@@ -2125,5 +2125,109 @@ console.log('knife edges after a cut');
   check('a narrow strip bounded by creases is a feature, not a tongue: it stays', ribTop.length > 5 && ribTop.every(t => RG1[t] === 0), { n: ribTop.length, left: ribTop.filter(t => RG1[t] === 0).length });
 }
 
+console.log('\n1.96 review fixes: bosses with joint numbers, drafted tops, explode depth and pins, split regions');
+{
+  // a brace standing at 45° on a slab with a post beside it: the pick's two lines get drafted bosses; with Number the
+  // joints on, the boss used to cover the number's pockets, the cut didn't seal, and every joint was dropped
+  const box = (w, d, h, pos, rot = [0, 0, 0]) => ({ kind: 'cube', w, d, h, edge: 'sharp', pos, rot });
+  const slab = K.shapeMesh({ kind: 'cube', w: 60, d: 40, h: 10 });
+  let cur = { positions: slab.positions.map((v, i) => (i % 3 === 2 ? v - 5 : v)), indices: slab.indices };
+  cur = K.booleanShape(cur.positions, cur.indices, box(10, 40, 50, [-25, 0, 25]), 'union');
+  cur = K.booleanShape(cur.positions, cur.indices, box(12, 12, 60, [0, 0, 20], [0, -45, 0]), 'union');
+  const sub = K.subdivideMesh(cur.positions, cur.indices, { maxEdge: 2.5 }), P = sub.positions, I = sub.indices, nt = I.length / 3, sel = new Uint8Array(nt);
+  for (let t = 0; t < nt; t++) {
+    const v = [I[3 * t], I[3 * t + 1], I[3 * t + 2]], c = [0, 1, 2].map(k => (P[3 * v[0] + k] + P[3 * v[1] + k] + P[3 * v[2] + k]) / 3);
+    if (c[2] > 1e-6 && c[0] > -20 + 1e-6 && Math.abs(c[1]) <= 8.6 && !v.every(q => Math.abs(P[3 * q + 2]) < 1e-6) && !v.every(q => Math.abs(P[3 * q] + 20) < 1e-6)) sel[t] = 1;
+  }
+  const seg = K.selectionSeg(P, I, sel), lines = K.groupLoops(P, I, seg, [1]), vol = K.volume(P, I);
+  const cfg = { type: 'peg', shape: 'square', length: 6, clearance: 0.2, margin: 1, taper: 10, taperSocket: true, sizeMode: 'auto', sizeMin: 2, pegSide: 'below', perArea: 1, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', sink: 0, sinkTaper: 5, sizeMax: 3, diameter: 3 };
+  const req = { loops: lines, regions: [1], seg, painted: true, cfg, minThickness: 0.8, sink: 0, perArea: 1, smooth: false, numberJoints: true, joint: 7 };
+  const j = K.planJoints(P, I, req), out = K.planPick(P, I, { ...req, planned: j }), r = out.result;
+  check('numbered joints planned on both lines of the brace', j.perLoop.length === 2 && j.perLoop.every(q => (q.marks || []).length > 0), j.perLoop.map(q => (q.marks || []).length));
+  check('with Number the joints on, the drafted bosses are kept (no number under a boss) and the pieces are sealed, unforced', !!r && !out.forced && !out.dropped && r.jointsMade.every(q => q.kind === 'boss') && allClosed(r.parts) && Math.abs(r.parts.reduce((a, q) => a + q.volume, 0) - vol) < 0.02 * vol, { dropped: out.dropped, forced: out.forced, kinds: r && r.jointsMade.map(q => q.kind) });
+}
+{
+  // a steeply drafted plug on an L-shaped face: the top drawn in towards the middle keeps the draft on every wall
+  const block = (pts, z0, z1) => { const pos = [], idx = [], n = pts.length;
+    for (const z of [z0, z1]) for (const [x, y] of pts) pos.push(x, y, z);
+    const c0 = pos.length / 3; pos.push(pts.reduce((s, p) => s + p[0], 0) / n, pts.reduce((s, p) => s + p[1], 0) / n, z0);
+    const c1 = pos.length / 3; pos.push(pos[3 * c0], pos[3 * c0 + 1], z1);
+    for (let i = 0; i < n; i++) { const k = (i + 1) % n; idx.push(i, k, n + k, i, n + k, n + i, c0, k, i, c1, n + i, n + k); }
+    return K.prepareMesh({ positions: new Float32Array(pos), indices: new Uint32Array(idx) }); };
+  const ell = [[0, 0], [24, 0], [24, 8], [8, 8], [8, 24], [0, 24]], m = block(ell, 0, 30);
+  const F = K.frameFromNormal([0, 0, 1], [8, 8, 15]);
+  for (const slope of [45, 55]) {
+    const c = { type: 'plug', margin: 1.2, clearance: 0.2, plugSlope: slope, plugSlopeMax: 64, pegSide: 'below', plugDepthMode: 'set', plugDepth: 3 };
+    const an = K.analyzePlane(m.positions, m.indices, F, c, 40), pl = K.planPlugs(an, c), tanS = Math.tan(slope * Math.PI / 180);
+    let worst = Infinity;
+    for (const q of pl.filter(x => x.ok)) for (let i = 0; i < q.base.length; i++) { const a = q.base[i], b = q.base[(i + 1) % q.base.length], ex = b[0] - a[0], ey = b[1] - a[1], L = Math.hypot(ex, ey); if (L < 1e-6) continue; for (const t of [q.top[i], q.top[(i + 1) % q.base.length]]) worst = Math.min(worst, ((t[0] - a[0]) * -ey + (t[1] - a[1]) * ex) / L / (q.depth * tanS)); }
+    const made = pl.filter(x => x.ok);
+    let sealed = true; if (made.length) { const r = K.cutMesh(m.positions, m.indices, F, { scale: 40, cfg: c, plugs: pl, minThickness: 1.2 }); sealed = allClosed(r.parts); }
+    check(`a ${slope}° plug on an L face: every wall keeps the draft asked, or there is no plug`, sealed && (!made.length || worst > 0.97), { made: made.length, worst, depth: made.map(q => q.depth) });
+  }
+}
+{
+  // a post under a roof, cut flat with two long pegs: the top piece rises clear of its pegs before it turns away
+  const box = (w, d, h, pos) => ({ kind: 'cube', w, d, h, edge: 'sharp', pos, rot: [0, 0, 0] });
+  const slab = K.shapeMesh({ kind: 'cube', w: 240, d: 120, h: 10 });
+  let cur = { positions: slab.positions.map((v, i) => (i % 3 === 2 ? v - 5 : v)), indices: slab.indices };
+  cur = K.booleanShape(cur.positions, cur.indices, box(10, 120, 82, [-115, 0, 41]), 'union');
+  cur = K.booleanShape(cur.positions, cur.indices, box(170, 116, 10, [-30, 0, 77]), 'union');
+  cur = K.booleanShape(cur.positions, cur.indices, box(80, 80, 60, [0, 0, 30]), 'union');
+  const sub = K.subdivideMesh(cur.positions, cur.indices, { maxEdge: 6 }), F = K.frameFromNormal([0, 0, 1], [0, 0, 30.3]);
+  const cfg = cfgOf({ type: 'peg', diameter: 3, length: 9 }), an = K.analyzePlane(sub.positions, sub.indices, F, cfg, 250);
+  let got = null;
+  for (const s of [0, 1, 2, 3]) {
+    const skip = new Set([s]);
+    try { const keys = K.autoPlaceKeys(an, cfg, 2, skip), r = K.cutMesh(sub.positions, sub.indices, F, { scale: 250, cfg, keys, skip, force: true }); if (r.parts.length !== 2) continue; const top = r.parts.find(q => q.side === 'above'); if (K.volume(top.positions, top.indices) < 250000) { got = { r, keys, top }; break; } } catch (e) { /* the next area */ }
+  }
+  if (got) {
+    const body = got.r.parts.find(q => q !== got.top), parts = [{ positions: body.positions, indices: body.indices, pull: [0, 0, -1] }, { positions: got.top.positions, indices: got.top.indices, pull: [0, 0, 1] }];
+    const plan = K.explodePlan(parts), legs = plan.parts[1].legs;
+    const grid = K.rayGrid(got.top.positions, got.top.indices, K.frameFromNormal([0, 0, 1], [0, 0, 0])), F0 = K.frameFromNormal([0, 0, 1], [0, 0, 0]);
+    const inTop = (p) => { const X = p[0] * F0.u[0] + p[1] * F0.u[1] + p[2] * F0.u[2], Y = p[0] * F0.v[0] + p[1] * F0.v[1] + p[2] * F0.v[2], runs = K.solidRuns(grid, X + 1.3e-5, Y + 0.7e-5); for (let i = 0; i < runs.length; i += 2) if (runs[i] + 0.05 <= p[2] && p[2] <= runs[i + 1] - 0.05) return true; return false; };
+    let bad = 0; const B = body.positions;
+    for (const k of [0.1, 0.15, 0.2, 0.3, 0.6]) { const o = K.explodeAt(plan, k)[1]; for (let v = 0; v < B.length / 3; v++) if (inTop([B[3 * v] - o[0], B[3 * v + 1] - o[1], B[3 * v + 2] - o[2]])) bad++; }
+    check('explode: a pegged piece rises past its pegs before it turns, and the pegs never go through it', got.keys.length === 2 && legs[0].d[2] > 0.99 && legs[0].len > 9 && bad === 0, { first: legs[0], bad });
+  } else check('explode: the roofed post cuts with pegs', false);
+}
+{
+  // dowel pins between two halves of a bar: each goes with the moving half at half its pace, out of both holes
+  const bar = K.shapeMesh({ kind: 'cube', w: 30, d: 30, h: 100 }), sub = K.subdivideMesh(bar.positions, bar.indices, { maxEdge: 5 });
+  const cfg = cfgOf({ type: 'dowel', diameter: 4, length: 16 }), F = K.frameFromNormal([0, 0, 1], [0, 0, 10.3]);
+  const an = K.analyzePlane(sub.positions, sub.indices, F, cfg, 100), keys = K.autoPlaceKeys(an, cfg, 2, new Set());
+  const r = K.cutMesh(sub.positions, sub.indices, F, { scale: 100, cfg, keys });
+  const parts = r.parts.map(q => ({ positions: q.positions, indices: q.indices, pull: q.side === 'below' ? [0, 0, -1] : [0, 0, 1] })).concat((r.pins || []).map(q => ({ positions: q.positions, indices: q.indices, pull: null })));
+  const plan = K.explodePlan(parts), F0 = K.frameFromNormal([0, 0, 1], [0, 0, 0]);
+  const insider = (q) => { const g = K.rayGrid(q.positions, q.indices, F0); return (p) => { const X = p[0] * F0.u[0] + p[1] * F0.u[1] + p[2] * F0.u[2], Y = p[0] * F0.v[0] + p[1] * F0.v[1] + p[2] * F0.v[2], runs = K.solidRuns(g, X + 1.3e-5, Y + 0.7e-5); for (let i = 0; i < runs.length; i += 2) if (runs[i] + 0.05 <= p[2] && p[2] <= runs[i + 1] - 0.05) return true; return false; }; };
+  const T = parts.slice(0, 2).map(insider);
+  let bad = 0, sideways = 0;
+  for (const k of [0.1, 0.2, 0.3, 0.5, 0.7, 1]) { const a = K.explodeAt(plan, k); for (let pi = 2; pi < parts.length; pi++) { if (Math.hypot(a[pi][0], a[pi][1]) > 1e-6) sideways++; const Q = parts[pi].positions; for (const q of [0, 1]) for (let v = 0; v < Q.length / 3; v++) if (T[q]([Q[3 * v] + a[pi][0] - a[q][0], Q[3 * v + 1] + a[pi][1] - a[q][1], Q[3 * v + 2] + a[pi][2] - a[q][2]])) bad++; } }
+  check('explode: dowel pins slide out of both holes along the joint, never through the pieces', parts.length === 4 && bad === 0 && sideways === 0, { n: parts.length, bad, sideways });
+}
+{
+  // a U-shaped region (both sides and the bottom of a bar's middle band) cut across its arms: each arm is a region of
+  // its own on the upper piece, both still named after the U
+  const bar = K.shapeMesh({ kind: 'cube', w: 60, d: 20, h: 20 }), sub = K.subdivideMesh(bar.positions, bar.indices, { maxEdge: 2.5 }), P = sub.positions, I = sub.indices, nt = I.length / 3;
+  const cen = (Q, J, t) => [0, 1, 2].map(k => (Q[3 * J[3 * t] + k] + Q[3 * J[3 * t + 1] + k] + Q[3 * J[3 * t + 2] + k]) / 3);
+  const ar = (Q, J, t) => { const a = 3 * J[3 * t], b = 3 * J[3 * t + 1], c = 3 * J[3 * t + 2]; const u = [Q[b] - Q[a], Q[b + 1] - Q[a + 1], Q[b + 2] - Q[a + 2]], w = [Q[c] - Q[a], Q[c + 1] - Q[a + 1], Q[c + 2] - Q[a + 2]]; return Math.hypot(u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]) / 2; };
+  const G = new Int32Array(nt); for (let t = 0; t < nt; t++) { const c = cen(P, I, t); G[t] = Math.abs(c[0]) < 11.25 && c[2] < 9.99 ? 1 : 0; }
+  K.unpinchGroups(P, I, G);
+  const seg = K.bordersFromGroups(P, I, G); seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[G[t]] += ar(P, I, t);
+  const f = K.cutMesh(P, I, K.frameFromNormal([0, 0, 1], [0, 0, 0.37]), { scale: 60, cfg: { type: 'none' } });
+  let ok = f.parts.length === 2, two = false; const info = [];
+  for (const q of f.parts) {
+    const src = K.inheritTriangles(P, I, q.positions, q.indices), cs = K.carryRegions(q.positions, q.indices, seg.groupOf, src, { areas: seg.areas, count: seg.count }), nq = q.indices.length / 3;
+    const pairs = K.trianglePairs(q.indices), par = new Int32Array(nq).map((_, i) => i), find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < pairs.length / 4; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (cs.groupOf[a] === cs.groupOf[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
+    const runs = new Map(); for (let t = 0; t < nq; t++) { const g = cs.groupOf[t]; if (!runs.has(g)) runs.set(g, new Set()); runs.get(g).add(find(t)); }
+    if ([...runs.values()].some(r => r.size !== 1)) ok = false;
+    if (cs.from.filter(x => x === 1).length === 2) two = true;
+    if (!K.regionOutlines(q.positions, q.indices, cs).every(l => l.closed)) ok = false;
+    info.push({ from: cs.from, runs: [...runs].map(([g, r]) => [g, r.size]) });
+  }
+  check('a region cut into two big runs is a region per run, each from the region it was', ok && two, info);
+}
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

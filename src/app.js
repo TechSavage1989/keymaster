@@ -106,8 +106,11 @@
   // wandered over the capelet. Kept through a scaling, a turn or a move; sculpting, repair and reducing start afresh.
   let findAfresh = false; // while Split into parts runs: each piece's parts are found on the piece itself
   function inheritFrom(parent, made) { if (!findAfresh) for (const q of made) if (q.kind !== 'pin' && !q.shape) q.from = { part: parent, src: null, f: 1 }; return made; }
-  function srcOf(p) { if (!p.from.src) p.from.src = K.inheritTriangles(p.from.part.positions, p.from.part.indices, p.positions, p.indices); return p.from.src; }
-  function keptFrom(p, factor = 1) { return p.from ? { part: p.from.part, src: srcOf(p), f: (p.from.f || 1) * factor } : null; } // before the piece's positions change
+  // (1.96) which of the part's triangles each of a piece's triangles is, worked out the first time its regions are
+  // asked for, from the piece's positions as it was cut (`from.pos`, kept through turns and scalings: the triangle
+  // order never changes, and the match is bit for bit)
+  function srcOf(p) { if (!p.from.src) { p.from.src = K.inheritTriangles(p.from.part.positions, p.from.part.indices, p.from.pos || p.positions, p.indices); p.from.pos = null; } return p.from.src; }
+  function keptFrom(p, factor = 1) { return p.from ? { part: p.from.part, src: p.from.src || null, pos: p.from.src ? null : p.from.pos || p.positions, f: (p.from.f || 1) * factor } : null; } // before the piece's positions change
   function regionsKnown(p) { if (p.from) return true; for (const k of regionCache.keys()) if (k.startsWith(`${p.id}:`)) return true; return false; }
   function carryOpts(p, s0) { const f = p.from.f || 1; return { areas: Array.from(s0.areas, a => a * f * f), hard: s0.hard || null, levels: s0.levels || null, count: s0.count }; }
   // (1.82) The parts of a part are found on the surface as it was before any even scaling or moving (`p.analysis`:
@@ -373,20 +376,47 @@
   // parts are intersecting when exploded"). The plan is worked out once per set of parts: at once for a small
   // model; for a big one a quick plan (the tree, each piece straight along its joint) shows while the full one is
   // worked out in the worker, and the view is set again when it arrives.
-  let explodeCache = null;
+  // (1.96) Plans are kept for the last few sets of parts, matched by each part's positions and pull, so an undo or a
+  // redo finds its plan again; the full plan is worked out at once only for a few small pieces, else the quick plan
+  // shows and the worker works out the full one, one plan at a time and only for the latest parts.
+  let explodeCache = null, explodeBusy = false;
+  const explodeKept = [];
+  const explodeSig = (parts) => parts.flatMap(p => [p.positions, p.pull]);
   function explodeState() {
     const parts = state.parts, c = explodeCache;
     if (c && c.parts === parts && c.sig.length === 2 * parts.length && parts.every((p, i) => c.sig[2 * i] === p.positions && c.sig[2 * i + 1] === p.pull)) return c;
+    const sig = explodeSig(parts);
+    const kept = explodeKept.find(k => k.sig.length === sig.length && k.sig.every((x, i) => x === sig[i]));
+    if (kept) {
+      if (kept.parts !== parts) { kept.parts = parts; kept.index = new Map(parts.map((p, i) => [p.id, i])); }
+      explodeCache = kept;
+      if (!kept.full) queueFullExplode();
+      return kept;
+    }
     const data = parts.map(p => ({ positions: p.positions, indices: p.indices, pull: p.pull, volume: p.volume }));
-    const tris = parts.reduce((n, p) => n + p.tris, 0), now = tris <= 20000 || parts.length < 2;
-    const next = explodeCache = { parts, sig: parts.flatMap(p => [p.positions, p.pull]), index: new Map(parts.map((p, i) => [p.id, i])), plan: null, at: null, atK: -1, full: now };
+    const tris = parts.reduce((n, p) => n + p.tris, 0), now = parts.length < 2 || (tris <= 20000 && parts.length <= 6);
+    const next = explodeCache = { parts, sig, index: new Map(parts.map((p, i) => [p.id, i])), plan: null, at: null, atK: -1, full: now };
+    explodeKept.unshift(next); if (explodeKept.length > 3) explodeKept.length = 3;
     try { next.plan = K.explodePlan(data, now ? {} : { quick: true }); } catch (err) { next.plan = null; next.full = true; }
-    if (!now) coreTask('explodePlan', [data, {}]).then((plan) => {
-      if (explodeCache !== next || !plan || !plan.parts || plan.parts.length !== parts.length) return;
-      next.plan = plan; next.at = null; next.full = true;
-      if (state.explode > 0) applyExplode();
-    }).catch(() => { next.full = true; });
+    if (!now) queueFullExplode();
     return next;
+  }
+  // the full plan for the latest parts, in the worker; while one is being worked out no other is sent, and when it
+  // ends the latest parts are planned if they changed meanwhile
+  function queueFullExplode() {
+    if (explodeBusy) return;
+    const next = explodeCache;
+    if (!next || next.full) return;
+    explodeBusy = true;
+    const parts = next.parts, data = parts.map(p => ({ positions: p.positions, indices: p.indices, pull: p.pull, volume: p.volume }));
+    coreTask('explodePlan', [data, {}]).then((plan) => {
+      if (next.full || !plan || !plan.parts || plan.parts.length !== parts.length) return;
+      next.plan = plan; next.at = null; next.atK = -1; next.full = true;
+      if (explodeCache === next && state.explode > 0) applyExplode();
+    }).catch(() => { next.full = true; }).finally(() => {
+      explodeBusy = false;
+      if (explodeCache && !explodeCache.full) queueFullExplode();
+    });
   }
   // where a part stands at explode amount k
   function explodeOffset(p, k) {
@@ -1715,8 +1745,8 @@
   }
 
   /* ---------------- model operations ---------------- */
-  function transformAll(fn, label, factor = 1, even = 0) { // even: the factor of an even scaling (or 1 for a move), which keeps the parts' analysis
-    const parts = state.parts.map(p => { const a = analysisOf(p); return makePart({ ...p, positions: K.transformPositions(p.positions, fn), indices: p.indices.slice(), analysis: even ? { P: a.P, f: a.f * even } : null, from: keptFrom(p, factor) }); }); // new indices too: core keeps what it learns of a mesh (centroids, edge lengths) by its index array
+  function transformAll(fn, label, factor = 1, even = 0, keepFrom = true) { // even: the factor of an even scaling (or 1 for a move), which keeps the parts' analysis; keepFrom: false for an uneven stretch, after which a piece's regions are found afresh
+    const parts = state.parts.map(p => { const a = analysisOf(p); return makePart({ ...p, positions: K.transformPositions(p.positions, fn), indices: p.indices.slice(), analysis: even ? { P: a.P, f: a.f * even } : null, from: keepFrom ? keptFrom(p, factor) : null }); }); // new indices too: core keeps what it learns of a mesh (centroids, edge lengths) by its index array
     parts.scale = modelScale() * factor;
     commit(parts, label);
     state.selectedId = null;
@@ -1733,7 +1763,8 @@
   // Stretch along the axes on their own (a size typed with the lock open); the scale % follows the volume
   function scaleAxes(f) {
     if (!f.every(x => x > 0 && isFinite(x))) return;
-    transformAll((x, y, z) => [x * f[0], y * f[1], z * f[2]], 'the size change', Math.cbrt(f[0] * f[1] * f[2]));
+    const same = f[0] === f[1] && f[1] === f[2]; // (1.96) an uneven stretch changes each region's area differently: the pieces' regions start afresh
+    transformAll((x, y, z) => [x * f[0], y * f[1], z * f[2]], 'the size change', Math.cbrt(f[0] * f[1] * f[2]), same ? f[0] : 0, same);
     fitKeySizeToModel();
     renderInspector(); syncScaleBoxes();
   }
@@ -1889,6 +1920,11 @@
   function partPicture(p) { return picture([{ p, at: [0, 0, 0] }], 320, 240); }
   // The exploded model, as the exploded view at a little over half way
   function assemblyPicture(list) {
+    // (1.96) the full plan, never the quick one a big model shows while the worker works it out
+    if (state.parts.length > 1) {
+      const c = explodeState();
+      if (!c.full) { try { c.plan = K.explodePlan(state.parts.map(p => ({ positions: p.positions, indices: p.indices, pull: p.pull, volume: p.volume })), {}); c.full = true; c.at = null; c.atK = -1; } catch (err) { /* keep the quick plan */ } }
+    }
     const items = list.map(p => ({ p, at: explodeOffset(p, 0.6) }));
     return picture(items, 800, 560);
   }
@@ -4005,7 +4041,7 @@
     if (regionCache.has(key)) return regionCache.get(key);
     if (p.from) { // (1.96) a piece of a cut: the regions of the part it was cut from, carried over
       const s0 = await prepareRegions(p.from.part);
-      if (!p.from.src) p.from.src = await coreTask('inheritTriangles', [p.from.part.positions, p.from.part.indices, p.positions, p.indices]);
+      if (!p.from.src) { p.from.src = await coreTask('inheritTriangles', [p.from.part.positions, p.from.part.indices, p.from.pos || p.positions, p.indices]); p.from.pos = null; }
       const carried = await coreTask('carryRegions', [p.positions, p.indices, s0.groupOf, p.from.src, carryOpts(p, s0)]);
       regionCache.set(key, carried);
       return carried;
@@ -4104,6 +4140,7 @@
         }
       }
     }
+    const removing = !!prev && prev.regions.includes(g); // (a Shift-click that takes a region out only ever takes away)
     let regions = prev ? prev.regions.filter(x => x !== g) : []; // a region already in the pick comes out again
     if (!prev || regions.length === prev.regions.length) {
       if (prev && prev.regions.length) { // a Shift-click further along a limb fills in the regions between (the owner's shoulder, then hand)
@@ -4113,8 +4150,8 @@
       regions.push(g);
     }
     if (!regions.length) { renderPick(); return; }
-    { // (1.96) what hangs only on the pick goes with it: left behind it would be a loose bit of the other piece (the end of a cross below the fist that holds it). For one clicked region only what is small beside it, so an arm doesn't take its hand
-      const enclosed = enclosedRegions(seg, regions, regions.length > 1 ? 1 : 0.25); if (enclosed.length) { regions.push(...enclosed); toast(regions.length - enclosed.length > 1 ? `Filled in ${enclosed.length === 1 ? 'a region' : `${enclosed.length} regions`} the pick surrounds.` : `Took in ${enclosed.length === 1 ? 'a small region' : `${enclosed.length} small regions`} that only this one holds.`); } }
+    if (!removing) { // (1.96) what hangs only on the pick goes with it: left behind it would be a loose bit of the other piece (the end of a cross below the fist that holds it). For one clicked region only what is small beside it, so an arm doesn't take its hand
+      const enclosed = regions.length > 1 ? enclosedRegions(seg, regions, 1) : enclosedRegions(seg, regions, 0.25, 0.01); if (enclosed.length) { regions.push(...enclosed); toast(regions.length - enclosed.length > 1 ? `Filled in ${enclosed.length === 1 ? 'a region' : `${enclosed.length} regions`} the pick surrounds.` : `Took in ${enclosed.length === 1 ? 'a small region' : `${enclosed.length} small regions`} that only this one holds.`); } }
     const loops = K.groupLoops(p.positions, p.indices, seg, regions);
     if (!loops.length) { pickLoose(p, seg, regions); return Promise.resolve(); }
     return pickLoops(p, loops, { regions, seg });
@@ -4123,18 +4160,29 @@
   // (the owner: pick parts at Balanced, then fine-tune at Fine) brings it back as a selection the new regions add to
   // Regions the pick closes round: every neighbour of theirs is picked (or is another such region), and together
   // they are smaller than the pick (a hole in a selection fills, as paint fill in Bambu Studio does)
-  function enclosedRegions(seg, regions, maxFrac = 1) {
+  function enclosedRegions(seg, regions, maxFrac = 1, maxShare = 1) {
     const picked = new Set(regions), nb = new Map(), b = seg.borders;
+    if (!seg.areas) return [];
     for (let i = 0; i < b.length; i += 4) { const x = seg.groupOf[b[i]], y = seg.groupOf[b[i + 1]]; if (x === y) continue; if (!nb.has(x)) nb.set(x, new Set()); if (!nb.has(y)) nb.set(y, new Set()); nb.get(x).add(y); nb.get(y).add(x); }
-    let area = 0; for (const g of regions) area += seg.areas ? seg.areas[g] || 0 : 0;
-    // the unpicked regions, grouped by touching each other; a group touching only the pick is enclosed
-    const seen = new Set(), out = [];
+    let area = 0, total = 0; for (const g of regions) area += seg.areas[g] || 0;
+    for (const a of seg.areas) total += a || 0;
+    // the unpicked regions, grouped by touching each other (across anything but the pick); (1.96) the biggest group is
+    // the rest of the part and always stays, and the others are taken smallest first while together they stay under
+    // `maxFrac` of the pick and `maxShare` of the whole surface (a click on a torso never takes the head or the arms)
+    const seen = new Set(), groups = [];
     for (const [g] of nb) {
       if (picked.has(g) || seen.has(g)) continue;
-      const grp = [], stack = [g]; let open = false, ga = 0; seen.add(g);
-      while (stack.length) { const x = stack.pop(); grp.push(x); ga += seg.areas ? seg.areas[x] || 0 : 0; for (const y of nb.get(x) || []) { if (picked.has(y)) continue; if (!seen.has(y)) { seen.add(y); stack.push(y); } } }
-      for (const x of grp) for (const y of nb.get(x) || []) if (!picked.has(y) && !grp.includes(y)) open = true;
-      if (!open && seg.areas && ga < area * maxFrac && grp.length < nb.size - regions.length) out.push(...grp);
+      const grp = [], stack = [g]; let ga = 0; seen.add(g);
+      while (stack.length) { const x = stack.pop(); grp.push(x); ga += seg.areas[x] || 0; for (const y of nb.get(x) || []) { if (picked.has(y)) continue; if (!seen.has(y)) { seen.add(y); stack.push(y); } } }
+      groups.push({ grp, ga });
+    }
+    if (groups.length < 2) return [];
+    groups.sort((x, y) => x.ga - y.ga);
+    groups.pop();
+    const out = []; let tot = 0;
+    for (const { grp, ga } of groups) {
+      if (tot + ga >= area * maxFrac || tot + ga >= total * maxShare) break;
+      tot += ga; out.push(...grp);
     }
     return out;
   }
@@ -4832,7 +4880,10 @@
     }
     if (!pick.result) return;
     const numberedHere = pick.perLoop.some(per => per.marks && per.marks.length) ? state.joint : null;
-    const joints = jointOf(p, { type: state.cfg.type, keys: pick.keys.length + pick.plugs.length, number: numberedHere });
+    // (1.96) the joint as it was made: drafted bosses, plugs (from the cut's edge or set in), or the keys chosen
+    const madeKinds = (pick.result.jointsMade || []).map(j => j && j.kind).filter(Boolean);
+    const type = madeKinds.includes('boss') || pick.perLoop.some(per => per.boss) ? 'boss' : (madeKinds.some(k => k === 'edge' || k === 'skew' || k === 'plug') || pick.plugs.length) && !pick.keys.length ? 'plug' : !madeKinds.length && !pick.keys.length && !pick.plugs.length ? 'none' : state.cfg.type;
+    const joints = jointOf(p, { type, keys: pick.keys.length + pick.plugs.length, number: numberedHere });
     const made = pick.result.parts.map((c, i) => makePart({ name: `${p.name} ${String.fromCharCode(65 + i)}`, color: nextColor(), positions: c.positions, indices: c.indices, pull: c.pull || null, joints }));
     (pick.result.pins || []).forEach((pin, i) => made.push(makePart({ name: `${p.name} pin ${i + 1}`, color: PIN_COLOR, positions: pin.positions, indices: pin.indices, kind: 'pin' })));
     inheritFrom(p, made);
