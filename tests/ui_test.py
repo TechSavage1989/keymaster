@@ -1266,10 +1266,10 @@ with sync_playwright() as p:
     info = pg.inner_text('#cutLineInfo')
     print('    sleeve hem:', res, info.replace('\n', ' ')[:160])
     check('the hem line comes with pegs sized to fit', bool(res) and res['ok'] and 'sized to fit' in info and ' peg' in info, info)
-    # (1.94) Block: one square peg in the middle of the cut face, Extrude and Taper greyed while it is chosen
+    # (1.94, 1.95) Block: one square peg in the middle of the cut face; Extrude still shapes the face it stands on
     pg.select_option('#extraKey', 'block'); pg.wait_for_function("KeymasterDebug.pickInfo() && !KeymasterDebug.pickInfo().pending", timeout=20000); pg.wait_for_timeout(300)
     binfo = pg.inner_text('#cutLineInfo'); bk = pg.evaluate("KeymasterDebug.pickInfo()")
-    check('Block gives the hem one block key and greys Extrude', 'block key' in binfo and bk['joints'] == 1 and pg.is_disabled('#sinkDepth') and pg.evaluate("KeymasterDebug.cfg().block") is True, binfo[:200])
+    check('Block gives the hem one block key, with Extrude still there for the face it stands on', 'block key' in binfo and bk['joints'] == 1 and pg.is_enabled('#sinkDepth') and pg.evaluate("KeymasterDebug.cfg().block") is True, binfo[:200])
     pg.select_option('#extraKey', 'peg'); pg.wait_for_function("KeymasterDebug.pickInfo() && !KeymasterDebug.pickInfo().pending", timeout=20000); pg.wait_for_timeout(300)
     check('choosing Pegs again puts the pegs back and Extrude with them', 'sized to fit' in pg.inner_text('#cutLineInfo') and pg.is_enabled('#sinkDepth') and pg.evaluate("KeymasterDebug.cfg().block") is False, pg.inner_text('#cutLineInfo')[:200])
     # Fill gaps (1.67): the pick completed as one area, picked again as a painted area with the checks
