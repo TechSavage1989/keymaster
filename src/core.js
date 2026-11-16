@@ -4286,14 +4286,32 @@ const KMCore = (() => {
         rooms.sort((a, b) => a - b);
         return !rooms.length || rooms[Math.floor(0.1 * rooms.length)] >= 0.75 * wall ? { xy2, h2 } : null;
       };
-      for (const kind of ['level', 'even']) for (const w of ws) { // (a level end at any depth before an even one: an even plug on a saddle-shaped line keeps the line's horns)
+      for (const kind of ['level', 'leveled', 'even']) for (const w of ws) { // (a level end at any depth before an even one: an even plug on a saddle-shaped line keeps the line's horns)
         const d = new Float64Array(n); let shortLen = 0; // (a stray point or two still short, under 2% of the line, doesn't stop a plug)
         for (let i = 0; i < n; i++) { d[i] = kind === 'level' ? top + w - lv[i] : w; if (!(room[i] >= d[i] - 0.5 * wall)) shortLen += (seg[i] + seg[(i + n - 1) % n]) / 2; }
         if (shortLen > Math.min(4 * wall, Math.max(2 * wall, 0.02 * per))) continue;
+        if (kind === 'leveled') {
+          // (1.93, the owner: "extrude into the main body part, leveling the extrusion out to a more smooth or flat
+          // plug") where the other piece can't hold a level end all round, the end is level as far as it holds and
+          // comes down smoothly only where it must, never nearer the line than `w`: the line's horns are filled in
+          // between, up to the level, instead of standing bare
+          const cap = (i) => Math.max(w, room[i]), win = Math.max(3 * wall, 0.08 * per);
+          for (let i = 0; i < n; i++) d[i] = Math.min(top + w - lv[i], cap(i));
+          for (let pass = 0; pass < 3; pass++) { // the floor's level eased along the line (lowest within reach, then the mean), held between `w` and the room
+            const lvl = Array.from(d, (v, i) => lv[i] + v), lo = new Float64Array(n), sm = new Float64Array(n);
+            const span = (i, f) => { let acc = f(null, lvl[i]), run = 0; for (let k = 1; k < n / 2; k++) { run += seg[(i + k - 1) % n]; if (run > win) break; acc = f(acc, lvl[(i + k) % n]); } run = 0; for (let k = 1; k < n / 2; k++) { run += seg[(i + n - k) % n]; if (run > win) break; acc = f(acc, lvl[(i + n - k) % n]); } return acc; };
+            for (let i = 0; i < n; i++) lo[i] = pass === 0 ? span(i, (a, v) => (a === null ? v : Math.min(a, v))) : lvl[i];
+            for (let i = 0; i < n; i++) lvl[i] = lo[i];
+            for (let i = 0; i < n; i++) { const a = span(i, (acc, v) => (acc === null ? [v, 1] : [acc[0] + v, acc[1] + 1])); sm[i] = a[0] / a[1]; }
+            for (let i = 0; i < n; i++) d[i] = Math.max(w, Math.min(sm[i] - lv[i], cap(i), top + w - lv[i]));
+          }
+          let dLo = Infinity, dHi = 0; for (let i = 0; i < n; i++) { dLo = Math.min(dLo, d[i]); dHi = Math.max(dHi, d[i]); }
+          if (dHi - dLo < 0.25 * w) continue; // (no deeper anywhere than an even plug: that one will do)
+        }
         const f = faceHolds(d);
         if (!f) continue;
         let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, d[i]);
-        return { xy2: f.xy2, h2: f.h2, depth: Array.from(d), max, least: w, flatEnd: kind === 'level', even: kind === 'even', floorTilt: 0 };
+        return { xy2: f.xy2, h2: f.h2, depth: Array.from(d), max, least: w, flatEnd: kind === 'level', leveled: kind === 'leveled', even: kind === 'even', floorTilt: 0 };
       }
       return null;
     }
@@ -4896,7 +4914,7 @@ const KMCore = (() => {
     if (caps.some(c => c.sunk)) sinkNote = null;
     parts.sort((x, y) => y.volume - x.volume);
     // each line's plug as it was made, in the model's own coordinates (the app draws it from these after the check)
-    const plugsMade = caps.map(c => { if (!c.sunk || !c.sunk.column) return null; const F = c.F, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z); const floor = [], line = []; for (let i = 0; i < c.n; i++) { floor.push(...at(c.sunk.xy2[2 * i], c.sunk.xy2[2 * i + 1], c.sunk.h2[i])); const v = 3 * c.ring[i]; line.push(P[v], P[v + 1], P[v + 2]); } return { floor, line, depth: c.sunk.max, least: c.sunk.least || 0, flat: !!c.sunk.flatEnd, taper: c.sunk.taper || 0, axis: F.n.map(x => x * c.into2), shared: !!c.axisFace && c.sunk === c.axisFace.sunk }; });
+    const plugsMade = caps.map(c => { if (!c.sunk || !c.sunk.column) return null; const F = c.F, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z); const floor = [], line = []; for (let i = 0; i < c.n; i++) { floor.push(...at(c.sunk.xy2[2 * i], c.sunk.xy2[2 * i + 1], c.sunk.h2[i])); const v = 3 * c.ring[i]; line.push(P[v], P[v + 1], P[v + 2]); } return { floor, line, depth: c.sunk.max, least: c.sunk.least || 0, flat: !!c.sunk.flatEnd, leveled: !!c.sunk.leveled, taper: c.sunk.taper || 0, axis: F.n.map(x => x * c.into2), shared: !!c.axisFace && c.sunk === c.axisFace.sunk }; });
     return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings, sinks: caps.map(c => c.sink), floors: caps.map(c => (c.sunk && c.sunk.plane) || null), plugsMade, sinkNote: sunkCaps.length && !caps.some(c => c.sunk) ? sinkNote || 'locked' : null };
     // the two pieces each line separates: side 1, and the piece of side 2 holding that line's copied vertices
     function pairsOf(parts) {
@@ -5560,7 +5578,7 @@ const KMCore = (() => {
         // (1.92) by its worst stretch too, not only on average: a ring square to the sleeve most of the way round but
         // grazing it along the front (where the sleeve tucks under the cape) left a thin brim on the arm there
         const gz = []; for (const v of near) { let nx = 0, ny = 0, nz = 0; for (let j = vt.start[v]; j < vt.start[v + 1]; j++) { const t = vt.tri[j]; nx += N[3 * t] * A[t]; ny += N[3 * t + 1] * A[t]; nz += N[3 * t + 2] * A[t]; } const L = Math.hypot(nx, ny, nz) || 1; gz.push(Math.abs((nx * ax[0] + ny * ax[1] + nz * ax[2]) / L)); }
-        const mean = gz.reduce((x, y) => x + y, 0) / (gz.length || 1), worst = gz.slice().sort((x, y) => x - y)[Math.floor(0.9 * (gz.length - 1))] || 0, graze = Math.max(mean, 0.85 * worst);
+        const mean = gz.reduce((x, y) => x + y, 0) / (gz.length || 1), worst = gz.slice().sort((x, y) => x - y)[Math.floor(0.9 * (gz.length - 1))] || 0, graze = mean; // (1.93: by its mean again: judged by its worst stretch the ring moved a step down the sleeve, out from under the cape and into plain view)
         if (!found || graze < found.graze - 0.05) found = { o, n: ax, F, ring: best, len: bl, graze };
         if (found.graze <= 0.3) break; // (the first that meets the surface squarely enough: nearer the joint is better)
       }
@@ -5628,7 +5646,7 @@ const KMCore = (() => {
       if (sl) return { P: sl.P, I: sl.I, req: { ...req, seg: sl.seg, regions: sl.groups, loops: sl.loops, sliced: true } };
     }
     if (!req.smooth) return { P, I, req };
-    if (req.regions && req.seg && !req.noReroute && !req.noSlice && req.limbEnds !== false) { // (1.92: a brushed pick too: its flat ring must lie on the brushed surface, as 1.86's check makes sure) // (1.83) a limb ends in a flat cut across it (1.86: never a painted pick: the owner's paint is what is cut, as painted)
+    if (req.regions && req.seg && !req.noReroute && !req.noSlice && req.limbEnds !== false) { // (1.93: only when asked (the app's End limbs with a flat cut, off by default): the cut follows the seam that was picked or painted, where it shows least; 1.92's flat end on a brushed arm sat in plain view below the shoulder) // (1.83) a limb ends in a flat cut across it (1.86: never a painted pick: the owner's paint is what is cut, as painted)
       let le = null; try { le = limbEndPick(P, I, req.seg, req.regions); } catch (err) { le = null; }
       if (le) {
         let sl = null; try { sl = sliceRegionPick(le.P, le.I, le.seg, [1], { ...(typeof req.smooth === 'object' ? req.smooth : {}), pin: le.pin }); } catch (err) { sl = null; }

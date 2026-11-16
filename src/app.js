@@ -2751,7 +2751,7 @@
     // (1.80) with Fill on the paint is whole regions, picked on purpose, so nothing is added: a hand lying on a book, shut in
     // between the book and the cuff, had filled as a hole of the book's region (Fill gaps under the pick still works)
     if (!state.paint.fill) try { const fg = K.fillSelectionGaps(p.positions, p.indices, state.paint.sel, { gap: Math.min(state.paint.size, fillGapDefault() / 2) }); if (fg.added) { state.paint.sel = fg.sel; renderPaint(); } } catch (err) { /* left as painted */ }
-    else try { const fg = K.fillSelectionGaps(p.positions, p.indices, state.paint.sel, { gap: 0, maxFrac: 0.02 }); if (fg.added) { state.paint.sel = fg.sel; renderPaint(); } } catch (err) { /* left as painted */ } // (1.90) with Fill, only specks of holes fill (between fingers): each would be a line of its own, cut and extruded
+    // (1.93) with Fill nothing at all is added: the gaps between the fingers of a hand lying on a book are the book's own faces, and filling them (1.90) put them in the hand's pick; such a gap's outline is a speck of a line now, cut as it is
     let loops = [], error = '';
     try { const seg = K.selectionSeg(p.positions, p.indices, state.paint.sel); loops = K.groupLoops(p.positions, p.indices, seg, [1]); } catch (err) { error = err.message; }
     const pick = { partId: p.id, loops, error, painted: true, preview: true, keys: [], plugs: [], perLoop: [], frames: [], draw: [], selection: state.paint.sel };
@@ -4213,7 +4213,7 @@
     }
     const bare = pick.loops.filter((l, i) => !made[i] && !((per[i] || {}).plugs || []).length && !((per[i] || {}).keys || []).length && !(per[i] || {}).tiny).length, bits = [], lines = (k) => (n === 1 ? '' : k === n ? (n === 2 ? ' on both lines' : ` on all ${n} lines`) : ` on ${k === 1 ? 'one line' : `${k} lines`}`);
     const taper = state.cfg.sinkTaper > 0 && made.some(q => q && q.taper > 0) ? `, sides leaning in ${fmt(Math.max(...made.filter(Boolean).map(q => q.taper)))}°` : '';
-    if (edge) bits.push(`a plug from the cut’s edge${lines(edge)}, ${hi - lo > 0.2 ? `${fmt(lo)} to ${fmt(hi)}` : fmt(hi)} mm into the other piece${taper}${flat === edge ? ', with a flat end' : ''}${shared ? ', along the one way the pieces slide apart' : ''}`);
+    if (edge) bits.push(`a plug from the cut’s edge${lines(edge)}, ${hi - lo > 0.2 ? `${fmt(lo)} to ${fmt(hi)}` : fmt(hi)} mm into the other piece${taper}${flat === edge ? ', with a flat end' : made.some(q => q && q.leveled) ? ', its end leveled as far as the other piece holds' : ''}${shared ? ', along the one way the pieces slide apart' : ''}`);
     const deep = (pick.plugs || []).length ? `, ${fmt(Math.max(...pick.plugs.map(q => q.depth)))} mm deep` : '', nkeys = (pick.keys || []).length;
     if (inset) bits.push(`a plug set in from the edge${lines(inset)}${deep}${state.cfg.sink > 0 ? ' (the other piece is too thin there for one from the edge)' : ''}`);
     if (keyed) bits.push(`${nkeys} ${{ peg: 'peg', dowel: 'dowel', magnet: 'magnet pocket' }[state.cfg.type] || 'key'}${nkeys === 1 ? '' : 's'}${state.cfg.sizeMode === 'set' ? '' : ' sized to fit'}${lines(keyed)}`);
@@ -4274,7 +4274,7 @@
   }
   function pickReq(loops, info) {
     const seg = info.seg ? { groupOf: info.seg.groupOf, count: info.seg.count, borders: info.seg.borders, areas: info.seg.areas } : null;
-    return { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint, smooth: state.cfg.smoothCut !== false, sliceDrawn: state.cfg.sliceDrawn !== false };
+    return { loops, regions: info.regions || null, seg, painted: !!info.painted, cfg: coreCfg(), minThickness: minWall(), sink: Math.max(0, +state.cfg.sink || 0), sizeSet: state.cfg.sizeMode === 'set', perArea: state.cfg.perArea, numberJoints: !!state.cfg.numberJoints, joint: state.joint, smooth: state.cfg.smoothCut !== false, sliceDrawn: state.cfg.sliceDrawn !== false, limbEnds: !!state.cfg.flatEnds };
   }
   function pickLoops(p, loops, info) {
     if (state.selectedId !== p.id) selectPart(p.id); // the pick's part is the chosen one, so its panel and its cut button show
@@ -4790,6 +4790,7 @@
     state.cfg.sliceDrawn = !!e.target.checked;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
   });
+  $('#flatEnds').addEventListener('change', (e) => { state.cfg.flatEnds = !!e.target.checked; const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p); });
   $('#smoothCut').addEventListener('change', (e) => {
     state.cfg.smoothCut = !!e.target.checked;
     const p = selectedPart(); if (p && state.regions.last && state.regions.last.partId === p.id) replayPick(p);
