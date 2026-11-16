@@ -255,7 +255,6 @@ with sync_playwright() as p:
     pg.click('[data-act=cut]')
     pg.wait_for_function(f"document.querySelectorAll('#partList li[data-id]').length > {n_parts}", timeout=15000)
     check('cutting with a custom key works', pg.locator('#partList li[data-id]').count() > n_parts)
-    # the exploded view moves each piece along the cut that made it, not out from the middle
     pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
     # start over: the model as it was opened, in one piece, as one undoable step
     check('with pieces cut, the model panel offers Start over', pg.locator('[data-act=start-over]').count() == 1)
@@ -266,16 +265,20 @@ with sync_playwright() as p:
     check('undo brings the cut pieces back', pg.locator('#partList li[data-id]').count() == n_cut, (n_cut, pg.locator('#partList li[data-id]').count()))
     pg.evaluate("(() => { const e = document.querySelector('#explode'); e.value = '0.6'; e.dispatchEvent(new Event('input', { bubbles: true })); })()"); pg.wait_for_timeout(1500)
     ex = pg.evaluate("KeymasterDebug.explodeOffsets()")
-    def along(o):
-        d = sum(a * b for a, b in zip(o['at'], o['pull'])); L = sum(a * a for a in o['at']) ** 0.5
-        return L > 1 and abs(d / L - 1) < 1e-3
-    pieces = [o for o in ex if o['pull']]
-    check('the pieces of a cut spread apart along the cut, in opposite directions', len(pieces) >= 2 and all(along(o) for o in pieces) and any(abs(sum(a * b for a, b in zip(pieces[0]['pull'], o['pull'])) + 1) < 1e-6 for o in pieces[1:]), ex)
+    # (1.96) the pieces are read as an assembly: the biggest stands still, the others move off it, none along a pull that points into its mate
+    far = lambda o: sum(a * a for a in o['at']) ** 0.5
+    plan = pg.evaluate("KeymasterDebug.explodePlan()")
+    roots = [i for i, q in enumerate(plan['parts']) if q['parent'] < 0 and not q['legs']]
+    movers = [i for i, q in enumerate(plan['parts']) if q['parent'] >= 0]
+    check('in the exploded view the biggest piece of a cut stands still and its mates move off it', plan['full'] and len(roots) >= 1 and len(movers) >= 1 and all(far(ex[i]) < 1e-9 for i in roots) and all(far(ex[i]) > 1 for i in movers), (ex, plan))
+    def off_parent(i):
+        q = plan['parts'][i]; d = q['legs'][0]['d']; pull = ex[i]['pull']
+        return pull is None or abs(abs(sum(a * b for a, b in zip(d, pull))) - 1) < 1e-3
+    check('a piece leaves its mate along the cut that made the joint', all(off_parent(i) for i in movers), (ex, plan))
     # the exploded view holds with a part chosen, in every tool (1.67): the chosen piece stays out, the plane goes with it
-    pg.locator('#partList li[data-id] [data-act=select]').first.click(); pg.wait_for_timeout(500)
+    pg.locator('#partList li[data-id] [data-act=select]').nth(movers[0]).click(); pg.wait_for_timeout(500)
     ex2 = pg.evaluate("KeymasterDebug.explodeOffsets()"); hold = pg.evaluate("KeymasterDebug.planeHolder()")
-    chosen_at = next((o['at'] for o, li in zip(ex2, range(len(ex2))) if li == 0), None)
-    check('choosing a piece keeps the exploded view, and the cut plane moves with the chosen piece', any(sum(a * a for a in o['at']) ** 0.5 > 1 for o in ex2 if o['pull']) and sum(a * a for a in hold) ** 0.5 > 1, (ex2, hold))
+    check('choosing a piece keeps the exploded view, and the cut plane moves with the chosen piece', [o['at'] for o in ex2] == [o['at'] for o in ex] and sum(a * a for a in hold) ** 0.5 > 1, (ex2, hold))
     for tool in ('regions', 'plane'):
         pg.click(f'[data-tool={tool}]'); pg.wait_for_function('!KeymasterDebug.regionsLoading()', timeout=60000); pg.wait_for_timeout(300)
     ex3 = pg.evaluate("KeymasterDebug.explodeOffsets()")
@@ -949,11 +952,20 @@ with sync_playwright() as p:
     pg.click('[data-act=seam-done]'); pg.wait_for_timeout(200)
     check('Done puts the handles away and keeps the line picked', not pg.is_visible('#seamTools') and pg.locator('[data-act=cut-line]').count() == 1 and pg.locator('[data-act=edit-seam]').count() == 1)
     pg.evaluate(f"KeymasterDebug.pickCutLineAt(0, {seam})"); pg.wait_for_timeout(300)
+    whole = pg.evaluate("KeymasterDebug.regionInfo(0)")
     pg.click('[data-act=cut-line]')
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
     names = pg.locator('#partList .part-name').all_inner_texts()
     check('cutting along the line gives two pieces', len(names) == 2 and all(n.endswith((' A', ' B')) for n in names), names)
     check('regions stay on to keep cutting', pg.evaluate('KeymasterDebug.regionsOn()') and 'Cut along the line' in pg.inner_text('#toast'))
+    # 1.96: the pieces keep the regions their surface had on the part they were cut from (nothing is found afresh,
+    # so a click after a cut picks what it would have picked before it), through a scaling too
+    kept = pg.evaluate("[KeymasterDebug.regionInfo(0), KeymasterDebug.regionInfo(1)]")
+    check('each piece of a cut keeps the regions of the part it was cut from', not whole['carried'] and all(k['carried'] and k['cutFrom'] and k['made'] > 0 and k['count'] < whole['count'] and all(g >= 0 for g in k['from']) for k in kept) and sorted(kept[0]['from'] + kept[1]['from']) == list(range(whole['count'])), (whole, kept))
+    pg.evaluate("KeymasterDebug.setScalePct(1000)"); pg.wait_for_timeout(300)
+    kept10 = pg.evaluate("[KeymasterDebug.regionInfo(0), KeymasterDebug.regionInfo(1)]")
+    check('and still does when the model is scaled', [k['from'] for k in kept10] == [k['from'] for k in kept] and all(k['carried'] for k in kept10), kept10)
+    pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     check('undo puts the dumbbell back together', pg.locator('#partList li[data-id]').count() == 1)
     res2 = pg.evaluate("KeymasterDebug.pickCutLineAt(0, [500, 500, 500])")

@@ -2121,6 +2121,67 @@ const KMCore = (() => {
     }
     return changed;
   }
+  // (1.96) Tongues and notches off the regions' borders (the owner: "topology that should not be included in a selection is
+  // still selected and cut"): where two regions meet with no crease between them (a step in thickness, a melted
+  // sliver) the border wanders, and a narrow tongue of one region pokes into the other; cut along it, the piece gets a
+  // paper-thin flap. Each region is opened by a share (`frac`, a quarter) of its own half-width, the furthest any of its
+  // triangles lies from its border measured over the surface, so nothing here goes by the model's size: what the
+  // opening takes off is a tongue, narrower than that against the region itself. A tongue goes to the neighbour it
+  // lies in when most of its border with other regions is smooth: no crease of `sharp` (25°) or more, and no seam
+  // between made and sculpted surface (`hard`). A tongue bounded by creases is a real feature (a strap, a lapel, a
+  // made object's strip) and stays; `fixed` triangles (the made objects) never move. A tube (a sleeve, a finger) is
+  // not narrow in this sense: its triangles lie far from its ends. In place; returns how many triangles moved.
+  function trimTongues(P, I, groupOf, opts = {}) {
+    const nt = I.length / 3, { nb, C } = triangleAdjacency(P, I), frac = opts.frac === undefined ? 0.25 : opts.frac;
+    const cosSharp = Math.cos(((opts.sharp === undefined ? 25 : opts.sharp) * Math.PI) / 180), hard = opts.hard || null, fixed = opts.fixed || null;
+    const N = new Float64Array(3 * nt), A = new Float64Array(nt);
+    for (let t = 0; t < nt; t++) { const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2], n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]), l = Math.hypot(n[0], n[1], n[2]); A[t] = l / 2; if (l > 0) { N[3 * t] = n[0] / l; N[3 * t + 1] = n[1] / l; N[3 * t + 2] = n[2] / l; } }
+    const elen = (t, k) => { const a = 3 * I[3 * t + k], b = 3 * I[3 * t + (k + 1) % 3]; return Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]); };
+    const cdist = (t, q) => Math.hypot(C[3 * q] - C[3 * t], C[3 * q + 1] - C[3 * t + 1], C[3 * q + 2] - C[3 * t + 2]);
+    let moved = 0; const within = opts.within || null, lock = new Uint8Array(nt); // (a tongue moved once stays: without this a run could go over and come back)
+    for (let round = 0; round < (opts.rounds || 3); round++) {
+      let count = 0; for (let t = 0; t < nt; t++) if (groupOf[t] + 1 > count) count = groupOf[t] + 1;
+      // a heap of (distance, triangle), spreading inside each region only
+      const hd = [], ht = [];
+      const push = (d, t) => { let i = hd.length; hd.push(d); ht.push(t); while (i > 0) { const p = (i - 1) >> 1; if (hd[p] <= d) break; hd[i] = hd[p]; ht[i] = ht[p]; i = p; } hd[i] = d; ht[i] = t; };
+      const pop = () => { const top = ht[0], d = hd.pop(), t = ht.pop(), n = hd.length; if (n) { let i = 0; for (;;) { let c = 2 * i + 1; if (c >= n) break; if (c + 1 < n && hd[c + 1] < hd[c]) c++; if (hd[c] >= d) break; hd[i] = hd[c]; ht[i] = ht[c]; i = c; } hd[i] = d; ht[i] = t; } return top; };
+      const spread = (dist, limit) => { while (hd.length) { const d = hd[0], t = pop(); if (d > dist[t]) continue; for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q < 0 || groupOf[q] !== groupOf[t]) continue; const nd = d + cdist(t, q); if (nd < dist[q] && (!limit || nd <= limit[groupOf[q]])) { dist[q] = nd; push(nd, q); } } } };
+      // how far each triangle lies from its region's border, and each region's half-width
+      const d = new Float64Array(nt).fill(Infinity);
+      for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q >= 0 && groupOf[q] !== groupOf[t]) { const v = cdist(t, q) / 2; if (v < d[t]) d[t] = v; } }
+      for (let t = 0; t < nt; t++) if (d[t] < Infinity) push(d[t], t);
+      spread(d, null);
+      const half = new Float64Array(count); for (let t = 0; t < nt; t++) if (d[t] < Infinity && d[t] > half[groupOf[t]]) half[groupOf[t]] = d[t];
+      // opened: the core (at least frac of the half-width in) grown back by as much
+      const r = half.map(h => frac * h), back = new Float64Array(nt).fill(Infinity), reach = r.map(x => 1.1 * x);
+      for (let t = 0; t < nt; t++) if (d[t] === Infinity || d[t] >= r[groupOf[t]]) { back[t] = 0; push(0, t); } // (a region with no border at all is all core)
+      spread(back, reach);
+      // the runs the opening took off, and their borders with other regions
+      const par = new Int32Array(nt).fill(-1); const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+      for (let t = 0; t < nt; t++) if (back[t] === Infinity) par[t] = t;
+      for (let t = 0; t < nt; t++) if (par[t] >= 0) for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q > t && par[q] >= 0 && groupOf[q] === groupOf[t]) { const x = find(t), y = find(q); if (x !== y) par[x] = y; } }
+      // what the opening kept, in connected pieces: a run that joins two of them is a bridge of its region, not a tongue
+      const kp = new Int32Array(nt).fill(-1); const kfind = (x) => { while (kp[x] !== x) { kp[x] = kp[kp[x]]; x = kp[x]; } return x; };
+      for (let t = 0; t < nt; t++) if (par[t] < 0) kp[t] = t;
+      for (let t = 0; t < nt; t++) if (kp[t] >= 0) for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q > t && kp[q] >= 0 && groupOf[q] === groupOf[t]) { const x = kfind(t), y = kfind(q); if (x !== y) kp[x] = y; } }
+      const runs = new Map(); // root -> { area, out, neck, roots, held, to: Map(region -> smooth length), all: Map(region -> length) }
+      const regArea = new Float64Array(count); for (let t = 0; t < nt; t++) regArea[groupOf[t]] += A[t];
+      for (let t = 0; t < nt; t++) {
+        if (par[t] < 0) continue; const x = find(t); let R = runs.get(x); if (!R) runs.set(x, R = { area: 0, out: 0, neck: 0, roots: new Set(), held: false, to: new Map(), all: new Map() });
+        R.area += A[t]; if (lock[t] || (fixed && fixed[t])) R.held = true;
+        for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q < 0) continue; if (groupOf[q] === groupOf[t]) { if (par[q] < 0) { R.neck += elen(t, k); R.roots.add(kfind(q)); } continue; } const l = elen(t, k); R.out += l; R.all.set(groupOf[q], (R.all.get(groupOf[q]) || 0) + l);
+          const smooth = N[3 * t] * N[3 * q] + N[3 * t + 1] * N[3 * q + 1] + N[3 * t + 2] * N[3 * q + 2] >= cosSharp && !(hard && hard[t] !== hard[q]) && !(fixed && fixed[q]) && !(within && within[t] !== within[q]);
+          if (smooth) R.to.set(groupOf[q], (R.to.get(groupOf[q]) || 0) + l); }
+      }
+      const dest = new Map();
+      for (const [x, R] of runs) { if (R.held || !(R.out > 0) || R.area > 0.1 * regArea[groupOf[x]]) continue; let all = 0, best = -1, bl = 0; for (const [g, l] of R.to) { all += l; if (l > bl) { bl = l; best = g; } } if (best >= 0 && all >= 0.6 * R.out && R.roots.size === 1 && R.neck < 0.5 * R.all.get(best)) dest.set(x, best); } // (one neck, and the border gets shorter by the move: at least halved along the region it goes to)
+      // two runs side by side (a tongue, and the corners of the other region beside its root) would swap and leave islands: the bigger goes, the other is looked at again next round
+      if (dest.size > 1) { const drop = new Set(); for (let t = 0; t < nt; t++) { if (par[t] < 0) continue; const x = find(t); if (!dest.has(x)) continue; for (let k = 0; k < 3; k++) { const q = nb[3 * t + k]; if (q < 0 || par[q] < 0) continue; const y = find(q); if (y !== x && dest.has(y)) drop.add(runs.get(x).area < runs.get(y).area ? x : y); } } for (const x of drop) dest.delete(x); }
+      let now = 0; if (dest.size) for (let t = 0; t < nt; t++) if (par[t] >= 0) { const g = dest.get(find(t)); if (g !== undefined) { groupOf[t] = g; lock[t] = 1; now++; } }
+      moved += now; if (!now) break;
+    }
+    return moved;
+  }
   // Hard surface or organic, per triangle (the owner: "determine when a hard surface meets a more organic surface and
   // split accordingly"): cloth, skin and hair bend a little at nearly every edge, each triangle a flat patch of its
   // own, while a modelled object (a book, a buckle, a crucifix, a cylinder's facets) is flat patches of several
@@ -2425,6 +2486,7 @@ const KMCore = (() => {
       if (!merged) break;
     }
     const groupOf = new Int32Array(nt), ids = new Map(); for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
+    if (opts.tongues !== false) trimTongues(P, I, groupOf, { hard: sec.hard || null, within: parts }); // (1.96) tongues go to the section they poke into, within their part
     unpinchGroups(P, I, groupOf);
     const out = bordersFromGroups(P, I, groupOf);
     out.areas = new Array(out.count).fill(0); for (let t = 0; t < nt; t++) out.areas[out.groupOf[t]] += A[t];
@@ -2966,10 +3028,14 @@ const KMCore = (() => {
     // (1.79) the props' enclosed islands (a bevel strip between two panels) join them, and leftover slivers melt
     if (made) carveProps(P, I, groupOf, made, A, pairs, total, minProp, labels);
     if (made && prop) ownObjectPieces(P, I, groupOf, made, prop, A, C, N, pairs); // (1.81)
+    if (made && prop) for (let t = 0; t < nt; t++) if (prop[t] >= 0) made[t] = 1; // (1.80) the objects' claimed surface is hard too, so the seam is pinned round it
+    if (opts.tongues !== false) { // (1.96) narrow tongues across smooth borders go to the region they poke into; the made objects keep what they hold
+      let fixed = null; if (prop) { fixed = new Uint8Array(nt); for (let t = 0; t < nt; t++) if (prop[t] >= 0) fixed[t] = 1; }
+      trimTongues(P, I, groupOf, { hard: made, fixed }); // (no region is emptied: a tongue is at most a tenth of its region)
+    }
     unpinchGroups(P, I, groupOf);
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
-    if (made && prop) for (let t = 0; t < nt; t++) if (prop[t] >= 0) made[t] = 1; // (1.80) the objects' claimed surface is hard too, so the seam is pinned round it
     seg.levels = form.levels; seg.sdf = sdf; seg.hard = made; // (1.77) so a pick's slice can pin the seam where hard meets organic
     return seg;
   }
@@ -3026,6 +3092,166 @@ const KMCore = (() => {
     for (let i = 0; i < pairs.length; i += 4) if (groupOf[pairs[i]] !== groupOf[pairs[i + 1]]) { borders[j++] = pairs[i]; borders[j++] = pairs[i + 1]; borders[j++] = pairs[i + 2]; borders[j++] = pairs[i + 3]; }
     let count = 0; for (let t = 0; t < nt; t++) count = Math.max(count, groupOf[t] + 1);
     return { groupOf, count, borders };
+  }
+  /* ---------- regions carried through a cut ----------
+     The owner, on 1.95: after three cuts a click on a sleeve picked a region that wandered over the capelet, because
+     every piece was segmented afresh, sockets and cut faces and all, and came out differently each time. A piece made
+     by a cut now keeps the regions its surface had on the part it was cut from. */
+  // Which triangle of the part (P0, I0) each triangle of a piece cut from it lies on, or -1 for a triangle the cut
+  // made (a cut face, a wall, a key). Triangles the cut left alone are matched by their corners' positions exactly;
+  // the rest (split by a slice, or with a corner eased along the line) are surface when all three corners lie on the
+  // part's surface, and take the triangle under their middle that faces their way.
+  function inheritTriangles(P0, I0, P, I) {
+    const nt0 = I0.length / 3, nt = I.length / 3, nv0 = P0.length / 3, nv = P.length / 3, src = new Int32Array(nt).fill(-1);
+    if (!nt || !nt0) return src;
+    const F0 = P0 instanceof Float32Array ? P0 : new Float32Array(P0), F = P instanceof Float32Array ? P : new Float32Array(P);
+    const U0 = new Uint32Array(F0.buffer, F0.byteOffset, F0.length), U = new Uint32Array(F.buffer, F.byteOffset, F.length);
+    const hash3 = (a, b, c) => (Math.imul(a, 73856093) ^ Math.imul(b, 19349663) ^ Math.imul(c, 83492791)) >>> 0;
+    let size = 1; while (size < 2 * nv0 + 2) size <<= 1;
+    const vtab = new Int32Array(size).fill(-1), canon = new Int32Array(nv0);
+    for (let v = 0; v < nv0; v++) {
+      const a = U0[3 * v], b = U0[3 * v + 1], c = U0[3 * v + 2]; let h = hash3(a, b, c) & (size - 1);
+      for (;;) { const w = vtab[h]; if (w < 0) { vtab[h] = v; canon[v] = v; break; } if (U0[3 * w] === a && U0[3 * w + 1] === b && U0[3 * w + 2] === c) { canon[v] = w; break; } h = (h + 1) & (size - 1); }
+    }
+    const vmap = new Int32Array(nv);
+    for (let v = 0; v < nv; v++) {
+      const a = U[3 * v], b = U[3 * v + 1], c = U[3 * v + 2]; let h = hash3(a, b, c) & (size - 1), m = -1;
+      for (;;) { const w = vtab[h]; if (w < 0) break; if (U0[3 * w] === a && U0[3 * w + 1] === b && U0[3 * w + 2] === c) { m = w; break; } h = (h + 1) & (size - 1); }
+      vmap[v] = m;
+    }
+    let tsize = 1; while (tsize < 2 * nt0 + 2) tsize <<= 1;
+    const ttab = new Int32Array(tsize).fill(-1), tri0 = new Int32Array(3 * nt0);
+    const turn = (a, b, c, out, o) => { if (a <= b && a <= c) { out[o] = a; out[o + 1] = b; out[o + 2] = c; } else if (b <= a && b <= c) { out[o] = b; out[o + 1] = c; out[o + 2] = a; } else { out[o] = c; out[o + 1] = a; out[o + 2] = b; } };
+    for (let t = 0; t < nt0; t++) {
+      turn(canon[I0[3 * t]], canon[I0[3 * t + 1]], canon[I0[3 * t + 2]], tri0, 3 * t);
+      const a = tri0[3 * t], b = tri0[3 * t + 1], c = tri0[3 * t + 2]; if (a === b || b === c || a === c) continue;
+      let h = hash3(a, b, c) & (tsize - 1);
+      for (;;) { const w = ttab[h]; if (w < 0) { ttab[h] = t; break; } if (tri0[3 * w] === a && tri0[3 * w + 1] === b && tri0[3 * w + 2] === c) break; h = (h + 1) & (tsize - 1); }
+    }
+    const used = new Uint8Array(nt0), q = [0, 0, 0], open = [];
+    for (let t = 0; t < nt; t++) {
+      const x = vmap[I[3 * t]], y = vmap[I[3 * t + 1]], z = vmap[I[3 * t + 2]];
+      if (x >= 0 && y >= 0 && z >= 0) {
+        turn(x, y, z, q, 0); let h = hash3(q[0], q[1], q[2]) & (tsize - 1);
+        for (;;) { const w = ttab[h]; if (w < 0) break; if (tri0[3 * w] === q[0] && tri0[3 * w + 1] === q[1] && tri0[3 * w + 2] === q[2]) { src[t] = w; used[w] = 1; break; } h = (h + 1) & (tsize - 1); }
+      }
+      if (src[t] < 0) open.push(t);
+    }
+    if (!open.length) return src;
+    // the rest by place: the part's triangles no piece triangle matched, near the open ones, in a grid of cells
+    const bb0 = bounds(P0), eps = 1e-5 * diag(bb0);
+    const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (const t of open) for (let k = 0; k < 3; k++) { const v = 3 * I[3 * t + k]; for (let j = 0; j < 3; j++) { if (P[v + j] < mn[j]) mn[j] = P[v + j]; if (P[v + j] > mx[j]) mx[j] = P[v + j]; } }
+    const cands = []; let sum = 0;
+    for (let t = 0; t < nt0; t++) {
+      if (used[t]) continue;
+      const a = 3 * I0[3 * t], b = 3 * I0[3 * t + 1], c = 3 * I0[3 * t + 2]; let out = false, ext = 0;
+      for (let j = 0; j < 3 && !out; j++) { const lo = Math.min(P0[a + j], P0[b + j], P0[c + j]), hi = Math.max(P0[a + j], P0[b + j], P0[c + j]); if (hi < mn[j] - eps || lo > mx[j] + eps) out = true; ext = Math.max(ext, hi - lo); }
+      if (!out) { cands.push(t); sum += ext; }
+    }
+    if (!cands.length) return src;
+    const span = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2], eps);
+    const h = Math.max(1.5 * sum / cands.length, span / 96, 4 * eps), pad = 0.25 * h;
+    const dim = [0, 1, 2].map(j => Math.max(1, Math.ceil((mx[j] - mn[j] + 2 * pad) / h) + 1));
+    const cellOf = (x, j) => Math.max(0, Math.min(dim[j] - 1, Math.floor((x - mn[j] + pad) / h)));
+    const cells = new Map();
+    for (const t of cands) {
+      const a = 3 * I0[3 * t], b = 3 * I0[3 * t + 1], c = 3 * I0[3 * t + 2], lo = [0, 0, 0], hi = [0, 0, 0];
+      for (let j = 0; j < 3; j++) { lo[j] = cellOf(Math.min(P0[a + j], P0[b + j], P0[c + j]) - pad, j); hi[j] = cellOf(Math.max(P0[a + j], P0[b + j], P0[c + j]) + pad, j); }
+      for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) { const k = (x * dim[1] + y) * dim[2] + z; let L = cells.get(k); if (!L) cells.set(k, L = []); L.push(t); }
+    }
+    const at = (Q, v) => [Q[3 * v], Q[3 * v + 1], Q[3 * v + 2]];
+    const near = (p, n) => { // the candidate nearest p (facing along n when given), as [triangle, distance]
+      const L = cells.get((cellOf(p[0], 0) * dim[1] + cellOf(p[1], 1)) * dim[2] + cellOf(p[2], 2)); let best = -1, bd = Infinity;
+      if (L) for (const t of L) {
+        const a = at(P0, I0[3 * t]), b = at(P0, I0[3 * t + 1]), c = at(P0, I0[3 * t + 2]);
+        if (n) { const m = cross3([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]), l = Math.hypot(m[0], m[1], m[2]); if (!(l > 0) || (m[0] * n[0] + m[1] * n[1] + m[2] * n[2]) / l < 0.5) continue; }
+        const cp = closestOnTriangle(p, a, b, c), d = Math.hypot(cp[0] - p[0], cp[1] - p[1], cp[2] - p[2]);
+        if (d < bd) { bd = d; best = t; }
+      }
+      return [best, bd];
+    };
+    const onSurf = new Int8Array(nv); // 1 on the part's surface, -1 off it
+    for (const t of open) {
+      let ok = true;
+      for (let k = 0; k < 3 && ok; k++) { const v = I[3 * t + k]; if (!onSurf[v]) onSurf[v] = vmap[v] >= 0 || near(at(P, v), null)[1] <= eps ? 1 : -1; if (onSurf[v] < 0) ok = false; }
+      if (!ok) continue;
+      const a = at(P, I[3 * t]), b = at(P, I[3 * t + 1]), c = at(P, I[3 * t + 2]);
+      const n = cross3([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]), l = Math.hypot(n[0], n[1], n[2]);
+      if (!(l > 0)) continue;
+      const r = near([(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3], [n[0] / l, n[1] / l, n[2] / l]);
+      if (r[0] >= 0 && r[1] <= pad) src[t] = r[0];
+    }
+    return src;
+  }
+  // The regions of a piece from those of the part it was cut from (`groupOf0`, by the part's triangles; `src` from
+  // `inheritTriangles`). Every triangle of the old surface keeps its region. A scrap of a region left beside a cut
+  // face (under `opts.scrap`, 15%, of that region as it was, `opts.areas`: what a smoothed cut line leaves along the
+  // rim, or the stub past a flat limb end) joins the neighbour it shares the most border with, and so does any crumb
+  // of a region this piece holds under 15% of. Each cut face (its
+  // walls, its plug or socket) then joins the region it shares the most rim with, so the socket takes the place of
+  // what was cut away and no region's outline runs through it: picking the coat takes the socket in it, and the
+  // capelet's outline runs along the rim as it ran along the sleeve. A piece that is all new (a pin) is one region.
+  function carryRegions(P, I, groupOf0, src, opts = {}) {
+    const nt = I.length / 3, pairs = trianglePairs(I), np = pairs.length / 4, areas0 = opts.areas || null, scrap = opts.scrap === undefined ? 0.15 : opts.scrap;
+    const lab = new Int32Array(nt), A = new Float64Array(nt); let count0 = 0;
+    for (let t = 0; t < nt; t++) {
+      lab[t] = src[t] >= 0 ? groupOf0[src[t]] : -1; if (lab[t] + 1 > count0) count0 = lab[t] + 1;
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2], n = cross3([P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]]);
+      A[t] = Math.hypot(n[0], n[1], n[2]) / 2;
+    }
+    if (opts.count > count0) count0 = opts.count;
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < np; i++) { const a = pairs[4 * i], b = pairs[4 * i + 1]; if (lab[a] === lab[b]) { const x = find(a), y = find(b); if (x !== y) par[x] = y; } }
+    const area = new Float64Array(nt), byFace = new Uint8Array(nt); let anyNew = false;
+    for (let t = 0; t < nt; t++) { area[find(t)] += A[t]; if (lab[t] < 0) anyNew = true; }
+    const out = new Int32Array(nt);
+    if (anyNew) {
+      { const vnew = new Uint8Array(P.length / 3); for (let t = 0; t < nt; t++) if (lab[t] < 0) { vnew[I[3 * t]] = 1; vnew[I[3 * t + 1]] = 1; vnew[I[3 * t + 2]] = 1; }
+        for (let t = 0; t < nt; t++) if (lab[t] >= 0 && (vnew[I[3 * t]] || vnew[I[3 * t + 1]] || vnew[I[3 * t + 2]])) byFace[find(t)] = 1; } // (touching the cut's rim, if only at a point)
+      const here = new Float64Array(count0 + 1); for (let t = 0; t < nt; t++) if (lab[t] >= 0) here[lab[t]] += A[t]; // how much of each region this piece holds
+      const loose = (r) => lab[r] < 0 || (!!areas0 && (byFace[r] ? area[r] : here[lab[r]]) < scrap * (areas0[lab[r]] || 0)); // a cut face; a scrap beside one; or a crumb of a region that went with the other piece
+      const nb = new Map(); // a loose run -> (the run beside it -> the length of border they share)
+      for (let i = 0; i < np; i++) {
+        const x = find(pairs[4 * i]), y = find(pairs[4 * i + 1]); if (x === y) continue;
+        const lx = loose(x), ly = loose(y); if (!lx && !ly) continue;
+        const va = 3 * pairs[4 * i + 2], vb = 3 * pairs[4 * i + 3], l = Math.hypot(P[va] - P[vb], P[va + 1] - P[vb + 1], P[va + 2] - P[vb + 2]);
+        if (lx) { let m = nb.get(x); if (!m) nb.set(x, m = new Map()); m.set(y, (m.get(y) || 0) + l); }
+        if (ly) { let m = nb.get(y); if (!m) nb.set(y, m = new Map()); m.set(x, (m.get(x) || 0) + l); }
+      }
+      // sets of runs: each scrap joins the run it borders most, then each cut face the set it borders most
+      const sp = new Map(); const sf = (x) => { let r = x; while (sp.has(r) && sp.get(r) !== r) r = sp.get(r); return r; };
+      const order = [...nb.keys()].sort((a, b) => (lab[a] < 0) - (lab[b] < 0) || area[a] - area[b]);
+      for (const r of order) {
+        const tally = new Map(); for (const [o, l] of nb.get(r)) { const s = sf(o); if (s === sf(r)) continue; tally.set(s, (tally.get(s) || 0) + l); }
+        let best = -1, bl = 0; for (const [s, l] of tally) if (l > bl) { bl = l; best = s; }
+        if (best >= 0) sp.set(sf(r), best);
+      }
+      // a set's region: that of its one run that isn't loose; of its biggest scrap when it has none; a new one when it is all cut face
+      const setLab = new Map(), setBest = new Map(); let extra = count0;
+      const roots = new Set(); for (let t = 0; t < nt; t++) roots.add(find(t));
+      for (const r of roots) { const s = sf(r); if (lab[r] < 0) continue; const rank = loose(r) ? area[r] : Infinity; if (!(setBest.get(s) >= rank)) { setBest.set(s, rank); setLab.set(s, lab[r]); } }
+      // (1.96) a region the cut split into two big runs (a U cut across its arms, a cape across the body) is a region
+      // per run: the biggest keeps the old label, the others get new ones (`from` still names the old region)
+      { const setArea = new Map(); for (const r of roots) { const s = sf(r); setArea.set(s, (setArea.get(s) || 0) + area[r]); }
+        const taken = new Set(); for (const [s, l] of [...setLab].sort((a, b) => setArea.get(b[0]) - setArea.get(a[0]))) { if (taken.has(l)) setLab.set(s, extra++); else taken.add(l); } }
+      for (const r of roots) { const s = sf(r); if (!setLab.has(s)) setLab.set(s, extra++); }
+      for (let t = 0; t < nt; t++) out[t] = setLab.get(sf(find(t)));
+      unpinchGroups(P, I, out);
+    } else out.set(lab);
+    // numbered in the order the part's regions were, the new ones last
+    let top = 0; for (let t = 0; t < nt; t++) if (out[t] + 1 > top) top = out[t] + 1;
+    const ren = new Int32Array(top).fill(-1); for (let t = 0; t < nt; t++) ren[out[t]] = 0;
+    const from = []; for (let g = 0; g < top; g++) if (ren[g] === 0) { ren[g] = from.length; from.push(anyNew ? -1 : g); }
+    for (let t = 0; t < nt; t++) out[t] = ren[out[t]];
+    if (anyNew) { const tally = from.map(() => new Map()); for (let t = 0; t < nt; t++) if (lab[t] >= 0) { const m = tally[out[t]]; m.set(lab[t], (m.get(lab[t]) || 0) + A[t]); } tally.forEach((m, g) => { let bl = 0; for (const [l, a] of m) if (a > bl) { bl = a; from[g] = l; } }); }
+    const seg = bordersFromGroups(P, I, out);
+    seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[out[t]] += A[t];
+    if (opts.hard) { seg.hard = new Uint8Array(nt); for (let t = 0; t < nt; t++) if (src[t] >= 0 && opts.hard[src[t]]) seg.hard[t] = 1; }
+    if (opts.levels) seg.levels = opts.levels;
+    seg.from = from; seg.carried = true;
+    return seg;
   }
 
   /* ---------- curved cuts along a border ----------
@@ -4098,15 +4324,34 @@ const KMCore = (() => {
       if (width < Math.max(4 * wall, 2 * want) || hi - lo > 2 * width) return null; }
     const B = insetRing(xy, Math.max(0.02, 0.25 * wall)) || nudgeIn(xy, Math.max(0.02, 0.25 * wall)); // (1.91) only where the room is measured: a jagged CAD outline (the book's) that can't be offset cleanly is nudged in point by point
     if (B) {
-      const r = sunkRingAt(P, I, F, ring, B, h, into2, want, wall, false, null, true);
-      if (r) {
+      // (1.96) the room is measured along the plug's own leaning walls. Measured straight down from the rim, a sleeve
+      // that bends away below its cuff, or a wrist inside a flared cuff, read as "too thin for a plug from the edge"
+      // (1.4 mm of room on a 23 mm sleeve), though a plug leaning in 20° sits well inside it. The walls as built are
+      // then checked point by point, and where they aren't held the room is measured straight as before.
+      const n = h.length, nrm = taper > 0 ? inwardOf(xy) : null;
+      const tries = taper > 0 ? [taper, 0] : [0], found = [];
+      for (let k = 0; k < tries.length; k++) {
+        const deg = tries[k], lean = deg > 0 ? { nrm, tan: Math.tan(deg * Math.PI / 180) } : null;
+        const r = sunkRingAt(P, I, F, ring, B, h, into2, want, wall, false, null, true, lean);
+        if (!r) continue;
         const t = taperRing(xy, r.depth, taper);
+        if (lean && t.deg < deg - 1e-9 && t.deg > 0 && !tries.includes(t.deg)) tries.splice(k + 1, 0, t.deg); // (the ring folds at the full taper: measured again at the taper it holds)
         r.xy2 = t.xy; r.taper = t.deg; r.column = true; r.lineXY = Array.from(xy); r.lineH = Array.from(h);
-        for (let i = 0; i < h.length; i++) r.h2[i] = h[i] + r.depth[i] * into2;
-        return r;
+        for (let i = 0; i < n; i++) r.h2[i] = h[i] + r.depth[i] * into2;
+        r.held = r.holds(r.xy2, r.h2); delete r.holds;
+        r.score = (r.held ? 1000 : 0) + (r.shallow ? 0 : 400) + (r.flatEnd ? 200 : r.leveled ? 100 : 0) + 10 * Math.min(r.least, 9) + Math.min(r.max, 9) / 10;
+        if (r.held || !lean) found.push(r); // (measured straight and not held as built: 1.95's plug, kept only when nothing better fits)
       }
+      if (found.length) return found.reduce((a, b) => (b.score > a.score ? b : a));
     }
     return null; // (1.92) no plug fits: the face is left as it is (sunk point by point it kept a slanted, thin rim), and the joint is a plug pulled in from the edge instead (`planJoints`)
+  }
+  // The inward direction on the plane at each point of a ring, from the ring eased smooth (as `taperRing` leans its walls)
+  function inwardOf(xy) {
+    const n = xy.length / 2; let a2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1]; }
+    const sg = a2 > 0 ? 1 : -1; let e = Array.from({ length: n }, (_, i) => [xy[2 * i], xy[2 * i + 1]]);
+    for (let k = 0; k < 10; k++) e = e.map((p, i) => { const a = e[(i + n - 1) % n], c = e[(i + 1) % n]; return [(a[0] + 2 * p[0] + c[0]) / 4, (a[1] + 2 * p[1] + c[1]) / 4]; });
+    return e.map((p, i) => { const a = e[(i + n - 1) % n], c = e[(i + 1) % n], dx = c[0] - a[0], dy = c[1] - a[1], L = Math.hypot(dx, dy) || 1; return [-dy / L * sg, dx / L * sg]; });
   }
   // Each point of a ring moved in on its plane by d, along the inward direction of the ring eased smooth (no check
   // that the result is a clean ring: it only says where to look for room)
@@ -4201,7 +4446,7 @@ const KMCore = (() => {
     return out;
     }
   }
-  function sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null, column = false) {
+  function sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null, column = false, lean = null) {
     const n = ring.length, g = raysFor(P, I, F), nv = P.length / 3;
     const ox = F.o[0] * F.u[0] + F.o[1] * F.u[1] + F.o[2] * F.u[2], oy = F.o[0] * F.v[0] + F.o[1] * F.v[1] + F.o[2] * F.v[2], oz = F.o[0] * F.n[0] + F.o[1] * F.n[1] + F.o[2] * F.n[2];
     // straight into the other piece along the frame normal, so the recess walls are parallel and the piece lifts
@@ -4246,10 +4491,18 @@ const KMCore = (() => {
     }
     // (1.87) a plug: how far the solid holds each point's line through the model, with a wall to spare
     const roomOf = new Float64Array(n);
+    let hTop = -Infinity; for (let i = 0; i < n; i++) hTop = Math.max(hTop, h[i] * into2);
     for (let i = 0; column && i < n; i++) {
       const r = roomAt(xy[2 * i], xy[2 * i + 1], h[i] + into2 * 1e-3 * wall);
       roomOf[i] = r ? r[0] - wall : -Infinity;
+      if (r && lean) { // along the leaning wall: as deep as every point of it is inside the other piece with a wall beyond
+        const far = hTop + want - h[i] * into2 + wall, step = Math.max(0.25, 0.5 * wall, far / 40); let ok = 0;
+        for (let d = Math.min(step, 0.5 * want); d <= far + step; d += step) { const q = roomAt(xy[2 * i] + lean.nrm[i][0] * d * lean.tan, xy[2 * i + 1] + lean.nrm[i][1] * d * lean.tan, h[i] + into2 * d); if (!(q && q[0] >= wall)) break; ok = d; }
+        roomOf[i] = ok > 0 ? ok : Math.min(roomOf[i], 0);
+      }
     }
+    // the plug as built (its floor ring moved in by the taper): held where every floor point, but for a stray 2% of the line, is inside the other piece with half a wall beyond
+    const holds = (xy2, h2) => { let per = 0, short = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n, l = Math.hypot(xy2[2 * j] - xy2[2 * i], xy2[2 * j + 1] - xy2[2 * i + 1], h2[j] - h2[i]); per += l; const q = roomAt(xy2[2 * i], xy2[2 * i + 1], h2[i]); if (!(q && q[0] >= 0.5 * wall)) short += l; } return short <= 0.04 * per; };
     if (column) { // a point whose line grazes the surface reads no room at all: it takes its nearer neighbours' room
       for (let i = 0; i < n; i++) if (roomOf[i] === -Infinity) { let l = -Infinity, r = -Infinity; for (let k = 1; k <= 3 && l === -Infinity; k++) l = roomOf[(i + n - k) % n]; for (let k = 1; k <= 3 && r === -Infinity; k++) r = roomOf[(i + k) % n]; roomOf[i] = Math.min(l, r); }
     }
@@ -4286,7 +4539,11 @@ const KMCore = (() => {
         rooms.sort((a, b) => a - b);
         return !rooms.length || rooms[Math.floor(0.1 * rooms.length)] >= 0.75 * wall ? { xy2, h2 } : null;
       };
-      for (const kind of ['level', 'leveled', 'even']) for (const w of ws) { // (a level end at any depth before an even one: an even plug on a saddle-shaped line keeps the line's horns)
+      // (1.96) a plug 1 mm deep at its shallowest is no key (the owner's book: "1.0 to 18.6 mm"): every kind is tried at
+      // a useful depth first (half of Extrude, or 1.5 mm), and only then the shallow ones, marked `shallow`
+      const good = (w) => w >= Math.min(1.5, 0.5 * want) - 1e-9, order = [];
+      for (const deepOnes of [true, false]) for (const kind of ['level', 'leveled', 'even']) for (const w of ws) if (good(w) === deepOnes) order.push([kind, w]);
+      for (const [kind, w] of order) { // (a level end at any depth before an even one: an even plug on a saddle-shaped line keeps the line's horns)
         const d = new Float64Array(n); let shortLen = 0; // (a stray point or two still short, under 2% of the line, doesn't stop a plug)
         for (let i = 0; i < n; i++) { d[i] = kind === 'level' ? top + w - lv[i] : w; if (!(room[i] >= d[i] - 0.5 * wall)) shortLen += (seg[i] + seg[(i + n - 1) % n]) / 2; }
         if (shortLen > Math.min(4 * wall, Math.max(2 * wall, 0.02 * per))) continue;
@@ -4311,7 +4568,7 @@ const KMCore = (() => {
         const f = faceHolds(d);
         if (!f) continue;
         let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, d[i]);
-        return { xy2: f.xy2, h2: f.h2, depth: Array.from(d), max, least: w, flatEnd: kind === 'level', leveled: kind === 'leveled', even: kind === 'even', floorTilt: 0 };
+        return { xy2: f.xy2, h2: f.h2, depth: Array.from(d), max, least: w, flatEnd: kind === 'level', leveled: kind === 'leveled', even: kind === 'even', floorTilt: 0, shallow: !good(w), holds };
       }
       return null;
     }
@@ -4706,7 +4963,7 @@ const KMCore = (() => {
   }
   function cutAlongLoop(P, I, loop, opts = {}) {
     const r = cutAlongLoops(P, I, [loop], opts);
-    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings, sinks: r.sinks, sink: r.sinks[0], floors: r.floors, plugsMade: r.plugsMade, sinkNote: r.sinkNote };
+    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings, sinks: r.sinks, sink: r.sinks[0], floors: r.floors, plugsMade: r.plugsMade, jointsMade: r.jointsMade, sinkNote: r.sinkNote };
   }
   /* Cut along several closed lines at once. Side 1 is whatever lies on the left of the lines as they run (the
      triangles holding the lines' own directed edges); side 2 is the rest, and may come apart into several pieces.
@@ -4765,7 +5022,7 @@ const KMCore = (() => {
       // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
       // keys and its checks then all work on the sunk ring
       const sinkWall = opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, taper = opts.sinkTaper !== undefined ? opts.sinkTaper : cfg.sinkTaper || 0;
-      const sunk = !(opts.sink > 0) ? null : opts.sinkStep === false || opts.sinkFlat ? sunkRingAt(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, !!opts.sinkFlat, opts.sinkPlane || null) : sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, false, null, taper);
+      const sunk = !(opts.sink > 0) || (per.inset && !opts.sinkFlat && opts.sinkStep !== false) ? null : opts.sinkStep === false || opts.sinkFlat ? sunkRingAt(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, !!opts.sinkFlat, opts.sinkPlane || null) : sunkRing(P, I, F, ring, xy, lf.h, into2, opts.sink, sinkWall, false, null, taper);
       // every face carries its frame: a plug may run along another axis than its line's own (1.92: the pieces' one
       // pull direction), and the face, its walls, its cap and its checks are then all worked in that frame
       const own = { F, xy, h: lf.h, cap, clash, xyOf, wantCCW };
@@ -4775,7 +5032,7 @@ const KMCore = (() => {
       c.along = (e) => {
         if (!(opts.sink > 0) || opts.sinkStep === false || opts.sinkFlat) return null;
         const en = [into2 * e[0], into2 * e[1], into2 * e[2]]; // the frame's normal, on the same side as the line's own
-        if (en[0] * F.n[0] + en[1] * F.n[1] + en[2] * F.n[2] < 0.5) return null; // more than 60° off the line's own axis
+        if (en[0] * F.n[0] + en[1] * F.n[1] + en[2] * F.n[2] < WAY_COS) return null; // more than 70° off the line's own axis (1.96: was 60°)
         const Fe = frameFromNormal(norm3(en), lf.centre), exy = new Float64Array(2 * n), eh = new Float64Array(n);
         for (let i = 0; i < n; i++) { const p = 3 * ring[i], d = [P[p] - Fe.o[0], P[p + 1] - Fe.o[1], P[p + 2] - Fe.o[2]]; exy[2 * i] = d[0] * Fe.u[0] + d[1] * Fe.u[1] + d[2] * Fe.u[2]; exy[2 * i + 1] = d[0] * Fe.v[0] + d[1] * Fe.v[1] + d[2] * Fe.v[2]; eh[i] = d[0] * Fe.n[0] + d[1] * Fe.n[1] + d[2] * Fe.n[2]; }
         let a2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; a2 += exy[2 * i] * exy[2 * j + 1] - exy[2 * j] * exy[2 * i + 1]; }
@@ -4789,16 +5046,44 @@ const KMCore = (() => {
         fixTJunctions(ecap, ring); splitThroughPoints(ecap, [ring], (id) => exyMap.get(id)); patchCap(ecap, [ring], (id) => exyMap.get(id), wantCCW);
         return Object.assign(faceOf(es.xy2, es.h2, { F: Fe, xy: exy, h: eh, cap: ecap, clash: false, xyOf: (id) => exyMap.get(id), wantCCW }), { sunk: es });
       };
-      c.use = (which) => {
+      // (1.96) the locating boss for a line that can't carry a plug along the way the pieces go on: the face's own
+      // shape pulled in from the edge (`planPlugs`), standing along the line's own axis, with sides drafted a little
+      // more than the angle between that axis and the way `e`, so it lifts out along `e` (a cone frees along any
+      // direction inside its own slope). Null where the way is more than 58° off, or nothing fits.
+      const bossCache = new Map();
+      c.boss = (e) => {
+        if (per.tiny) return null;
+        const cs = into2 * (e[0] * F.n[0] + e[1] * F.n[1] + e[2] * F.n[2]), phi = Math.acos(Math.max(-1, Math.min(1, cs))) * 180 / Math.PI;
+        if (phi > 60) return null;
+        const draft = Math.min(64, Math.max(taper || 5, Math.ceil(phi + 3))), key = String(draft);
+        if (bossCache.has(key)) return bossCache.get(key);
+        const depth = opts.sink > 0 ? opts.sink : 0;
+        const pcfg = { ...lcfg, type: 'plug', plugSlope: draft, plugSlopeMax: 64, ...(depth > 0 ? { plugDepthMode: 'set', plugDepth: Math.max(1, depth) } : { plugDepthMode: 'auto' }) };
+        let out = null;
+        try {
+          const an = analyzeLoop(P, I, loops[li], { ...pcfg, sink: 0 }, diag(bounds(P)));
+          const pl = planPlugs(an, pcfg).filter(q => q.ok);
+          if (pl.length) { const H = an.curved.heightAt; out = { plugs: pl, cfg: pcfg, draft, draw: pl.map(q => { let lo = Infinity, hi = -Infinity; for (const [x, y] of q.mouth) { const z = H(x, y); lo = Math.min(lo, z); hi = Math.max(hi, z); } return { base: q.base, top: q.top, z0: q.side > 0 ? lo : hi, tip: (q.side > 0 ? hi : lo) + q.side * q.depth }; }) }; }
+        } catch (err) { out = null; }
+        bossCache.set(key, out);
+        return out;
+      };
+      // which face, and which joints on it: 'own' (the keys or plug planned for this line, in its own frame), 'boss'
+      // (`c.bossPlan`) or 'none'
+      c.use = (which, joints = 'own') => {
         const f = which === 'sunk' && c.sunkFace ? c.sunkFace : which === 'axis' && c.axisFace ? c.axisFace : c.plain;
         Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0, F: f.fr.F, xy: f.fr.xy, h: f.fr.h, cap: f.fr.cap, clash: f.fr.clash, xyOf: f.fr.xyOf });
-        c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = f.fr.F !== lf.F ? [] : markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); /* (marks were laid out in the line's own frame: none on a face worked in another) */ c.plugs = cfg.type === 'plug' || per.inset ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length;
+        const own = joints === 'own' && f.fr.F === lf.F; // (keys and plugs were planned in the line's own frame)
+        c.cfg = lcfg;
+        c.keys = !own || cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = f.fr.F !== lf.F ? [] : markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); /* (marks were laid out in the line's own frame: none on a face worked in another) */ c.plugs = own && (cfg.type === 'plug' || per.inset) ? (per.plugs || []).filter(q => q.ok) : [];
+        c.bossUsed = null;
+        if (joints === 'boss' && c.bossPlan && f === c.plain) { c.plugs = c.bossPlan.plugs; c.cfg = c.bossPlan.cfg; c.bossUsed = c.bossPlan; c.marks = []; } // (a boss covers the face: no joint number under it)
+        c.joined = c.keys.length + c.plugs.length;
       };
-      c.use('sunk');
+      c.tiny = !!per.tiny; c.way = null; c.bossPlan = null;
+      c.use('sunk'); c.ownJoined = c.joined;
       return c;
     });
-    const joined = caps.some(c => c.joined); // the same whichever face is used: keys sit inside both outlines or neither matters
-    const allKeys = caps.flatMap(c => c.keys), allPlugs = caps.flatMap(c => c.plugs);
     const base1 = tris[1].length, base2 = tris[2].length;
     let pins = [];
     const makeParts = (fan, fine = true) => { // fan: per loop, fan the cap from a centre point; fine: draw caps as grids
@@ -4874,13 +5159,14 @@ const KMCore = (() => {
     const buildParts = () => {
       let parts = makeParts(caps.map(c => c.clash));
       if (!parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(c => c.clash), false); // a grid cap didn't seal: plain caps (1.92: round keys and plugs too: a plug on a limb's flat end came out open and was dropped)
+      const joined = caps.some(c => c.joined);
       if (!joined && caps.some(c => !c.clash) && !parts.every(q => edgeReport(q.indices).closed)) parts = makeParts(caps.map(() => true), false); // a flat cap didn't seal: fan them instead
       if (parts.every(q => edgeReport(q.indices).closed) && parts.some(q => !(q.volume > 0))) // a line rings a dip, so the "piece" would be empty air
         throw new Error('This line goes round a dip or hollow in the surface, so cutting along it wouldn’t free a solid piece. Pick a line round something that sticks out, like a limb or a sleeve.');
       for (const q of parts) if (!edgeReport(q.indices).closed || !(q.volume > 0)) throw new Error('Keymaster couldn’t make sealed pieces along this border. Try a nearby border, or a flat cut here.');
       return parts;
     };
-    const tol = Math.max(1e-4, diag(bounds(P)) * 2e-6);
+    const tol = Math.max(1e-4, diag(bounds(P)) * 2e-6), WAY_COS = Math.cos(70 * Math.PI / 180);
     // The plugs, plan by plan, until the pieces pass (a lock, or a piece too thin, moves on to the next plan):
     // 1. each line's plug along its own axis, when the lines' axes agree (a plug only slides out straight, so plugs
     //    that point different ways always lock);
@@ -4890,32 +5176,69 @@ const KMCore = (() => {
     // 3. the longest line's plug alone; 4. no plugs, where the refusal stands (or, forced, becomes a warning).
     const sunkCaps = caps.filter(c => c.sunkFace), axisOf = (c) => c.lf.F.n.map(x => x * c.into2);
     const agree = sunkCaps.every(a => sunkCaps.every(b => { const p = axisOf(a), q = axisOf(b); return p[0] * q[0] + p[1] * q[1] + p[2] * q[2] > Math.cos(Math.PI / 6); }));
-    let parts = null, warnings, plainParts = null, sinkNote = null;
-    const attempt = (plan, canForce) => { caps.forEach((c, i) => c.use(plan[i])); const p = plan.every(x => x === 'plain') && plainParts ? plainParts : buildParts(); const w = checkPieces(p, canForce); parts = p; warnings = w; return true; };
-    const soft = (e) => { if (e.code !== 'locked' && e.code !== 'thin') throw e; sinkNote = sinkNote || e.code; return false; };
+    let parts = null, warnings, plainParts = null, sinkNote = null, lastFail = null;
+    const attempt = (plan, canForce) => {
+      caps.forEach((c, i) => c.use(plan[i][0], plan[i][1]));
+      const bare = caps.every(c => c.F === c.lf.F && !c.sunk && !c.joined && !c.marks.length);
+      const p = bare && plainParts ? plainParts : buildParts(); const w = checkPieces(p, canForce); parts = p; warnings = w; return true;
+    };
+    const soft = (e) => { if (e.code !== 'locked' && e.code !== 'thin') throw e; sinkNote = sinkNote || e.code; lastFail = e.code; return false; };
+    const ownPlan = caps.map(c => [c.sunkFace ? 'sunk' : 'plain', 'own']), plainPlan = caps.map(() => ['plain', 'own']);
+    const anyJoint = caps.some(c => c.sunkFace || c.ownJoined);
     let done = false;
-    if (!sunkCaps.length) done = attempt(caps.map(() => 'plain'), true);
-    if (!done && agree) try { done = attempt(caps.map(c => (c.sunkFace ? 'sunk' : 'plain')), false); } catch (e) { done = soft(e); }
-    if (!done && !caps.some(c => c.joined)) { // (keys were planned on each line's own face, so a line with keys keeps its own axis)
-      caps.forEach(c => c.use('plain')); plainParts = buildParts();
+    if (!anyJoint) done = attempt(plainPlan, true);
+    if (!done && (agree || !sunkCaps.length)) try { done = attempt(ownPlan, false); } catch (e) { done = soft(e); }
+    // (1.96) One way on for every line. The pieces are built bare, the ways they come apart are found (`pullWays`,
+    // best for the lines taken together), and each line gets the best joint that lifts out along its way: its own
+    // plug where the way lies inside the plug's taper, a plug along the way where the other piece holds one, else a
+    // boss drafted past the angle between the two (`c.boss`). Before, a line more than 60° off the way, any line
+    // whose plug didn't fit along it, and every line once keys were planned, was simply cut flat.
+    if (!done && anyJoint && lastFail !== 'thin') {
+      caps.forEach(c => c.use('plain', 'none')); plainParts = buildParts();
       const ways = pullWays(plainParts);
-      const tried = agree; // (a way that is the line's own axis was step 1: not built again)
-      caps.forEach((c, i) => { const q = axisOf(c), w = ways[i]; c.axisFace = c.sunkFace && w && !(tried && w[0] * q[0] + w[1] * q[1] + w[2] * q[2] > 0.9998) ? c.along(w) : null; });
-      if (caps.some(c => c.axisFace)) try { done = attempt(caps.map(c => (c.axisFace ? 'axis' : 'plain')), false); } catch (e) { done = soft(e); }
+      let before = agree || !sunkCaps.length ? ownPlan.map(x => x.join()).join() + '|' + caps.map(() => 0).join('') : '';
+      if (ways.some(Boolean)) for (const bossAll of [false, true]) {
+        const plan = caps.map((c, i) => {
+          const e = ways[i], q = axisOf(c); c.way = null; c.wayOff = null;
+          if (!e) return ['plain', 'none'];
+          const phi = Math.acos(Math.max(-1, Math.min(1, e[0] * q[0] + e[1] * q[1] + e[2] * q[2]))) * 180 / Math.PI; c.wayOff = phi;
+          if (phi <= 3) return [c.sunkFace ? 'sunk' : 'plain', 'own']; // (its own axis, near enough: checked along it, with its keys)
+          c.way = e;
+          if (!bossAll && c.sunkFace && phi <= (c.sunkFace.sunk.taper || 0) - 2) return ['sunk', 'none'];
+          if (!bossAll && (c.axisFace = c.along(e))) return ['axis', 'none'];
+          if ((c.bossPlan = c.boss(e))) return ['plain', 'boss'];
+          return ['plain', 'none'];
+        });
+        const sig = plan.map(x => x.join()).join() + '|' + caps.map(c => (c.way ? 1 : 0)).join('');
+        if (sig === before || !plan.some(x => x[0] !== 'plain' || x[1] !== 'none')) { if (bossAll) break; continue; }
+        before = sig;
+        try { done = attempt(plan, false); } catch (e) { done = !e.code && plan.some(x => x[1] === 'boss') ? false : soft(e); } // (a boss plan that didn't seal is a failed plan: the later plans still run)
+        if (done) break;
+      }
+      if (!done) caps.forEach(c => { c.way = null; c.wayOff = null; });
     }
-    if (!done && sunkCaps.length > 1) { const longest = caps.indexOf(sunkCaps.reduce((b, c) => (c.xy.length > b.xy.length ? c : b))); try { done = attempt(caps.map((c, i) => (i === longest ? 'sunk' : 'plain')), false); } catch (e) { done = soft(e); } }
-    if (!done) attempt(caps.map(() => 'plain'), true);
+    if (!done && sunkCaps.length > 1) { const longest = caps.indexOf(sunkCaps.reduce((b, c) => (c.xy.length > b.xy.length ? c : b))); try { done = attempt(caps.map((c, i) => [i === longest ? 'sunk' : 'plain', 'own']), false); } catch (e) { done = soft(e); } }
+    if (!done) attempt(plainPlan, true);
     // (1.87) forced through a lock that no plan frees (a piece held at both ends): cut with the plugs after all, along
     // their own axes, since dropping them only brought the thin rims back
     if (opts.force && sunkCaps.length && caps.every(c => !c.sunk) && warnings && warnings.some(w => w.code === 'locked')) {
-      const stepped = caps.map(c => (c.sunkFace && c.sunkFace.sunk.column ? 'sunk' : 'plain'));
-      if (stepped.includes('sunk')) { const keep = { parts, warnings }; try { attempt(stepped, true); sinkNote = null; } catch (e) { caps.forEach(c => c.use('plain')); parts = keep.parts; warnings = keep.warnings; } }
+      const stepped = caps.map(c => [c.sunkFace && c.sunkFace.sunk.column ? 'sunk' : 'plain', 'own']);
+      if (stepped.some(x => x[0] === 'sunk')) { const keep = { parts, warnings }; try { attempt(stepped, true); sinkNote = null; } catch (e) { caps.forEach(c => c.use('plain')); parts = keep.parts; warnings = keep.warnings; } }
     }
     if (caps.some(c => c.sunk)) sinkNote = null;
     parts.sort((x, y) => y.volume - x.volume);
     // each line's plug as it was made, in the model's own coordinates (the app draws it from these after the check)
-    const plugsMade = caps.map(c => { if (!c.sunk || !c.sunk.column) return null; const F = c.F, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z); const floor = [], line = []; for (let i = 0; i < c.n; i++) { floor.push(...at(c.sunk.xy2[2 * i], c.sunk.xy2[2 * i + 1], c.sunk.h2[i])); const v = 3 * c.ring[i]; line.push(P[v], P[v + 1], P[v + 2]); } return { floor, line, depth: c.sunk.max, least: c.sunk.least || 0, flat: !!c.sunk.flatEnd, leveled: !!c.sunk.leveled, taper: c.sunk.taper || 0, axis: F.n.map(x => x * c.into2), shared: !!c.axisFace && c.sunk === c.axisFace.sunk }; });
-    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: allKeys, plugs: allPlugs, warnings, sinks: caps.map(c => c.sink), floors: caps.map(c => (c.sunk && c.sunk.plane) || null), plugsMade, sinkNote: sunkCaps.length && !caps.some(c => c.sunk) ? sinkNote || 'locked' : null };
+    const plugsMade = caps.map(c => { if (!c.sunk || !c.sunk.column) return null; const F = c.F, at = (x, y, z) => [0, 1, 2].map(k => F.o[k] + F.u[k] * x + F.v[k] * y + F.n[k] * z); const floor = [], line = []; for (let i = 0; i < c.n; i++) { floor.push(...at(c.sunk.xy2[2 * i], c.sunk.xy2[2 * i + 1], c.sunk.h2[i])); const v = 3 * c.ring[i]; line.push(P[v], P[v + 1], P[v + 2]); } return { floor, line, depth: c.sunk.max, least: c.sunk.least || 0, flat: !!c.sunk.flatEnd, leveled: !!c.sunk.leveled, taper: c.sunk.taper || 0, axis: F.n.map(x => x * c.into2), shared: (!!c.axisFace && c.sunk === c.axisFace.sunk) || !!c.way }; });
+    // (1.96) each line's joint as it was made: 'edge' (a plug from the cut's edge), 'skew' (one along the shared way),
+    // 'boss' (a drafted boss, with its plan for the app to draw), 'plug' / 'keys' (as planned), or null with why
+    const jointsMade = caps.map(c => {
+      const v = 3 * c.ring[0], kind = c.sunk && c.sunk.column ? (c.axisFace && c.sunk === c.axisFace.sunk ? 'skew' : 'edge') : c.bossUsed ? 'boss' : c.plugs.length ? 'plug' : c.keys.length ? 'keys' : null;
+      const j = { at: [P[v], P[v + 1], P[v + 2]], kind, keys: c.keys.length, off: c.way ? c.wayOff : 0 };
+      if (c.bossUsed) Object.assign(j, { plugs: c.bossUsed.plugs, cfg: c.bossUsed.cfg, draft: c.bossUsed.draft, draw: c.bossUsed.draw, depth: Math.max(...c.bossUsed.plugs.map(q => q.depth)) });
+      if (!kind) j.why = c.tiny ? 'tiny' : c.wayOff > 60 ? 'off' : 'room';
+      return j;
+    });
+    return { parts, pins, length: loops.reduce((s, l) => s + l.length, 0), frames: caps.map(c => c.F), keys: caps.flatMap(c => c.keys), plugs: caps.flatMap(c => c.plugs), warnings, sinks: caps.map(c => c.sink), floors: caps.map(c => (c.sunk && c.sunk.plane) || null), plugsMade, jointsMade, sinkNote: sunkCaps.length && !caps.some(c => c.sunk) ? sinkNote || 'locked' : null };
     // the two pieces each line separates: side 1, and the piece of side 2 holding that line's copied vertices
     function pairsOf(parts) {
       const keyOf = (x, y, z) => `${x},${y},${z}`;
@@ -4932,24 +5255,35 @@ const KMCore = (() => {
     // then leaning up to 40° from them, and from one piece's middle to the other's.
     function pullWays(prts) {
       const pair = pairsOf(prts), out = caps.map(() => null), groups = new Map();
-      caps.forEach((c, i) => { if (!c.sunkFace) return; const [a, b] = pair(c), key = prts.indexOf(a) + ':' + prts.indexOf(b); if (!groups.has(key)) groups.set(key, { a, b, idx: [] }); groups.get(key).idx.push(i); });
+      caps.forEach((c, i) => { if (c.tiny || !(c.sunkFace || c.ownJoined || opts.sink > 0)) return; const [a, b] = pair(c), key = prts.indexOf(a) + ':' + prts.indexOf(b); if (!groups.has(key)) groups.set(key, { a, b, idx: [] }); groups.get(key).idx.push(i); });
+      const dot = (p, q) => p[0] * q[0] + p[1] * q[1] + p[2] * q[2], ang = (p, q) => Math.acos(Math.max(-1, Math.min(1, dot(p, q)))) * 180 / Math.PI;
       for (const { a, b, idx } of groups.values()) {
         const axes = idx.map(i => axisOf(caps[i])), lens = idx.map(i => loops[i].length || 1), sum = [0, 0, 0];
         axes.forEach((e, k) => { for (let j = 0; j < 3; j++) sum[j] += e[j] * lens[k]; });
+        const byLen = idx.map((i, k) => k).sort((x, y) => lens[y] - lens[x]);
+        // how far off its own axis each line's own plug still lifts out: its taper, less a little
+        const lean = idx.map(i => (caps[i].sunkFace ? Math.max(0, (caps[i].sunkFace.sunk.taper || 0) - 2) : 0));
         const cands = [];
         if (Math.hypot(...sum) > 1e-9) cands.push(norm3(sum));
-        idx.map((i, k) => k).sort((x, y) => lens[y] - lens[x]).forEach(k => cands.push(axes[k]));
+        byLen.forEach(k => cands.push(axes[k]));
+        // (1.96) each line's axis turned towards each other line's as far as its own plug's taper lets it go
+        for (const k of byLen) for (const m of byLen) { if (m === k || lean[k] < 4) continue; const W = ang(axes[k], axes[m]) * Math.PI / 180; if (W < 0.05) continue; for (const f of [0.95, 0.6]) { const t = Math.min(W, f * lean[k] * Math.PI / 180), s1 = Math.sin(W - t) / Math.sin(W), s2 = Math.sin(t) / Math.sin(W); cands.push(norm3([0, 1, 2].map(j => axes[k][j] * s1 + axes[m][j] * s2))); } }
+        if (axes.length > 1) { const un = [0, 0, 0]; axes.forEach(e => { for (let j = 0; j < 3; j++) un[j] += e[j]; }); if (Math.hypot(...un) > 1e-9) { const u = norm3(un); cands.push(u); for (const f of [0.33, 0.67]) cands.push(norm3([0, 1, 2].map(j => u[j] * f + cands[0][j] * (1 - f)))); } }
         const base = cands[0], F0 = frameFromNormal(base, [0, 0, 0]);
         for (const deg of [20, 40]) for (let k = 0; k < 8; k++) { const t = (k * Math.PI) / 4, s = Math.sin((deg * Math.PI) / 180), co = Math.cos((deg * Math.PI) / 180); cands.push([0, 1, 2].map(j => F0.n[j] * co + (F0.u[j] * Math.cos(t) + F0.v[j] * Math.sin(t)) * s)); }
         const ma = volumeCentroid(a.positions, a.indices).centroid, mb = volumeCentroid(b.positions, b.indices).centroid, ap = [mb[0] - ma[0], mb[1] - ma[1], mb[2] - ma[2]];
         if (Math.hypot(...ap) > 1e-9) cands.push(norm3(ap));
-        const deep = Math.max(3, ...idx.map(i => (caps[i].sunkFace.sunk.max || 0) + 1));
-        for (const e0 of cands) {
-          // the plugs point into side 2: the direction is turned that way, and a line more than 60° off it keeps none
-          const e = e0[0] * base[0] + e0[1] * base[1] + e0[2] * base[2] < 0 ? e0.map(x => -x) : e0;
-          if (!idx.some(i => { const q = axisOf(caps[i]); return e[0] * q[0] + e[1] * q[1] + e[2] * q[2] >= 0.5; })) continue;
+        const deep = Math.max(3, ...idx.map(i => ((caps[i].sunkFace ? caps[i].sunkFace.sunk.max : opts.sink) || 0) + 1));
+        // the way that gives the most lines a joint comes first, then the better joints (a line's own plug or keys
+        // count 3, a plug or boss up to 45° off 2, a shallow boss up to 58° off 1), then the longest line's
+        const score = (e) => { let n = 0, sc = 0, first = 0; idx.forEach((i, k) => { const phi = ang(e, axes[k]), c = caps[i]; const p = (c.sunkFace || c.ownJoined) && phi <= Math.max(3, lean[k]) ? 3 : phi <= 45 ? 2 : phi <= 60 ? 1 : 0; if (p) n++; sc += p; if (k === byLen[0]) first = p; }); return [n, sc, first]; };
+        const order = cands.map((e0, k) => { const e = dot(e0, base) < 0 ? e0.map(x => -x) : e0; return { e, k, s: score(e) }; }).filter(x => x.s[0] > 0) // (the plugs point into side 2)
+          .sort((x, y) => y.s[0] - x.s[0] || y.s[1] - x.s[1] || y.s[2] - x.s[2] || x.k - y.k);
+        let tries = 0;
+        for (const { e } of order) {
+          if (++tries > 10) break;
           if (!slidesApart(a, b, e, tol, deep, 0.2)) continue;
-          for (const i of idx) { const q = axisOf(caps[i]); if (e[0] * q[0] + e[1] * q[1] + e[2] * q[2] >= 0.5) out[i] = e; }
+          for (const i of idx) out[i] = e;
           break;
         }
       }
@@ -4976,14 +5310,16 @@ const KMCore = (() => {
       // at both ends may still come out along one of its joints, or between them, so those directions are tried too
       const same = L > 1 ? caps.filter(d => d !== c && (([a, b]) => a === p1 && b === p2)(pair(d))) : [];
       const also = (Math.hypot(...apart) > 1e-9 ? [apart] : []).concat(same.flatMap(d => [d.F.n, d.F.n.map(x => -x)]));
+      for (const d of same) if (d.way) also.push(d.way); // (1.96) the one way on found for the lines between these pieces
       if (same.length) { const sum = [0, 0, 0]; for (const d of [c, ...same]) for (let k = 0; k < 3; k++) sum[k] += d.into2 * d.F.n[k]; if (Math.hypot(...sum) > 1e-9) also.push(sum); }
       // (1.92) a plug is a key: it only slides out straight along its axis, and only once it has come all the way out
       const plugged = !!(c.sunk && c.sunk.column);
-      if (lockedPairs([p1, p2], F.n, tol, { anyDirection: !c.joined && !plugged, distance: Math.max(pullDistance(c.cfg, c.keys, c.plugs), plugged ? c.sink + 1 : 0), also }).length) {
+      const dir = c.way || F.n; // (1.96) a joint made to lift out along the pieces' one way on is checked along that way
+      if (lockedPairs([p1, p2], dir, tol, { anyDirection: !c.joined && !plugged, distance: Math.max(pullDistance(c.cfg, c.keys, c.plugs), plugged ? c.sink + 1 : 0), also }).length) {
         const wedged = same.length > 0; // held at both ends by one piece (a shin between the thigh and a shoe that stands on the same base)
         // with keys the pieces must slide straight; would they come apart at a slant without them? Asked of these
         // same pieces, so a pick needn't build them all again without keys just to find out (half a neck pick's time)
-        const keyless = c.joined && opts.force && !lockedPairs([p1, p2], F.n, tol, { anyDirection: true, distance: 3, also }).length;
+        const keyless = c.joined && opts.force && !lockedPairs([p1, p2], dir, tol, { anyDirection: true, distance: 3, also }).length;
         refuse(wedged ? `This piece is held in ${same.length + 1} places by the same neighbour, and no one direction frees them all, so it couldn’t be fitted back on after printing. Split off one of its neighbours first, or pick it in smaller parts held in one place each, or cut it anyway.`
           : c.joined ? 'With keys, the pieces would have to slide straight apart, and here they’d catch on each other.'
           : 'The pieces on each side of this line would hook round each other, so they couldn’t be put together after printing. Pick a different line, or use a flat cut here.', 'locked', wedged, keyless);
@@ -5692,10 +6028,19 @@ const KMCore = (() => {
           // (1.92) where the other piece can't hold a plug from the cut's edge (a shoulder that slopes away right above
           // the line), the plug is pulled in from the edge by a wall instead, tapered and as deep as Extrude asks:
           // the owner's arm ended in bare horns, or in nothing, where the edge plug didn't fit
-          const inset = cfg.sink > 0 && cfg.sinkStep !== false && !(sk && sk.column) && (cfg.type === 'none' || cfg.type === 'plug');
+          // (1.96) and where the edge plug is only a shallow one (under 1.5 mm at its shallowest: the owner's "1.0 to
+          // 18.6 mm" was no key), the plug set in from the edge is taken instead when it goes deeper
+          const shallow = !!(sk && sk.column && sk.shallow);
+          let inset = cfg.sink > 0 && cfg.sinkStep !== false && (!(sk && sk.column) || shallow) && (cfg.type === 'none' || cfg.type === 'plug');
+          const pcfg = cfg.type === 'plug' ? lcfg : { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) }; // (a plug chosen as the key keeps its own settings)
+          let pl = null;
+          if (inset && shallow) {
+            let an2 = null; try { an2 = analyzeLoop(P, I, loop, { ...lcfg, sink: 0 }, D); pl = planPlugs(an2, pcfg); } catch (err) { pl = null; }
+            if (pl && pl.some(q => q.ok && q.depth >= Math.max(1.5, 1.5 * (sk.least || 0)))) { an = an2; out.frames[out.frames.length - 1] = an.frame; delete draw.sink; }
+            else { inset = false; pl = null; }
+          }
           if (inset) {
-            const pcfg = cfg.type === 'plug' ? lcfg : { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) }; // (a plug chosen as the key keeps its own settings)
-            const pl = planPlugs(an, pcfg);
+            if (!pl) pl = planPlugs(an, pcfg);
             per.plugs = pl.filter(q => q.ok); per.inset = per.plugs.length > 0; per.cfg = per.inset ? pcfg : lcfg;
             if (!per.plugs.length && !out.noKeys && !tiny) out.noKeys = { code: 'plug', reason: (pl[0] || {}).reason || 'no room' };
             const H = an.curved.heightAt;
@@ -5847,12 +6192,42 @@ const KMCore = (() => {
     }
     return out;
   }
+  // (1.96) The cut may change a line's joint from the one planned (`cutAlongLoops`: a boss drafted to lift out along
+  // the pieces' one way on in place of keys or a plug that would lock; keys left off a plug that leans). The pick's
+  // per-line plan and what the app draws are brought in step with what was made (`result.jointsMade`, matched to the
+  // pick's lines by position: the cut may take its lines in another order).
   function planPickPieces(P0, I0, req0) {
+    const out = planPickPiecesRaw(P0, I0, req0), r = out.result, P = pickMeshOf.get(out) || P0;
+    if (!r || !r.jointsMade || !out.loops) return out;
+    const key = (x, y, z) => Math.fround(x) + ',' + Math.fround(y) + ',' + Math.fround(z);
+    const sets = out.loops.map(l => new Set(l.verts.map(v => key(P[3 * v], P[3 * v + 1], P[3 * v + 2]))));
+    const made = out.loops.map(() => null), plugsMade = out.loops.map(() => null);
+    r.jointsMade.forEach((j, k) => { const i = sets.findIndex((s, i2) => !made[i2] && s.has(key(j.at[0], j.at[1], j.at[2]))); if (i >= 0) { made[i] = j; plugsMade[i] = (r.plugsMade || [])[k] || null; } });
+    if (made.some(j => !j)) return out;
+    r.jointsMade = made; r.plugsMade = plugsMade;
+    out.perLoop = out.perLoop.map((per, i) => {
+      const j = made[i], q = { ...per, made: j.kind, why: j.why || null, off: j.off || 0 };
+      if (j.kind === 'boss') { Object.assign(q, { keys: [], plugs: j.plugs, inset: true, boss: true, draft: j.draft, cfg: j.cfg, extruded: false }); out.draw[i] = { keys: [], plugs: j.draw }; }
+      else {
+        if (!j.keys && (per.keys || []).length) { q.keys = []; out.draw[i] = { ...out.draw[i], keys: [] }; }
+        if (j.kind !== 'plug' && (per.plugs || []).length) { q.plugs = []; q.inset = false; out.draw[i] = { ...out.draw[i], plugs: [] }; }
+        if (j.kind !== 'edge' && j.kind !== 'skew') { if (q.extruded) q.extruded = false; if (out.draw[i] && out.draw[i].sink) out.draw[i] = { ...out.draw[i], sink: null }; }
+        else q.extruded = true;
+      }
+      return q;
+    });
+    out.keys = out.perLoop.reduce((n, per) => n + (per.keys || []).length, 0); out.plugs = out.perLoop.reduce((n, per) => n + (per.plugs || []).length, 0);
+    const allMade = !out.perLoop.some(per => !per.tiny && per.why !== 'tiny' && !per.made);
+    if (out.noKeys && allMade) out.noKeys = null;
+    if (out.dropped && allMade) out.dropped = null; // (joints were left off as planned, and the cut gave every line one that lifts out)
+    return out;
+  }
+  function planPickPiecesRaw(P0, I0, req0) {
     const { P, I, req } = pickMesh(P0, I0, req0); // the same eased lines as planJoints worked on (it is quick and comes out alike)
     const cfg = req.cfg, out = req.planned ? { ...req.planned, result: null, error: null, errorCode: null, forced: null, dropped: null } : planJoints(P, I, req), loops = out.loops;
     pickMeshOf.set(out, P);
     const run = (withJoints, force, only = -1) => { // only: the one line that keeps its joints
-      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, sinkStep: req.sinkStep, perLoop: withJoints ? out.perLoop : loops.map((l, i) => (i === only ? out.perLoop[i] : { keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
+      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, sinkStep: req.sinkStep, perLoop: withJoints ? out.perLoop : loops.map((l, i) => (i === only ? out.perLoop[i] : { keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide, tiny: out.perLoop[i] && out.perLoop[i].tiny })) };
       if (req.regions) return splitRegions(P, I, req.seg, req.regions, o);
       if (loops.length > 1) return cutAlongLoops(P, I, loops, { ...o, what: 'lines' });
       const p0 = o.perLoop[0] || {};
@@ -6359,7 +6734,7 @@ const KMCore = (() => {
     const out = [];
     if (cfg.type !== 'plug' || !an || an.base.error) return out;
     const sec = an.base, m = cfg.margin, c = cfg.clearance, ca = c + 0.1, floorT = Math.max(0.8, m * 0.75);
-    const tanS = Math.tan((Math.max(0, Math.min(30, cfg.plugSlope === undefined ? 5 : cfg.plugSlope)) * Math.PI) / 180), gs = c * Math.sqrt(1 + tanS * tanS);
+    const tanS = Math.tan((Math.max(0, Math.min(cfg.plugSlopeMax > 30 ? cfg.plugSlopeMax : 30, cfg.plugSlope === undefined ? 5 : cfg.plugSlope)) * Math.PI) / 180), gs = c * Math.sqrt(1 + tanS * tanS);
     const S = cfg.pegSide === 'above' ? -1 : +1, round = Math.max(1, m);
     const src = an._src, F = an.frame, H = an.curved ? an.curved.heightAt : () => 0;
     const g = src ? raysFor(src.P, src.I, F) : null;
@@ -6412,8 +6787,23 @@ const KMCore = (() => {
       // the sloping sides move the top in by depth × tan(slope): where that folds a concave corner over itself, a
       // shallower plug is used instead of none
       let depth = best.depth, top, floor, fine = false;
+      if (tanS > 0.6 && best.inradius > 0) depth = Math.min(depth, Math.max(1, 0.6 * best.inradius / tanS)); // (1.96) a steeply drafted boss ends in a top at least two fifths as wide as its base
       for (let tries = 0; tries < 8 && depth >= 1; tries++) {
         top = offsetRing(base, -depth * tanS); floor = offsetRing(top, gs);
+        if (tanS > 0.6 && best.inradius > 0 && !(ringOk(top) && ringOk(floor))) {
+          // (1.96) a steep draft moves the top in by millimetres, and a ring of many short edges moved in point by point
+          // folds at every wiggle: the top is the base drawn in towards the plug's middle instead (the same shape,
+          // smaller, at least the draft asked at its nearest point), where the base can be seen whole from there
+          // (each wall moves in by its line's distance from the middle × (1 − scale), so the scale comes from the
+          // nearest wall line, not the inradius: on an L or a U the inside corner's walls pass much nearer the middle;
+          // where no scale of at least 0.3 gives every wall its draft, the plug is made shallower below)
+          let hmin = Infinity;
+          for (let i = 0; i < base.length; i++) { const a = base[i], b = base[(i + 1) % base.length], ex = b[0] - a[0], ey = b[1] - a[1], L = Math.hypot(ex, ey); if (L < 1e-9) continue; hmin = Math.min(hmin, ((best.x - a[0]) * -ey + (best.y - a[1]) * ex) / L); }
+          if (hmin > 0 && 1 - depth * tanS / hmin < 0.3 && 0.7 * hmin / tanS >= 1) depth = 0.7 * hmin / tanS; // (as deep as a top three tenths the size allows)
+          const sc = hmin > 0 ? 1 - depth * tanS / hmin : -1, fb = flatOf(base);
+          const t2 = sc >= 0.3 - 1e-9 ? base.map(q => [best.x + (q[0] - best.x) * sc, best.y + (q[1] - best.y) * sc]) : null;
+          if (t2 && t2.every(q => pointInRing(fb, q[0], q[1]))) { top = t2; floor = t2.map((q, i) => [q[0] + mouth[i][0] - base[i][0], q[1] + mouth[i][1] - base[i][1]]); }
+        }
         if (ringOk(top) && ringOk(floor)) { fine = true; break; }
         depth *= 0.7;
       }
@@ -6939,7 +7329,7 @@ const KMCore = (() => {
     const fmt1 = (v) => (Math.round(v * 10) / 10).toString();
     const byJoint = new Map();
     parts.forEach((p, i) => { for (const j of p.joints || []) { if (!byJoint.has(j.id)) byJoint.set(j.id, []); byJoint.get(j.id).push(i); } });
-    const kindName = { peg: 'pegs', dowel: 'dowels', magnet: 'magnets', plug: 'plug', none: 'no keys' };
+    const kindName = { peg: 'pegs', dowel: 'dowels', magnet: 'magnets', plug: 'plug', boss: 'bosses', none: 'no keys' };
     const pictures = parts.some(p => p.image);
     const rows = parts.map((p, i) => {
       const b = bounds(p.positions), joints = (p.joints || []).map(j => { const others = (byJoint.get(j.id) || []).filter(k => k !== i).map(k => esc(parts[k].name)); return `${j.number != null ? `<b>№ ${esc(j.number)}</b> ` : ''}${others.length ? 'with ' + others.join(', ') : 'with another part'}${j.type ? ` (${kindName[j.type] || esc(j.type)}${j.keys ? `, ${j.keys}` : ''})` : ''}`; });
@@ -7840,6 +8230,457 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     if (s.kind === 'ring') { const ri = Math.max(0.01, Math.min(s.inner / 2, r - 0.01)); return latheMesh(shapedCorners([[ri, -h / 2], [r, -h / 2], [r, h / 2], [ri, h / 2]], true, edge, es), n, true); }
     throw new Error(`Unknown shape: ${s.kind}`);
   }
+  /* ---- The exploded view ----
+     The owner on 1.95: "explode is not intelligent and parts are intersecting when exploded". Every piece used to move
+     along its own pull, on its own: the body moved too, a hand and the sleeve it plugs into went separate ways, and a
+     sleeve that slides down from under a cape kept sliding into the skirt. Now the pieces are read as an assembly:
+     - **Mates** come from the geometry. Pieces that share a cut face share its points exactly, so every point is
+       hashed by its float32 bits; two pieces are mates when they share a face's worth of points, and the triangles
+       of one whose corners are all shared with the other are the joint, whose summed normal says which way it faces.
+     - **A tree** per group of mated pieces: the biggest piece is the root and never moves. A piece hangs on the mate
+       nearest the root it shares the biggest joint with, except that a piece which stands in the way of a mate's
+       slide is carried by that mate (a hand on the end of a sleeve), so the sleeve can come off at all.
+     - **A path** per piece, relative to its parent: along its slide direction (the cut's own pull when it agrees with
+       the joint) only as far as nothing is in the way, then along the freest of a few directions outward. "In the
+       way" is measured by lines from points spread over the piece (and over what it carries) to the first face of
+       any other piece.
+     - **In turn**: a parent starts once the pieces it carries have come out of their joints.
+     `explodePlan` works this out once per set of parts; `explodeAt(plan, k)` gives each part's offset at amount k. */
+  // The first face a ray enters (its front), between minT and maxT along it, or -1. The ray may start outside the grid.
+  function castFirst(grid, P, I, o, d, maxT, minT = 0) {
+    const { lo, size, dims, start, tris } = grid;
+    let t0 = minT, t1 = maxT;
+    for (let k = 0; k < 3; k++) {
+      const a = lo[k], b = lo[k] + dims[k] * size;
+      if (d[k] === 0) { if (o[k] < a || o[k] > b) return -1; continue; }
+      let ta = (a - o[k]) / d[k], tb = (b - o[k]) / d[k]; if (ta > tb) { const s = ta; ta = tb; tb = s; }
+      if (ta > t0) t0 = ta; if (tb < t1) t1 = tb;
+      if (t0 > t1) return -1;
+    }
+    const idx = [0, 0, 0], step = [0, 0, 0], tMax = [0, 0, 0], tDelta = [0, 0, 0];
+    for (let k = 0; k < 3; k++) {
+      idx[k] = Math.min(dims[k] - 1, Math.max(0, Math.floor((o[k] + d[k] * t0 - lo[k]) / size)));
+      step[k] = Math.sign(d[k]);
+      if (d[k] === 0) { tMax[k] = Infinity; tDelta[k] = Infinity; continue; }
+      tMax[k] = (lo[k] + (idx[k] + (step[k] > 0 ? 1 : 0)) * size - o[k]) / d[k]; tDelta[k] = Math.abs(size / d[k]);
+    }
+    let best = -1, guard = 0;
+    while (guard++ < dims[0] + dims[1] + dims[2] + 3) {
+      const c = (idx[0] * dims[1] + idx[1]) * dims[2] + idx[2];
+      for (let q = start[c]; q < start[c + 1]; q++) {
+        const t = tris[q], a = 3 * I[3 * t], b = 3 * I[3 * t + 1], cc = 3 * I[3 * t + 2];
+        const e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2], e2x = P[cc] - P[a], e2y = P[cc + 1] - P[a + 1], e2z = P[cc + 2] - P[a + 2];
+        const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x, det = e1x * px + e1y * py + e1z * pz;
+        if (det <= 1e-12) continue; // only a face the ray meets from its front: going into the solid
+        const inv = 1 / det, tx = o[0] - P[a], ty = o[1] - P[a + 1], tz = o[2] - P[a + 2];
+        const u = (tx * px + ty * py + tz * pz) * inv; if (u < 0 || u > 1) continue;
+        const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+        const v = (d[0] * qx + d[1] * qy + d[2] * qz) * inv; if (v < 0 || u + v > 1) continue;
+        const tt = (e2x * qx + e2y * qy + e2z * qz) * inv;
+        if (tt >= minT && tt <= maxT && (best < 0 || tt < best)) best = tt;
+      }
+      const tCell = Math.min(tMax[0], tMax[1], tMax[2]);
+      if (best >= 0 && best <= tCell) return best;
+      if (tCell > t1) return best;
+      const k = tMax[0] <= tMax[1] ? (tMax[0] <= tMax[2] ? 0 : 2) : (tMax[1] <= tMax[2] ? 1 : 2);
+      idx[k] += step[k]; tMax[k] += tDelta[k];
+      if (idx[k] < 0 || idx[k] >= dims[k]) return best;
+    }
+    return best;
+  }
+  // About `n` points spread evenly by area over a surface, each with its face's normal: [x, y, z, nx, ny, nz, …]
+  function surfaceSamples(P, I, n) {
+    const nt = I.length / 3, A = new Float64Array(nt); let total = 0;
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+      const x = (P[b + 1] - P[a + 1]) * (P[c + 2] - P[a + 2]) - (P[b + 2] - P[a + 2]) * (P[c + 1] - P[a + 1]), y = (P[b + 2] - P[a + 2]) * (P[c] - P[a]) - (P[b] - P[a]) * (P[c + 2] - P[a + 2]), z = (P[b] - P[a]) * (P[c + 1] - P[a + 1]) - (P[b + 1] - P[a + 1]) * (P[c] - P[a]);
+      A[t] = Math.hypot(x, y, z) / 2; total += A[t];
+    }
+    const out = []; let acc = 0.5, seed = 12345;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    for (let t = 0; t < nt && total > 0; t++) {
+      acc += (A[t] / total) * n;
+      let first = true;
+      while (acc >= 1) {
+        acc -= 1;
+        const a = 3 * I[3 * t], b = 3 * I[3 * t + 1], c = 3 * I[3 * t + 2];
+        let u = 1 / 3, v = 1 / 3;
+        if (!first) { u = rnd(); v = rnd(); if (u + v > 1) { u = 1 - u; v = 1 - v; } u = 0.02 + 0.94 * u; v = 0.02 + 0.94 * v; }
+        first = false;
+        const w = 1 - u - v;
+        const nx = (P[b + 1] - P[a + 1]) * (P[c + 2] - P[a + 2]) - (P[b + 2] - P[a + 2]) * (P[c + 1] - P[a + 1]), ny = (P[b + 2] - P[a + 2]) * (P[c] - P[a]) - (P[b] - P[a]) * (P[c + 2] - P[a + 2]), nz = (P[b] - P[a]) * (P[c + 1] - P[a + 1]) - (P[b + 1] - P[a + 1]) * (P[c] - P[a]), L = Math.hypot(nx, ny, nz) || 1;
+        out.push(w * P[a] + u * P[b] + v * P[c], w * P[a + 1] + u * P[b + 1] + v * P[c + 1], w * P[a + 2] + u * P[b + 2] + v * P[c + 2], nx / L, ny / L, nz / L);
+      }
+    }
+    return new Float64Array(out);
+  }
+  // Which pieces share cut faces: per pair, the points they share (as vertices of the lower-numbered piece), the
+  // joint's area, and the way from the one to the other across it
+  function explodeMates(pieces) {
+    const n = pieces.length; let nv = 0; for (const p of pieces) nv += p.P.length / 3;
+    let cap = 16; while (cap < nv * 2) cap *= 2;
+    const table = new Int32Array(cap).fill(-1), ux = new Uint32Array(nv), uy = new Uint32Array(nv), uz = new Uint32Array(nv), last = new Int32Array(nv).fill(-1), cnt = new Int32Array(nv);
+    let nu = 0;
+    const ids = pieces.map((p, pi) => {
+      const bits = new Uint32Array(p.P.buffer, p.P.byteOffset, p.P.length), m = p.P.length / 3, id = new Int32Array(m);
+      for (let v = 0; v < m; v++) {
+        let x = bits[3 * v], y = bits[3 * v + 1], z = bits[3 * v + 2];
+        if (x === 0x80000000) x = 0; if (y === 0x80000000) y = 0; if (z === 0x80000000) z = 0;
+        let h = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) >>> 0; h = (h ^ (h >>> 15)) & (cap - 1);
+        for (;;) { const e = table[h]; if (e < 0) { table[h] = nu; ux[nu] = x; uy[nu] = y; uz[nu] = z; id[v] = nu++; break; } if (ux[e] === x && uy[e] === y && uz[e] === z) { id[v] = e; break; } h = (h + 1) & (cap - 1); }
+        if (last[id[v]] !== pi) { last[id[v]] = pi; cnt[id[v]]++; }
+      }
+      return id;
+    });
+    // the pieces at each point held by more than one
+    const start = new Int32Array(nu + 1); for (let u = 0; u < nu; u++) start[u + 1] = start[u] + (cnt[u] > 1 ? cnt[u] : 0);
+    const fill = start.slice(0, nu), who = new Int32Array(start[nu]); last.fill(-1);
+    ids.forEach((id, pi) => { for (let v = 0; v < id.length; v++) { const u = id[v]; if (cnt[u] > 1 && last[u] !== pi) { last[u] = pi; who[fill[u]++] = pi; } } });
+    const pairs = new Map(); // i * n + j (i < j) → { i, j, pts: [vertex of i, …], a: [area, x, y, z] of i's side, b: of j's }
+    const pairOf = (i, j) => { const k = i < j ? i * n + j : j * n + i; let q = pairs.get(k); if (!q) { q = { i: Math.min(i, j), j: Math.max(i, j), pts: [], tris: [], a: [0, 0, 0, 0], b: [0, 0, 0, 0], a2: [0, 0, 0], b2: [0, 0, 0] }; pairs.set(k, q); } return q; };
+    last.fill(-1);
+    ids.forEach((id, pi) => {
+      const P = pieces[pi].P, I = pieces[pi].I;
+      for (let v = 0; v < id.length; v++) { const u = id[v]; if (cnt[u] < 2 || last[u] === pi) continue; last[u] = pi; for (let q = start[u]; q < start[u + 1]; q++) { const pj = who[q]; if (pj > pi) pairOf(pi, pj).pts.push(v); } }
+      for (let t = 0; t < I.length; t += 3) {
+        const ua = id[I[t]], ub = id[I[t + 1]], uc = id[I[t + 2]];
+        if ((cnt[ua] > 1 ? 1 : 0) + (cnt[ub] > 1 ? 1 : 0) + (cnt[uc] > 1 ? 1 : 0) < 2) continue;
+        const has = (u, pj) => { for (let r = start[u]; r < start[u + 1]; r++) if (who[r] === pj) return true; return false; };
+        const a = 3 * I[t], b = 3 * I[t + 1], c = 3 * I[t + 2];
+        const x = (P[b + 1] - P[a + 1]) * (P[c + 2] - P[a + 2]) - (P[b + 2] - P[a + 2]) * (P[c + 1] - P[a + 1]), y = (P[b + 2] - P[a + 2]) * (P[c] - P[a]) - (P[b] - P[a]) * (P[c + 2] - P[a + 2]), z = (P[b] - P[a]) * (P[c + 1] - P[a + 1]) - (P[b + 1] - P[a + 1]) * (P[c] - P[a]);
+        const seen = (pj, inA) => {
+          if (pj === pi) return;
+          const k = (inA ? 1 : 0) + (has(ub, pj) ? 1 : 0) + (has(uc, pj) ? 1 : 0); if (k < 2) return;
+          const pr = pairOf(pi, pj), s2 = pi < pj ? pr.a2 : pr.b2; s2[0] += x / 2; s2[1] += y / 2; s2[2] += z / 2; // a face with two corners on the joint: of the joint or beside it
+          if (k < 3) return;
+          const sd = pi < pj ? pr.a : pr.b; sd[0] += Math.hypot(x, y, z) / 2; sd[1] += x / 2; sd[2] += y / 2; sd[3] += z / 2;
+          if (pi < pj) pr.tris.push(t / 3, x / 2, y / 2, z / 2);
+        };
+        for (let q = start[ua]; q < start[ua + 1]; q++) seen(who[q], true);
+        for (let q = start[ub]; q < start[ub + 1]; q++) if (!has(ua, who[q])) seen(who[q], false);
+      }
+    });
+    const mates = [];
+    for (const q of pairs.values()) {
+      if (q.pts.length < 3) continue;
+      const P = pieces[q.i].P, m = q.pts.length, c = [0, 0, 0];
+      for (const v of q.pts) for (let k = 0; k < 3; k++) c[k] += P[3 * v + k] / m;
+      const cov = [0, 0, 0, 0, 0, 0];
+      for (const v of q.pts) { const x = P[3 * v] - c[0], y = P[3 * v + 1] - c[1], z = P[3 * v + 2] - c[2]; cov[0] += x * x; cov[1] += x * y; cov[2] += x * z; cov[3] += y * y; cov[4] += y * z; cov[5] += z * z; }
+      const eig = symEig3(cov.map(x => x / m));
+      const tri = q.a[0] + q.b[0];
+      if (!(tri > 0) && !(m >= 8 && eig[1].l > 0.0025 * eig[0].l)) continue; // a line of points where two cuts cross is no joint
+      // the way from i to j: the joint's faces on i look at j, those on j look back
+      let g = [q.a[1] - q.b[1], q.a[2] - q.b[2], q.a[3] - q.b[3]], L = Math.hypot(g[0], g[1], g[2]);
+      if (!(tri > 0) || !(L > 0.2 * tri)) { // no faces to go by (keys change each side's faces), or a joint that wraps right round: the points' own plane
+        const nrm = eig[2].v, ci = pieces[q.i].c, cj = pieces[q.j].c, s = (cj[0] - ci[0]) * nrm[0] + (cj[1] - ci[1]) * nrm[1] + (cj[2] - ci[2]) * nrm[2];
+        const g2 = [q.a2[0] - q.b2[0], q.a2[1] - q.b2[1], q.a2[2] - q.b2[2]], s2 = g2[0] * nrm[0] + g2[1] * nrm[1] + g2[2] * nrm[2]; // the faces at the joint on each side look across it
+        g = nrm.map(x => x * ((s2 || s) < 0 ? -1 : 1)); L = 1;
+      }
+      // how deep the joint is: each connected patch of it (a plug in its socket, a face that follows a seam), measured
+      // along the way that patch faces
+      let deep = 0;
+      if (q.tris.length) {
+        const I = pieces[q.i].I, par = new Map(), find = (v) => { let r = v; while (par.get(r) !== r) r = par.get(r); while (par.get(v) !== r) { const nx = par.get(v); par.set(v, r); v = nx; } return r; };
+        for (let k = 0; k < q.tris.length; k += 4) { const t = 3 * q.tris[k]; for (let e = 0; e < 3; e++) if (!par.has(I[t + e])) par.set(I[t + e], I[t + e]); const ra = find(I[t]); for (let e = 1; e < 3; e++) { const rb = find(I[t + e]); if (rb !== ra) par.set(rb, ra); } }
+        const patch = new Map();
+        for (let k = 0; k < q.tris.length; k += 4) { const r = find(I[3 * q.tris[k]]); let pt = patch.get(r); if (!pt) { pt = { n: [0, 0, 0], a: 0 }; patch.set(r, pt); } pt.n[0] += q.tris[k + 1]; pt.n[1] += q.tris[k + 2]; pt.n[2] += q.tris[k + 3]; pt.a += Math.hypot(q.tris[k + 1], q.tris[k + 2], q.tris[k + 3]); }
+        for (const pt of patch.values()) { const l = Math.hypot(pt.n[0], pt.n[1], pt.n[2]); pt.n = l > 0.2 * pt.a ? pt.n.map(x => x / l) : g.map(x => x / L); pt.lo = Infinity; pt.hi = -Infinity; }
+        for (const v of par.keys()) { const pt = patch.get(find(v)); if (!pt) continue; const h = P[3 * v] * pt.n[0] + P[3 * v + 1] * pt.n[1] + P[3 * v + 2] * pt.n[2]; if (h < pt.lo) pt.lo = h; if (h > pt.hi) pt.hi = h; }
+        for (const pt of patch.values()) if (pt.a >= 0.05 * q.a[0]) deep = Math.max(deep, pt.hi - pt.lo);
+      }
+      // (1.96) and how far either piece reaches past the joint within its outline: a peg, a dowel's boss or a plug
+      // stands out of one piece into the other, and shares no corner with it (the fit gap), so the shared faces alone
+      // read a keyed joint as flat; capped at the joint's own width, so a limb beside it isn't counted
+      {
+        const nn = g.map(x => x / L), h0 = c[0] * nn[0] + c[1] * nn[1] + c[2] * nn[2];
+        const ax = Math.abs(nn[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], b0 = cross3(nn, ax), bl = Math.hypot(b0[0], b0[1], b0[2]), bu = b0.map(x => x / bl), bv = cross3(nn, bu);
+        let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+        for (const v of q.pts) { const x = P[3 * v], y = P[3 * v + 1], z = P[3 * v + 2], a = x * bu[0] + y * bu[1] + z * bu[2], b = x * bv[0] + y * bv[1] + z * bv[2]; if (a < u0) u0 = a; if (a > u1) u1 = a; if (b < v0) v0 = b; if (b > v1) v1 = b; }
+        const span = Math.max(u1 - u0, v1 - v0), mg = 0.02 * span;
+        let reach = 0;
+        for (const [pi, sgn] of [[q.i, 1], [q.j, -1]]) {
+          const Q = pieces[pi].P;
+          for (let v = 0; v < Q.length; v += 3) {
+            const x = Q[v], y = Q[v + 1], z = Q[v + 2], a = x * bu[0] + y * bu[1] + z * bu[2];
+            if (a < u0 - mg || a > u1 + mg) continue;
+            const b = x * bv[0] + y * bv[1] + z * bv[2]; if (b < v0 - mg || b > v1 + mg) continue;
+            const e = sgn * (x * nn[0] + y * nn[1] + z * nn[2] - h0); if (e > reach) reach = e;
+          }
+        }
+        deep = Math.max(deep, Math.min(reach, span));
+      }
+      mates.push({ i: q.i, j: q.j, pts: q.pts, centre: c, depth: deep, n: g.map(x => x / L), area: tri > 0 ? tri / 2 : Math.PI * Math.sqrt(Math.max(0, eig[0].l * eig[1].l)) * 2 });
+    }
+    return mates;
+  }
+  function explodePlan(parts, opts = {}) {
+    const n = parts.length, pieces = parts.map((p) => {
+      const P = p.positions instanceof Float32Array ? p.positions : Float32Array.from(p.positions), I = p.indices, b = bounds(P), c = [0, 0, 0], m = P.length / 3;
+      for (let v = 0; v < m; v++) { c[0] += P[3 * v] / m; c[1] += P[3 * v + 1] / m; c[2] += P[3 * v + 2] / m; }
+      const pl = p.pull ? Math.hypot(p.pull[0], p.pull[1], p.pull[2]) : 0, pull = pl > 1e-9 ? [p.pull[0] / pl, p.pull[1] / pl, p.pull[2] / pl] : null;
+      return { P, I, b, c: m ? c : b.center.slice(), pull, vol: typeof p.volume === 'number' ? p.volume : volume(P, I), mates: [], parent: -1, root: -1, kids: [], legs: [], start: 0, total: 0, clear: 0, joint: 0 };
+    });
+    const out = { parts: [], order: [], travel: 0 };
+    if (!n) return out;
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const p of pieces) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p.b.min[k]); hi[k] = Math.max(hi[k], p.b.max[k]); }
+    const mid = [0, 1, 2].map(k => (lo[k] + hi[k]) / 2), D = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1, S = (opts.travel || 0.25) * D;
+    out.travel = S;
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], unit = (a) => { const L = Math.hypot(a[0], a[1], a[2]); return L > 1e-12 ? [a[0] / L, a[1] / L, a[2] / L] : null; };
+    const mateOf = (i, j) => pieces[i].mates.find(e => e.to === j);
+    const isAbove = (a, i) => { for (let q = pieces[i].parent, g = 0; q >= 0 && g <= n; q = pieces[q].parent, g++) if (q === a) return true; return false; }; // a is an ancestor of i
+    // the way a piece's joints let it go: off its parent across their joint; for a piece hung on the root with no joint
+    // to it, away from all its mates together
+    const jointWay = (i) => { const p = pieces[i], e = mateOf(i, p.parent); if (e) return e.n.map(x => -x); const all = [0, 0, 0]; for (const m of p.mates) if (!isAbove(i, m.to)) for (let k = 0; k < 3; k++) all[k] -= m.n[k] * m.m.area; return unit(all); };
+    // the way a piece leaves: the cut's own pull where it agrees with the joint, else the joint's
+    const slideOf = (i) => { const p = pieces[i], geo = jointWay(i); return p.pull && (!geo || dot(p.pull, geo) > 0.5) ? p.pull : geo || unit([p.c[0] - mid[0], p.c[1] - mid[1], p.c[2] - mid[2]]) || [0, 0, 1]; };
+    const mates = n > 1 ? explodeMates(pieces) : [];
+    for (const m of mates) { pieces[m.i].mates.push({ to: m.j, m, n: m.n }); pieces[m.j].mates.push({ to: m.i, m, n: m.n.map(x => -x) }); }
+    // groups of mated pieces; in each the biggest stands still
+    const depth = new Int32Array(n).fill(-1);
+    for (let s = 0; s < n; s++) {
+      if (pieces[s].root >= 0) continue;
+      const group = [s]; pieces[s].root = s;
+      for (let q = 0; q < group.length; q++) for (const e of pieces[group[q]].mates) if (pieces[e.to].root < 0) { pieces[e.to].root = s; group.push(e.to); }
+      let root = s; for (const i of group) if (pieces[i].vol > pieces[root].vol) root = i;
+      for (const i of group) pieces[i].root = root;
+      depth[root] = 0; const queue = [root];
+      for (let q = 0; q < queue.length; q++) for (const e of pieces[queue[q]].mates) if (depth[e.to] < 0) { depth[e.to] = depth[queue[q]] + 1; queue.push(e.to); }
+      // Each piece hangs on the mate nearest the root it shares the biggest joint with, if that mate can carry it:
+      // a mate whose own slide would push the piece into another of its mates can't (the arches of a knot cut by one
+      // plane: an arch that lifts can't take along the arc below it, which lies under the next arch). A piece no
+      // mate can carry hangs on the root itself and leaves all its joints at once.
+      const hung = new Set([root]);
+      for (const i of queue) {
+        if (i === root) continue;
+        const cands = pieces[i].mates.filter(e => hung.has(e.to)).sort((a, b) => depth[a.to] - depth[b.to] || b.m.area - a.m.area);
+        const carries = (y) => { for (let a = y; pieces[a].parent >= 0; a = pieces[a].parent) { const sl = slideOf(a); for (const e of pieces[i].mates) if (e.to !== a && !isAbove(a, e.to) && dot(sl, e.n) > 0.3) return false; } return true; };
+        const by = cands.find(e => carries(e.to));
+        pieces[i].parent = by ? by.to : root; hung.add(i);
+      }
+    }
+    // ---- what is in the way ----
+    const back = D * 2e-5, skim = D * 2e-3, thick = D * 0.03, budget = opts.samples || 1400;
+    const gridOf = (p) => p.grid || (p.grid = meshGrid(p.P, p.I, Math.max(12, Math.min(64, Math.round(Math.cbrt(p.I.length / 3) * 1.3)))));
+    const samplesOf = (p) => p.samples || (p.samples = surfaceSamples(p.P, p.I, budget));
+    // How far the bodies ([{ i, off }], pieces at offsets) can go along d before more than a few of their points
+    // have met one of the obstacle pieces (which stand where they are), up to maxT
+    function freeDist(bodies, obstacles, d, maxT, stride = 1, joint = 0) {
+      const hits = []; let lead = 0; const o = [0, 0, 0];
+      const total = bodies.reduce((s, b) => s + samplesOf(pieces[b.i]).length / 6, 0);
+      for (const b of bodies) {
+        const sm = samplesOf(pieces[b.i]), m = sm.length / 6, st = Math.max(1, Math.round(stride * total / budget)); // what is carried shares the points, it doesn't add to them
+        for (let s = 0; s < m; s += st) {
+          const c = sm[6 * s + 3] * d[0] + sm[6 * s + 4] * d[1] + sm[6 * s + 5] * d[2];
+          if (c < 0.05) continue; // only faces that lead the way can meet anything first
+          lead++;
+          o[0] = sm[6 * s] + b.off[0] - d[0] * back; o[1] = sm[6 * s + 1] + b.off[1] - d[1] * back; o[2] = sm[6 * s + 2] + b.off[2] - d[2] * back;
+          const from = c < 0.3 ? back + skim : 0; // a face sliding along its own joint grazes the mate's wall: not a clash
+          let best = -1;
+          for (const j of obstacles) {
+            const q = pieces[j], lim = best < 0 ? maxT + back : best; let t = -1, f = from;
+            for (let g = 0; g < 4; g++) {
+              t = castFirst(gridOf(q), q.P, q.I, o, d, lim, f);
+              if (t < 0 || !(joint > 0) || t - back >= joint) break;
+              // (a locked piece) on its way out of its joint it goes through a thin wall; a thick one stops it
+              const th = castInward(gridOf(q), q.P, q.I, [o[0] + d[0] * (t + back), o[1] + d[1] * (t + back), o[2] + d[2] * (t + back)], d, thick);
+              if (th < 0) break;
+              f = t + th + 2 * back; t = -1;
+            }
+            if (t >= 0 && (best < 0 || t < best)) best = t;
+          }
+          if (best >= 0) hits.push(Math.max(0, best - back));
+        }
+      }
+      const allow = Math.floor(lead * 0.006); // a stray point or two is noise
+      if (hits.length <= allow) return maxT;
+      hits.sort((a, b) => a - b);
+      return Math.min(maxT, hits[allow]);
+    }
+    const subtree = (i) => { const list = [i]; for (let q = 0; q < list.length; q++) for (const k of pieces[list[q]].kids) list.push(k); return list; };
+    const quick = !!opts.quick;
+    // ---- a piece in the way of its mate's slide is carried by that mate ----
+    if (!quick) {
+      const sweeps = (y, x) => freeDist([{ i: y, off: [0, 0, 0] }], [x], slideOf(y), S, 2) < 0.5 * S;
+      const carry = [];
+      for (let y = 0; y < n; y++) {
+        const py = pieces[y]; if (py.parent < 0) continue;
+        for (const e of py.mates) {
+          const x = e.to; if (x === py.parent || pieces[x].parent < 0 || pieces[x].parent === y) continue;
+          if (sweeps(y, x) && !sweeps(x, y)) carry.push({ x, y, area: e.m.area });
+        }
+      }
+      carry.sort((a, b) => b.area - a.area);
+      const moved = new Set();
+      for (const c of carry) { if (moved.has(c.x) || c.y === c.x || isAbove(c.x, c.y)) continue; pieces[c.x].parent = c.y; moved.add(c.x); }
+    }
+    for (let i = 0; i < n; i++) if (pieces[i].parent >= 0) pieces[pieces[i].parent].kids.push(i);
+    // where a piece's own path has taken it after travelling s along it
+    const along = (p, s) => { const at = [0, 0, 0]; for (const l of p.legs) { if (s <= 0) break; const t = Math.min(l.len, s); at[0] += l.d[0] * t; at[1] += l.d[1] * t; at[2] += l.d[2] * t; s -= l.len; } return at; };
+    const ownAt = (p, k) => p.total > 0 ? along(p, p.total * Math.min(1, Math.max(0, (k - p.start) / (1 - p.start)))) : [0, 0, 0];
+    const FIXED = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1], [1, 1, 0], [1, -1, 0], [-1, 1, 0], [-1, -1, 0], [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 0, -1], [-1, 0, -1], [0, 1, -1], [0, -1, -1]].map(unit);
+    const add = (list, d, min = 0.98) => { if (d && !list.some(q => dot(q, d) > min)) list.push(d); };
+    // the ways a piece may turn once it is out of its joint: from its parent's middle, the root's, the model's, blends
+    // of those with its first leg, the joint's own direction, and a few fixed ones that lead outward
+    function waysOut(i, d1) {
+      const p = pieces[i], c = p.c, geo = jointWay(i), list = [];
+      const rads = [pieces[p.parent].c, pieces[p.root].c, mid].map(q => unit([c[0] - q[0], c[1] - q[1], c[2] - q[2]])).filter(Boolean);
+      for (const r of rads) { const h = dot(r, d1); add(list, unit([r[0] - h * d1[0], r[1] - h * d1[1], r[2] - h * d1[2]]), 0.97); } // square to the first leg
+      for (const r of rads) add(list, r, 0.97);
+      for (const r of rads) add(list, unit([r[0] + d1[0], r[1] + d1[1], r[2] + d1[2]]), 0.97);
+      add(list, geo, 0.97);
+      if (p.pull) add(list, p.pull, 0.97);
+      const outward = rads[rads.length - 1] || rads[0] || d1;
+      for (const f of FIXED.slice().sort((a, b) => dot(b, outward) - dot(a, outward))) if (dot(f, outward) > 0.25) add(list, f, 0.9);
+      return list;
+    }
+    function planPiece(i) {
+      const p = pieces[i];
+      for (const k of p.kids) planPiece(k);
+      if (p.parent < 0) {
+        if (p.mates.length) return; // a root: it stands still
+        // a piece on its own (a loose shell, a dowel pin): along its pull, or out from the middle
+        const v = [p.b.center[0] - mid[0], p.b.center[1] - mid[1], p.b.center[2] - mid[2]];
+        if (p.pull) p.legs = [{ d: p.pull, len: 0.25 * D + 0.9 * Math.max(0, dot(p.pull, v)) }];
+        else { const u = unit(v); if (u) p.legs = [{ d: u, len: 0.9 * Math.hypot(v[0], v[1], v[2]) }]; }
+        p.total = p.legs.reduce((s, l) => s + l.len, 0);
+        return;
+      }
+      const geo = jointWay(i);
+      if (quick) { p.legs = [{ d: slideOf(i), len: S }]; p.total = S; return; }
+      const mine = subtree(i), inMine = new Set(mine), obstacles = []; for (let j = 0; j < n; j++) if (!inMine.has(j)) obstacles.push(j);
+      // the first leg: the pull, the joint's own direction, or all its joints' together
+      const firsts = [];
+      if (p.pull && (!geo || dot(p.pull, geo) > 0.2)) add(firsts, p.pull);
+      add(firsts, geo);
+      { const all = [0, 0, 0]; for (const m of p.mates) if (!inMine.has(m.to)) for (let k = 0; k < 3; k++) all[k] -= m.n[k] * m.m.area; add(firsts, unit(all)); }
+      if (!firsts.length) add(firsts, slideOf(i));
+      // how far it must go along d to be out of its joints
+      const clearAlong = (d) => { let c = 0; for (const m of p.mates) if (!inMine.has(m.to)) c = Math.max(c, m.m.depth / Math.max(0.3, -dot(d, m.n))); return Math.min(0.2 * S, c); };
+      // A path with the pieces it carries where they are once it starts (at `start`); `joint`: a locked piece, which
+      // may go through thin walls for that far
+      const attempt = (start, joint) => {
+        const place = (shift) => mine.map((j) => { const off = shift.slice(); for (let q = j; q !== i; q = pieces[q].parent) { const o = ownAt(pieces[q], start); off[0] += o[0]; off[1] += o[1]; off[2] += o[2]; } return { i: j, off }; });
+        const free = (shift, d, maxT) => { const bodies = place(shift), f = freeDist(bodies, obstacles, d, maxT, 4, joint); return f < maxT * 0.999 ? f : freeDist(bodies, obstacles, d, maxT, 1, joint); };
+        let d1 = firsts[0], F1 = -1;
+        for (const d of firsts) { const f = free([0, 0, 0], d, S); if (f > F1 * 1.1 + 1e-9) { F1 = f; d1 = d; } if (f >= S * 0.999) break; }
+        const clear = clearAlong(d1);
+        if (F1 >= S * 0.999) return { start, clear, total: S, legs: [{ d: d1, len: S }] };
+        // then the freest way out: from the parent's middle, the root's, the model's, blends with the first leg, the joint
+        const seconds = waysOut(i, d1);
+        // it turns once it is out of its joint and a little more (a tenth of the travel), so the joint opens the way it goes together
+        const want = Math.min(0.97 * F1, clear + 0.1 * S);
+        const Ls = [...new Set([Math.min(clear + 0.01 * S, 0.97 * F1), 0.25 * F1, 0.5 * F1, 0.75 * F1, 0.97 * F1, want].map(x => +x.toPrecision(6)))].sort((a, b) => Math.abs(a - want) - Math.abs(b - want));
+        // of the ways that are free all the way, the one most outward, square to the way it came out (an L, as a hand
+        // would take it off: out of the joint, then away), and a little the way it was going
+        const rad = [p.c[0] - pieces[p.root].c[0], p.c[1] - pieces[p.root].c[1], p.c[2] - pieces[p.root].c[2]], rd = dot(rad, d1);
+        const outward = unit([rad[0] - rd * d1[0], rad[1] - rd * d1[1], rad[2] - rd * d1[2]]) || unit(rad) || d1;
+        let best = { total: F1 * 0.97, legs: [{ d: d1, len: F1 * 0.97 }] };
+        for (const L of Ls) {
+          const shift = [d1[0] * L, d1[1] * L, d1[2] * L]; let pick = null;
+          for (const d2 of seconds) {
+            if (dot(d2, d1) > 0.98) continue;
+            const f = free(shift, d2, S - L), whole = f >= (S - L) * 0.999, total = L + (whole ? f : f * 0.97);
+            if (whole) { const score = 0.25 * dot(d2, d1) + dot(d2, outward); if (!pick || score > pick.score + 1e-9) pick = { score, d2 }; }
+            else if (!pick && total > best.total * 1.02 + 1e-9) best = { total, legs: L > 1e-9 ? [{ d: d1, len: L }, { d: d2, len: total - L }] : [{ d: d2, len: total }] };
+          }
+          if (pick) { best = { total: S, legs: L > 1e-9 ? [{ d: d1, len: L }, { d: pick.d2, len: S - L }] : [{ d: pick.d2, len: S }] }; break; }
+        }
+        return { start, clear, total: best.total, legs: best.legs };
+      };
+      // it starts at once if it can with what it carries still in place; else once that is out of its joints
+      let wait = 0;
+      for (const k of p.kids) { const c = pieces[k]; if (c.total > 0) wait = Math.max(wait, c.start + (1 - c.start) * Math.min(1, c.clear / c.total)); }
+      wait = Math.min(0.35, wait);
+      const waits = wait > 0 ? [0, wait / 4, wait / 2, wait] : [0];
+      const tryAll = (joint) => { let best = null; for (const w of waits) { const a = attempt(w, joint); if (!best || a.total > best.total * 1.05) best = a; if (best.total >= S * 0.999) break; } return best; };
+      let plan = tryAll(0);
+      if (plan.total < S * 0.6) { // locked (a cut that was forced): out through the thin walls that hold it
+        const joint = Math.min(0.3 * S, clearAlong(firsts[0]) + 0.02 * D);
+        const l = tryAll(joint);
+        if (l.total > plan.total * 1.2) { plan = l; p.joint = joint; }
+      }
+      p.start = plan.start; p.clear = plan.clear; p.legs = plan.legs.filter(l => l.len > 1e-9); p.total = p.legs.reduce((s, l) => s + l.len, 0);
+    }
+    // A piece carried by a piece that moves itself goes where both paths take it, so its own path, found against
+    // everything standing still, is checked again against what it really passes: each stretch between the moments a
+    // path turns is a straight line relative to each piece further up the tree. Where that meets something, the piece
+    // turns another way after leaving its joint, or stops short.
+    const breaks = (q, list) => { list.push(q.start); let cum = 0; for (const l of q.legs) { cum += l.len; if (q.total > 0) list.push(q.start + (1 - q.start) * Math.min(1, cum / q.total)); } };
+    const cutLegs = (legs, s) => { const outLegs = []; for (const l of legs) { if (s <= 1e-9) break; outLegs.push({ d: l.d, len: Math.min(l.len, s) }); s -= l.len; } return outLegs; };
+    function replan(i) {
+      const p = pieces[i], chain = []; for (let q = p.parent; q >= 0; q = pieces[q].parent) chain.push(q);
+      if (chain.length < 2 || !p.legs.length) return;
+      const mine = subtree(i), inMine = new Set(mine);
+      const below = chain.map((a, m) => new Set(subtree(m ? chain[m - 1] : i))); // what moves with the piece as seen from chain[m]
+      // the moment (k) the piece, on these legs, first meets something further up the tree than its parent; 1 if never
+      const blockedAt = (legs) => {
+        const keep = p.legs; p.legs = legs;
+        const ks = [0, 1]; breaks(p, ks); for (const a of chain) breaks(pieces[a], ks);
+        const times = [...new Set(ks.filter(k => k >= 0 && k <= 1).map(k => +k.toFixed(9)))].sort((a, b) => a - b);
+        let first = 1;
+        for (let m = 1; m < chain.length; m++) {
+          const obstacles = []; for (let j = 0; j < n; j++) if (!below[m].has(j) && (m === chain.length - 1 || isAbove(chain[m], j) || j === chain[m])) obstacles.push(j);
+          const rel = (k) => { const at = ownAt(p, k); for (let q = 0; q < m; q++) { const o = ownAt(pieces[chain[q]], k); at[0] += o[0]; at[1] += o[1]; at[2] += o[2]; } return at; };
+          for (let t = 0; t + 1 < times.length && times[t] < first; t++) {
+            const ka = times[t], kb = times[t + 1], a = rel(ka), b = rel(kb), dl = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], len = Math.hypot(dl[0], dl[1], dl[2]);
+            if (len < 1e-9) continue;
+            const bodies = mine.map((j) => { const off = a.slice(); for (let q = j; q !== i; q = pieces[q].parent) { const o = ownAt(pieces[q], ka); off[0] += o[0]; off[1] += o[1]; off[2] += o[2]; } return { i: j, off }; });
+            const sOwn = p.total * Math.min(1, Math.max(0, (ka - p.start) / (1 - p.start)));
+            const f = freeDist(bodies, obstacles, [dl[0] / len, dl[1] / len, dl[2] / len], len, 2, p.joint > sOwn ? p.joint - sOwn : 0);
+            if (f < len * 0.999) { first = Math.min(first, ka + (kb - ka) * f / len); break; }
+          }
+        }
+        p.legs = keep;
+        return first;
+      };
+      let best = { legs: p.legs, k: blockedAt(p.legs) };
+      if (best.k >= 1) return;
+      const tp = pieces[p.parent].start, sPre = p.total * Math.min(1, Math.max(0, (tp - p.start) / (1 - p.start))), len1 = p.legs[0].len;
+      const cuts = [...new Set([sPre, sPre + 0.5 * Math.max(0, len1 - sPre), Math.max(sPre, len1)].map(x => +Math.min(x, p.total).toPrecision(6)))].filter(x => x < p.total * 0.98);
+      const ways = waysOut(i, p.legs[0].d); add(ways, p.legs[0].d, 0.97); for (const a of chain) for (const l of pieces[a].legs) add(ways, l.d, 0.97);
+      search: for (const s of cuts) for (const d of ways) {
+        const legs = cutLegs(p.legs, s); legs.push({ d, len: p.total - s });
+        const k = blockedAt(legs);
+        if (k > best.k + 1e-6) best = { legs, k };
+        if (k >= 1) break search;
+      }
+      // still meeting something: stop short of it
+      p.legs = best.k >= 1 ? best.legs : cutLegs(best.legs, 0.97 * p.total * Math.min(1, Math.max(0, (best.k - p.start) / (1 - p.start))));
+    }
+    for (let i = 0; i < n; i++) if (pieces[i].parent < 0) planPiece(i);
+    for (let i = 0; i < n; i++) if (pieces[i].parent < 0) for (const j of subtree(i)) out.order.push(j);
+    if (!quick) for (const i of out.order) replan(i);
+    // (1.96) a dowel pin (no joint shared with anything, no pull) sits in a hole in each of two pieces: it goes with the
+    // moving piece whose bounds it overlaps most, at half its pace and from its parent, so it slides out of both holes
+    // along the joint instead of out through the pieces' walls
+    const overlap = (a, b) => { let v = 1; for (let k = 0; k < 3; k++) { const d = Math.min(a.max[k], b.max[k]) - Math.max(a.min[k], b.min[k]); if (!(d > 0)) return 0; v *= d; } return v; };
+    for (let i = 0; i < n; i++) {
+      const p = pieces[i]; if (p.parent >= 0 || p.mates.length || p.pull || p.kids.length) continue;
+      let q = -1, best = 0;
+      for (let j = 0; j < n; j++) { if (j === i || pieces[j].parent < 0 || !pieces[j].total) continue; const o = overlap(p.b, pieces[j].b); if (o > best) { best = o; q = j; } }
+      if (q < 0) continue;
+      const pq = pieces[q];
+      p.parent = pq.parent; pq.parent >= 0 && pieces[pq.parent].kids.push(i);
+      p.legs = pq.legs.map(l => ({ d: l.d.slice(), len: 0.5 * l.len })); p.start = pq.start; p.total = 0.5 * pq.total;
+      out.order.splice(out.order.indexOf(i), 1); out.order.push(i); // (after its new parent)
+    }
+    out.parts = pieces.map(p => ({ parent: p.parent, root: p.root, start: p.start, total: p.total, legs: p.legs.map(l => ({ d: l.d.slice(), len: l.len })), mates: p.mates.map(e => e.to) }));
+    return out;
+  }
+  // Each part's offset at explode amount k (0 to 1): its parent's, plus its own way along its path
+  function explodeAt(plan, k) {
+    const at = plan.parts.map(() => [0, 0, 0]);
+    k = Math.min(1, Math.max(0, +k || 0));
+    for (const i of plan.order) {
+      const p = plan.parts[i], a = at[i];
+      if (p.parent >= 0) { a[0] = at[p.parent][0]; a[1] = at[p.parent][1]; a[2] = at[p.parent][2]; }
+      let s = p.total * Math.min(1, Math.max(0, (k - p.start) / (1 - p.start)));
+      for (const l of p.legs) { if (s <= 0) break; const t = Math.min(l.len, s); a[0] += l.d[0] * t; a[1] += l.d[1] * t; a[2] += l.d[2] * t; s -= l.len; }
+    }
+    return at;
+  }
   return {
     parseSTL, parseOBJ, prepareMesh, fillHoles, edgeReport, volume, bounds, diag,
     frameFromNormal, shiftFrame, section, analyzePlane, evaluateKeys, autoPlaceKeys, regionAt, regionSamples, pickLabelPoint, keyGeometrySpec, KEY_DEFAULTS,
@@ -7849,7 +8690,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh, segmentSections,
+    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh, segmentSections, explodePlan, explodeAt, explodeMates, castFirst, surfaceSamples, inheritTriangles, carryRegions, trimTongues,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
