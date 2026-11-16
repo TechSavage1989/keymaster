@@ -1056,6 +1056,7 @@ with sync_playwright() as p:
     # an inlay cut from the painted patch: a pocket in the ball and an inlay that fits it
     pg.evaluate("KeymasterDebug.paintLetGo()"); pg.wait_for_timeout(300)
     check('with an area painted, the regions panel offers the inlay cut with depth, fit and a flat floor', pg.is_visible('#inlayTools') and pg.locator('[data-act=inlay-cut]').count() == 1 and pg.is_checked('#inlayFlat'))
+    pg.evaluate("document.querySelector('details[data-sec=inlay]').open = true")  # (1.92) the inlay settings are folded until wanted
     pg.fill('#inlayDepth', '1.5'); pg.fill('#inlayFit', '0.3')
     pg.evaluate("KeymasterDebug.inlayCut()")
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=30000)

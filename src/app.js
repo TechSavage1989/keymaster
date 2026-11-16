@@ -4208,10 +4208,10 @@
       const q = made[i], pl = per[i] || {};
       if (q) { edge++; lo = Math.min(lo, q.least || q.depth); hi = Math.max(hi, q.depth); if (q.flat) flat++; if (q.shared) shared = true; }
       else if (pl.plugs && pl.plugs.length) inset++;
-      else if (pl.keys && pl.keys.length) keyed++;
-      else if (pl.tiny) tiny++;
+      else if (pl.tiny && !(pl.keys && pl.keys.length)) tiny++;
+      if (pl.keys && pl.keys.length) keyed++;
     }
-    const bare = n - edge - inset - keyed - tiny, bits = [], lines = (k) => (n === 1 ? '' : k === n ? (n === 2 ? ' on both lines' : ` on all ${n} lines`) : ` on ${k === 1 ? 'one line' : `${k} lines`}`);
+    const bare = pick.loops.filter((l, i) => !made[i] && !((per[i] || {}).plugs || []).length && !((per[i] || {}).keys || []).length && !(per[i] || {}).tiny).length, bits = [], lines = (k) => (n === 1 ? '' : k === n ? (n === 2 ? ' on both lines' : ` on all ${n} lines`) : ` on ${k === 1 ? 'one line' : `${k} lines`}`);
     const taper = state.cfg.sinkTaper > 0 && made.some(q => q && q.taper > 0) ? `, sides leaning in ${fmt(Math.max(...made.filter(Boolean).map(q => q.taper)))}°` : '';
     if (edge) bits.push(`a plug from the cut’s edge${lines(edge)}, ${hi - lo > 0.2 ? `${fmt(lo)} to ${fmt(hi)}` : fmt(hi)} mm into the other piece${taper}${flat === edge ? ', with a flat end' : ''}${shared ? ', along the one way the pieces slide apart' : ''}`);
     const deep = (pick.plugs || []).length ? `, ${fmt(Math.max(...pick.plugs.map(q => q.depth)))} mm deep` : '', nkeys = (pick.keys || []).length;
