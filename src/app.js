@@ -4297,7 +4297,7 @@
     const done = coreTask('planJoints', [p.positions, p.indices, req]).then((joints) => {
       if (!live()) return null;
       pick.cover = joints.cover || null; if (pick.comp) pick.comp = null;
-      if (joints.paths) pick.paths = joints.paths; else { pick.loops = joints.loops; pick.loop = joints.loops[0]; } // a sliced pick's lines run through new vertices: drawn from their points, and the pick keeps the lines on the part itself
+      if (joints.paths) pick.paths = joints.paths; else if (joints.loops && joints.loops.length) { pick.loops = joints.loops; pick.loop = joints.loops[0]; } // a sliced pick's lines run through new vertices: drawn from their points, and the pick keeps the lines on the part itself
       pick.perLoop = joints.perLoop; pick.frames = joints.frames; pick.draw = joints.draw;
       pick.keys = joints.perLoop.flatMap(per => per.keys); pick.plugs = joints.perLoop.flatMap(per => per.plugs);
       pick.noKeys = noKeysText(joints.noKeys, joints.loops.length > 1, joints.perLoop);
@@ -4306,7 +4306,7 @@
     }).then((out) => {
       if (!out || !live()) return; // a newer pick took over
       pick.pending = false;
-      if (out.paths) pick.paths = out.paths; else { pick.loops = out.loops; pick.loop = out.loops[0]; }
+      if (out.paths) pick.paths = out.paths; else if (out.loops && out.loops.length) { pick.loops = out.loops; pick.loop = out.loops[0]; }
       pick.perLoop = out.perLoop; pick.frames = out.frames; pick.draw = out.draw;
       pick.keys = out.perLoop.flatMap(per => per.keys); pick.plugs = out.perLoop.flatMap(per => per.plugs);
       pick.noKeys = out.dropped ? droppedText(out.dropped) : noKeysText(out.noKeys, out.loops.length > 1, out.perLoop);
