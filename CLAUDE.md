@@ -433,6 +433,14 @@ The owner, on 1.92: "why is it doing a flat cut below the shoulder when the whol
 - Tried and put back: giving a made run in a sculpted part to the object it borders from a fifth (or nine tenths) of its sculpted border, for the book's faces under the wrist that stay in the hand's part (766 triangles, 5% of the hand at Balanced): the cuff and the robe's flags went into the book. Still open.
 - Known, and the price of the seam on this figure: the arm with the book, cut along the seam under the capelet, can't slide off in any direction (the capelet holds the sleeve's top, the skirt the book), so the pick asks for Split it off anyway; its plugs are then a leveled one at the shoulder (5 to 17 mm) and a level one on the book. With the flat end on it passes unforced.
 
+## Block keys, and a held pick taken off in parts (1.94)
+
+The owner showed cast kits (limbs parted at clothing seams, each with one rectangular block in a matching socket, set well inside a smooth mating face) and said "make it so".
+- **Block** (`cfg.block`, on by default and for settings saved before it; **Extra key: Block** in the regions panel, which rides beside `cfg.type` so the flat cut's key type is untouched): `pickReq` sends the plain cut face (`sink: 0`) with `cfg` as a square peg, one per line (`perArea: 1`), sized to fit from 6% of the part's diagonal (at most 40 mm, `sizeMax`) down, `lenRatio: 1.6` (`sizeLadder` reads it: a block is longer for its width), taper 12, aligned to the face. A square can't turn in its socket. Extrude and Taper are greyed while Block is chosen. `pickJointText` says "a block key … set in the middle of the cut face".
+- **Split it into its parts instead** (`splitPickInParts`, `pickParts`, the button under a "held in N places" refusal, `KeymasterDebug.splitInParts`): the Parts regions the pick covers by half or more come off one at a time, smallest first, each picked as a click on it would be on whichever piece holds it by then, and cut only if it passes every check unforced; the round starts again after each cut, since taking one part off (a hand lying on a book) frees the next (the arm that closed the ring). Each cut is its own undo step.
+- Checked on the page with the real renderer: the owner's arm with the book, Block: the pick is refused as held in 3 places, the button takes the parts off separately with no forcing.
+- Not done yet, from the same references: round magnet or pin holes beside the block on the face, and a mating face recessed inside the clothing's rim like a cup.
+
 ## Versions
 
 `VERSION` holds the version shown next to the app's name, with a short build code that `tools/build.py` works out from the sources (the same sources always give the same code). **Bump `VERSION` in every pull request** (1.14 to 1.15 and so on), so the owner can refresh the live page and see the new version has arrived.

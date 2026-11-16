@@ -1508,7 +1508,7 @@ const KMCore = (() => {
     const max = cfg.sizeMax || cfg.diameter, min = cfg.sizeMin || PRINTERS[cfg.printer === 'resin' ? 'resin' : 'fdm'].min;
     if (cfg.type === 'magnet') return MAGNET_SIZES.filter(([d]) => d <= max + 1e-9 && d >= Math.min(min, 2) - 1e-9);
     const ds = [max, ...KEY_SIZES.filter(d => d < max - 1e-9 && d >= min - 1e-9)];
-    const len = (d) => cfg.type === 'dowel' ? Math.max(2, Math.round(d * 2.5 * 2) / 2) : Math.max(1, Math.round(d * 1.2 * 2) / 2);
+    const len = (d) => cfg.type === 'dowel' ? Math.max(2, Math.round(d * 2.5 * 2) / 2) : Math.max(1, Math.round(d * (cfg.lenRatio || 1.2) * 2) / 2); // (a block key is longer for its width, as cast kits make them: lenRatio)
     return ds.map(d => [d, len(d)]);
   }
   function autoFitKeys(an, cfg, perRegion, skip) {
