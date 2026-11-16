@@ -4155,6 +4155,9 @@ const KMCore = (() => {
             const hits = findSelfCrossings(flatOf(r2)); if (!hits.length) break;
             for (const [k, m] of hits) { const inner = m - k, wrap = inner > n / 2, from = wrap ? m : k, cnt = wrap ? n - inner : inner; if (cnt > n / 8) continue; for (let j = -1; j <= cnt + 2; j++) { const i = ((from + j) % n + n) % n; tt[i] = Math.max(0, tt[i] - 0.25); } }
           }
+          // (the blending and the crossings' fix move points again: none may end outside the line)
+          for (let i = 0; i < n; i++) { while (tt[i] > 0) { const q0 = at(i); if (pointInRing(flatPts, q0[0], q0[1])) break; tt[i] = tt[i] > 0.26 ? tt[i] - 0.25 : 0; } }
+          r2 = pts.map((_, i) => at(i));
           const rr = a2 > 0 ? r2 : r2.slice().reverse();
           let kept = 0; for (let i = 0; i < n; i++) if (tt[i] > 0.5) kept++;
           if (kept >= 0.6 * n && ringOk(rr)) { const out = new Float64Array(2 * n); r2.forEach((p, i) => { out[2 * i] = p[0]; out[2 * i + 1] = p[1]; }); return { xy: out, deg: deg * f }; }
@@ -4264,7 +4267,7 @@ const KMCore = (() => {
       // the room as the solid holds it, past one- or two-point dips (each point's room is at least the lower of the
       // best rooms within two points either side: a lone grazing reading lifts to its neighbours', a real narrowing
       // that spans more points stays)
-      const room = Float64Array.from(roomOf), reach = Math.max(2 * wall, 0.015 * per);
+      const room = Float64Array.from(roomOf), reach = Math.min(3 * wall, Math.max(2 * wall, 0.015 * per)); // (never past a real narrowing: three walls at most)
       for (let i = 0; n >= 12 && i < n; i++) { // (by length along the line, not by count: sliced lines crowd points)
         let l = -Infinity, r = -Infinity, run = 0;
         for (let k = 1; k < n / 2; k++) { run += seg[(i + n - k) % n]; if (run > reach) break; l = Math.max(l, roomOf[(i + n - k) % n]); }
@@ -4286,7 +4289,7 @@ const KMCore = (() => {
       for (const kind of ['level', 'even']) for (const w of ws) { // (a level end at any depth before an even one: an even plug on a saddle-shaped line keeps the line's horns)
         const d = new Float64Array(n); let shortLen = 0; // (a stray point or two still short, under 2% of the line, doesn't stop a plug)
         for (let i = 0; i < n; i++) { d[i] = kind === 'level' ? top + w - lv[i] : w; if (!(room[i] >= d[i] - 0.5 * wall)) shortLen += (seg[i] + seg[(i + n - 1) % n]) / 2; }
-        if (shortLen > Math.max(2 * wall, 0.02 * per)) continue;
+        if (shortLen > Math.min(4 * wall, Math.max(2 * wall, 0.02 * per))) continue;
         const f = faceHolds(d);
         if (!f) continue;
         let max = 0; for (let i = 0; i < n; i++) max = Math.max(max, d[i]);
@@ -4685,7 +4688,7 @@ const KMCore = (() => {
   }
   function cutAlongLoop(P, I, loop, opts = {}) {
     const r = cutAlongLoops(P, I, [loop], opts);
-    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings, sinks: r.sinks, sink: r.sinks[0] };
+    return { parts: r.parts, pins: r.pins, length: r.length, frame: r.frames[0], warnings: r.warnings, sinks: r.sinks, sink: r.sinks[0], floors: r.floors, plugsMade: r.plugsMade, sinkNote: r.sinkNote };
   }
   /* Cut along several closed lines at once. Side 1 is whatever lies on the left of the lines as they run (the
      triangles holding the lines' own directed edges); side 2 is the rest, and may come apart into several pieces.
@@ -4771,7 +4774,7 @@ const KMCore = (() => {
       c.use = (which) => {
         const f = which === 'sunk' && c.sunkFace ? c.sunkFace : which === 'axis' && c.axisFace ? c.axisFace : c.plain;
         Object.assign(c, { sec: f.sec, step: f.step, H: f.H, sunk: f.sunk || null, sink: f.sunk ? f.sunk.max : 0, F: f.fr.F, xy: f.fr.xy, h: f.fr.h, cap: f.fr.cap, clash: f.fr.clash, xyOf: f.fr.xyOf });
-        c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.plugs = cfg.type === 'plug' || per.inset ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length;
+        c.keys = cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = f.fr.F !== lf.F ? [] : markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); /* (marks were laid out in the line's own frame: none on a face worked in another) */ c.plugs = cfg.type === 'plug' || per.inset ? (per.plugs || []).filter(q => q.ok) : []; c.joined = c.keys.length + c.plugs.length;
       };
       c.use('sunk');
       return c;
@@ -4878,7 +4881,8 @@ const KMCore = (() => {
     if (!done && !caps.some(c => c.joined)) { // (keys were planned on each line's own face, so a line with keys keeps its own axis)
       caps.forEach(c => c.use('plain')); plainParts = buildParts();
       const ways = pullWays(plainParts);
-      caps.forEach((c, i) => { c.axisFace = c.sunkFace && ways[i] ? c.along(ways[i]) : null; });
+      const tried = agree; // (a way that is the line's own axis was step 1: not built again)
+      caps.forEach((c, i) => { const q = axisOf(c), w = ways[i]; c.axisFace = c.sunkFace && w && !(tried && w[0] * q[0] + w[1] * q[1] + w[2] * q[2] > 0.9998) ? c.along(w) : null; });
       if (caps.some(c => c.axisFace)) try { done = attempt(caps.map(c => (c.axisFace ? 'axis' : 'plain')), false); } catch (e) { done = soft(e); }
     }
     if (!done && sunkCaps.length > 1) { const longest = caps.indexOf(sunkCaps.reduce((b, c) => (c.xy.length > b.xy.length ? c : b))); try { done = attempt(caps.map((c, i) => (i === longest ? 'sunk' : 'plain')), false); } catch (e) { done = soft(e); } }
@@ -5670,7 +5674,7 @@ const KMCore = (() => {
           // (1.92) where the other piece can't hold a plug from the cut's edge (a shoulder that slopes away right above
           // the line), the plug is pulled in from the edge by a wall instead, tapered and as deep as Extrude asks:
           // the owner's arm ended in bare horns, or in nothing, where the edge plug didn't fit
-          const inset = cfg.sink > 0 && !(sk && sk.column) && (cfg.type === 'none' || cfg.type === 'plug');
+          const inset = cfg.sink > 0 && cfg.sinkStep !== false && !(sk && sk.column) && (cfg.type === 'none' || cfg.type === 'plug');
           if (inset) {
             const pcfg = cfg.type === 'plug' ? lcfg : { ...lcfg, type: 'plug', plugSlope: Math.max(2, cfg.sinkTaper || 5), plugDepthMode: 'set', plugDepth: Math.max(1, cfg.sink) }; // (a plug chosen as the key keeps its own settings)
             const pl = planPlugs(an, pcfg);
@@ -5785,7 +5789,7 @@ const KMCore = (() => {
       // from a twentieth of its line (a 3 mm nick on a 350 mm figure's 80 mm shoulder line had sent every cut back)
       const loopOf = new Map(), loopLen = []; for (const v0 of adj.keys()) { if (loopOf.has(v0)) continue; const id = loopLen.length; let len = 0; const st = [v0]; loopOf.set(v0, id); while (st.length) { const v = st.pop(); len += rimLen.get(v) || 0; for (const w of adj.get(v) || []) if (!loopOf.has(w)) { loopOf.set(w, id); st.push(w); } } loopLen.push(len); }
       const seen = new Set(); let longest = 0, sharp = false;
-      for (const v0 of knife) { if (seen.has(v0)) continue; let run = 0; const st = [v0]; seen.add(v0); while (st.length) { const v = st.pop(); run += rimLen.get(v) || 0; for (const w of adj.get(v) || []) if (!seen.has(w) && knife.has(w)) { seen.add(w); st.push(w); } } longest = Math.max(longest, run); if (run >= Math.max(4 * t, 0.05 * (loopLen[loopOf.get(v0)] || 0))) sharp = true; }
+      for (const v0 of knife) { if (seen.has(v0)) continue; let run = 0; const st = [v0]; seen.add(v0); while (st.length) { const v = st.pop(); run += rimLen.get(v) || 0; for (const w of adj.get(v) || []) if (!seen.has(w) && knife.has(w)) { seen.add(w); st.push(w); } } longest = Math.max(longest, run); if (run >= Math.max(4 * t, Math.min(10 * t, 0.05 * (loopLen[loopOf.get(v0)] || 0)))) sharp = true; /* (never more than 10·t: a long blade counts on any line) */ }
       out.push({ part: pi, length: longest, knife: knifeLen, rim: total, sharp, points: opts.points ? [...knife] : undefined });
     });
     return out;
@@ -5829,8 +5833,8 @@ const KMCore = (() => {
     const { P, I, req } = pickMesh(P0, I0, req0); // the same eased lines as planJoints worked on (it is quick and comes out alike)
     const cfg = req.cfg, out = req.planned ? { ...req.planned, result: null, error: null, errorCode: null, forced: null, dropped: null } : planJoints(P, I, req), loops = out.loops;
     pickMeshOf.set(out, P);
-    const run = (withJoints, force) => {
-      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, sinkStep: req.sinkStep, perLoop: withJoints ? out.perLoop : loops.map((l, i) => ({ keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
+    const run = (withJoints, force, only = -1) => { // only: the one line that keeps its joints
+      const o = { cfg, minThickness: req.minThickness, force, sink: req.sink, sinkStep: req.sinkStep, perLoop: withJoints ? out.perLoop : loops.map((l, i) => (i === only ? out.perLoop[i] : { keys: [], plugs: [], pegSide: out.perLoop[i] && out.perLoop[i].pegSide })) };
       if (req.regions) return splitRegions(P, I, req.seg, req.regions, o);
       if (loops.length > 1) return cutAlongLoops(P, I, loops, { ...o, what: 'lines' });
       const p0 = o.perLoop[0] || {};
@@ -5853,18 +5857,35 @@ const KMCore = (() => {
       if (plain && !crumbs(plain)) { first = plain; dropJoints('crumb'); }
     }
     const guards = (r) => (r.warnings || []).filter(w => w.code === 'thin' || w.code === 'locked');
+    // (1.92) when joints on every line lock the pieces but the cut without any passes: the joints on one line may still
+    // do (the longest that has any first): an arm that goes on along its book's plug keeps that plug and loses only the
+    // stud on its shoulder
+    const keepOne = () => {
+      const withJ = out.perLoop.map((per, i) => i).filter(i => (out.perLoop[i].keys || []).length + (out.perLoop[i].plugs || []).length > 0).sort((a, b) => (loops[b].length || 0) - (loops[a].length || 0));
+      if (withJ.length > 1) for (const i of withJ.slice(0, 2)) {
+        let one = null; try { one = run(false, true, i); } catch (err) { one = null; }
+        if (one && !guards(one).length && !crumbs(one)) {
+          out.perLoop = out.perLoop.map((per, k) => (k === i ? per : { keys: [], plugs: [], pegSide: per.pegSide, tiny: per.tiny })); out.draw = out.draw.map((d, k) => (k === i ? d : { keys: [], plugs: [] }));
+          out.keys = out.perLoop[i].keys.length; out.plugs = out.perLoop[i].plugs.length; out.dropped = { code: 'locked', what: out.plugs ? 'plug' : 'keys', some: true }; out.result = one; return true;
+        }
+      }
+      return false;
+    };
     if (first) {
       const w = guards(first);
       if (!w.length) { out.result = first; return out; }
       if ((out.keys || out.plugs) && !w.some(x => x.code === 'thin') && !w.some(x => x.code === 'locked' && !x.keyless)) { // (1.76: a piece held at both ends too, when it slides out along one of its joints without them) // locked with joints, and the same pieces would come apart at a slant without them: built again without the joints
         let second = null; try { second = run(false, true); } catch (err) { second = null; }
-        if (second) { const w2 = guards(second); dropJoints('locked'); out.result = second; if (w2.length) out.forced = w2[0].message; return out; }
+        if (second) { const w2 = guards(second); if (!w2.length && keepOne()) return out; dropJoints('locked'); out.result = second; if (w2.length) out.forced = w2[0].message; return out; }
       }
       // (1.92) locked with joints whichever way it is asked (a stud on an arm's flat end, where the arm only goes on
       // sideways with its book): if the same cut without the joints passes every check, that is the cut
       else if ((out.keys || out.plugs) && !w.some(x => x.code === 'thin')) {
         let second = null; try { second = run(false, true); } catch (err) { second = null; }
-        if (second && !guards(second).length) { dropJoints('locked'); out.result = second; return out; }
+        if (second && !guards(second).length) {
+          if (keepOne()) return out;
+          dropJoints('locked'); out.result = second; return out;
+        }
       }
       out.result = first; out.forced = w[0].message; return out;
     }

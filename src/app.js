@@ -4224,7 +4224,7 @@
   function droppedText(d) {
     const what = d.what === 'plug' ? 'A plug' : 'Keys', it = d.what === 'plug' ? 'one' : 'them';
     if (d.code === 'crumb') return `${what} would have broken through a thin wall and nicked off a scrap, so it will be cut without ${it}.`;
-    return d.code === 'locked' ? `${what} on every line would lock the pieces together (they only slide apart one way), so the lines that would catch are cut flat.` : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`;
+    return d.code === 'locked' ? (d.some ? `${what} on every line would lock the pieces together (they only slide apart one way), so one line keeps its joint and the rest are cut flat.` : `${what} here would lock the pieces together, so the cut is made flat, without ${it}.`) : `${what} didn’t fit cleanly here, so it will be cut without ${it}.`;
   }
   function drawPickLines(p, pick) {
     const v = views.get(p.id);
