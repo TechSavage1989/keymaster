@@ -4369,6 +4369,22 @@ const KMCore = (() => {
      sliver of a lip", so the walls start at the line now, and the room is measured along lines a hair inside it
      (on the line itself they graze the surface). Where the ring can't be moved in even that far, each point is
      sunk by itself as before. An inlay's pocket (`flat`) keeps its exact outline. */
+  // (1.98) The extruded end, a flat array of points, with a flat side where it is nearly round (4πA/L² over `limit`):
+  // every point past a chord `cut` of the smallest radius out from the middle, towards the farthest point, is moved
+  // onto the chord, so the count stays the same and each wall still runs from its line point to its floor point.
+  // A round limb's extrusion (Extra key None) could turn in its socket; with a flat it seats one way only.
+  function flatEnd(xy, limit = 0.9, cut = 0.7) {
+    const n = xy.length / 2; if (n < 8) return xy;
+    let A = 0, L = 0, cx = 0, cy = 0;
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n, ax = xy[2 * i], ay = xy[2 * i + 1], bx = xy[2 * j], by = xy[2 * j + 1], cr = ax * by - bx * ay; A += cr; cx += (ax + bx) * cr; cy += (ay + by) * cr; L += Math.hypot(bx - ax, by - ay); }
+    A /= 2; if (!(Math.abs(A) > 0)) return xy; cx /= 6 * A; cy /= 6 * A;
+    if (4 * Math.PI * Math.abs(A) / (L * L) < limit) return xy;
+    let far = -1, fx = 1, fy = 0, rmin = Infinity;
+    for (let i = 0; i < n; i++) { const r = Math.hypot(xy[2 * i] - cx, xy[2 * i + 1] - cy); if (r > far) { far = r; fx = (xy[2 * i] - cx) / r; fy = (xy[2 * i + 1] - cy) / r; } rmin = Math.min(rmin, r); }
+    const hc = cut * rmin, out = Float64Array.from(xy);
+    for (let i = 0; i < n; i++) { const s = (xy[2 * i] - cx) * fx + (xy[2 * i + 1] - cy) * fy - hc; if (s > 0) { out[2 * i] -= s * fx; out[2 * i + 1] -= s * fy; } }
+    return out;
+  }
   function sunkRing(P, I, F, ring, xy, h, into2, want, wall, flat = false, plane = null, taper = 0) {
     if (flat) return sunkRingAt(P, I, F, ring, xy, h, into2, want, wall, true, plane);
     // (1.90) only a line round something a plug can be: a crevice in a fist (3 mm across, winding 13 mm out of its own
@@ -4391,7 +4407,7 @@ const KMCore = (() => {
         if (!r) continue;
         const t = taperRing(xy, r.depth, taper);
         if (lean && t.deg < deg - 1e-9 && t.deg > 0 && !tries.includes(t.deg)) tries.splice(k + 1, 0, t.deg); // (the ring folds at the full taper: measured again at the taper it holds)
-        r.xy2 = t.xy; r.taper = t.deg; r.column = true; r.lineXY = Array.from(xy); r.lineH = Array.from(h);
+        r.xy2 = flatEnd(t.xy); r.taper = t.deg; r.column = true; r.lineXY = Array.from(xy); r.lineH = Array.from(h); // (1.98) a nearly round end gets a flat: the extrusion can't turn in its socket
         for (let i = 0; i < n; i++) r.h2[i] = h[i] + r.depth[i] * into2;
         r.held = r.holds(r.xy2, r.h2); delete r.holds;
         r.score = (r.held ? 1000 : 0) + (r.shallow ? 0 : 400) + (r.flatEnd ? 200 : r.leveled ? 100 : 0) + 10 * Math.min(r.least, 9) + Math.min(r.max, 9) / 10;
@@ -8796,7 +8812,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh, segmentSections, explodePlan, explodeAt, explodeMates, castFirst, surfaceSamples, inheritTriangles, carryRegions, trimTongues, flatIslands, antiTwist,
+    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh, segmentSections, explodePlan, explodeAt, explodeMates, castFirst, surfaceSamples, inheritTriangles, carryRegions, trimTongues, flatIslands, antiTwist, flatEnd,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
