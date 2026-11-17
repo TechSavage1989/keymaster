@@ -2283,5 +2283,22 @@ console.log('\nan extrusion with no extra key can\'t turn either (1.98)');
   const r = K.cutAlongLoop(P, I, l, { sink: 5, minThickness: 1, sinkTaper: 10 });
   check('  and the cut is sealed with the volume kept', r.parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(r.parts.reduce((a, q) => a + q.volume, 0) - K.volume(P, I)) / K.volume(P, I) < 1e-6 && r.sink > 4.9, r.sink);
 }
+console.log('\na loose piece beside another is its own piece, not swallowed by its box (1.99)');
+{
+  // a wide plate with a small cube standing clear above it, inside the plate's box only when the box is the whole
+  // plate's: the cube must come out as a piece of its own; a ball inside a ball (an eye in a head) still stays with it
+  const plate = K.shapeMesh({ kind: 'cube', w: 100, d: 100, h: 60 }), cube = K.shapeMesh({ kind: 'cube', w: 6, d: 6, h: 6 });
+  const hollow = { positions: Float32Array.from(plate.positions), indices: plate.indices };
+  // the plate's top caved in: a cube standing in the cave, inside the plate's box but outside its solid
+  const cave = K.booleanShape(hollow.positions, hollow.indices, { kind: 'cube', w: 40, d: 40, h: 40, pos: [0, 0, 30], rot: [0, 0, 0] }, 'difference');
+  const small = { positions: cube.positions.map((v, i) => v + (i % 3 === 2 ? 18 : 0)), indices: cube.indices };
+  const both = K.mergeMeshes([{ positions: new Float32Array(cave.positions), indices: cave.indices }, { positions: new Float32Array(small.positions), indices: small.indices }]);
+  const sh = K.separateShells(both.positions, both.indices);
+  check('a cube standing in a cave of a plate is a piece of its own', sh.length === 2, sh.map(q => q.indices.length / 3));
+  const outer = K.shapeMesh({ kind: 'ball', w: 40, d: 40, h: 40 }), inner = K.shapeMesh({ kind: 'ball', w: 8, d: 8, h: 8 });
+  const innerFlip = Uint32Array.from(inner.indices); for (let t = 0; t < innerFlip.length; t += 3) { const x = innerFlip[t + 1]; innerFlip[t + 1] = innerFlip[t + 2]; innerFlip[t + 2] = x; }
+  const eye = K.mergeMeshes([{ positions: new Float32Array(outer.positions), indices: outer.indices }, { positions: new Float32Array(inner.positions), indices: innerFlip }]);
+  check('a ball inside a ball stays with it', K.separateShells(eye.positions, eye.indices).length === 0);
+}
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);
