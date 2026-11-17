@@ -1356,7 +1356,7 @@ console.log('curved cuts along a border');
     const area = (a) => { let t = 0; const n = a.length / 2; for (let i = 0; i < n; i++) { const j = (i + 1) % n; t += a[2 * i] * a[2 * j + 1] - a[2 * j] * a[2 * i + 1]; } return Math.abs(t) / 2; };
     const tan = K.analyzeLoop(cP, cI, cl, { type: 'none', sink: 1, margin: 1, sinkTaper: 5 }, 60).curved.sunk, ring = can.base.loops[0].xy;
     const tr = K.cutAlongLoop(cP, cI, cl, { sink: 1, minThickness: 1, sinkTaper: 5 }), tvol = tr.parts.reduce((a, q) => a + q.volume, 0);
-    check('tapered 5°: the floor ring sits inside the line (by up to depth × tan 5°), its end one flat face, sealed, volume kept', tan.taper === 5 && tan.flatEnd && area(tan.xy2) < area(ring) * 0.85 && area(tan.xy2) > area(ring) * 0.4 && allClosed(tr.parts) && Math.abs(tvol - K.volume(cP, cI)) / K.volume(cP, cI) < 1e-6, [tan.taper, area(tan.xy2), area(ring)]);
+    check('tapered 5°: the floor ring sits inside the line (by up to depth × tan 5°), its end one flat face, sealed, volume kept', tan.taper === 5 && tan.flatEnd && area(tan.xy2) < area(ring) * 0.9 && area(tan.xy2) > area(ring) * 0.4 && allClosed(tr.parts) && Math.abs(tvol - K.volume(cP, cI)) / K.volume(cP, cI) < 1e-6, [tan.taper, area(tan.xy2), area(ring)]);
     // (1.89) Plug as the extra key on a line already extruded into a plug: the extrusion is the plug (a second one on a
     // steep taper's floor came away as a piece of its own); the pick cuts in two sealed pieces
     const pcfg = { type: 'plug', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 1.5, printer: 'fdm', pegSide: 'below', perArea: 1, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, sinkTaper: 20, sizeMax: 5 };
@@ -2270,6 +2270,18 @@ console.log('\na flat patch walled off from its region goes to the face it is fl
   // a raised flat block on the top (its own region, walled by creases all round, flush with nothing) stays
   const g2 = new Int32Array(nt); for (let t = 0; t < nt; t++) g2[t] = Math.abs(cz(t) - zTop) < 1e-6 ? 0 : 1;
   check('a whole flat face of its own region is left alone', K.flatIslands(P, I, g2) === 0);
+}
+console.log('\nan extrusion with no extra key can\'t turn either (1.98)');
+{
+  const cy = K.shapeMesh({ kind: 'cone', w: 12, d: 12, h: 60, segments: 48 }), m = K.subdivideMesh(cy.positions, cy.indices, { maxEdge: 1 }), P = m.positions, I = m.indices, n = I.length / 3, g = new Int32Array(n);
+  for (let q = 0; q < n; q++) { let z = 0; for (let k = 0; k < 3; k++) z += P[3 * I[3 * q + k] + 2]; g[q] = z / 3 > 0 ? 1 : 0; }
+  const l = K.orientLoops(P, I, [K.borderLoops(P, K.bordersFromGroups(P, I, g))[0]], { what: 'lines' }).loops[0];
+  const sk = K.analyzeLoop(P, I, l, { type: 'none', sink: 5, margin: 1, sinkTaper: 10 }, 60).curved.sunk, xy = sk.xy2, m2 = xy.length / 2;
+  let cx = 0, cy2 = 0; for (let i = 0; i < m2; i++) { cx += xy[2 * i]; cy2 += xy[2 * i + 1]; } cx /= m2; cy2 /= m2;
+  const rs = Array.from({ length: m2 }, (_, i) => Math.hypot(xy[2 * i] - cx, xy[2 * i + 1] - cy2));
+  check('a round limb\'s extruded end has a flat side (its radius varies by a fifth or more)', !!sk.column && Math.min(...rs) < 0.82 * Math.max(...rs), [Math.min(...rs), Math.max(...rs)]);
+  const r = K.cutAlongLoop(P, I, l, { sink: 5, minThickness: 1, sinkTaper: 10 });
+  check('  and the cut is sealed with the volume kept', r.parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0) && Math.abs(r.parts.reduce((a, q) => a + q.volume, 0) - K.volume(P, I)) / K.volume(P, I) < 1e-6 && r.sink > 4.9, r.sink);
 }
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

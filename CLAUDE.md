@@ -463,6 +463,11 @@ The owner, on 1.96 (Father Rhinehardt at 1000%, Sections, Extra key Plug, Extrud
 - **The tool stays** (`cutAlongPick`): after a region, line or painted cut the biggest piece is chosen, its regions found (carried, 1.96), and the brush (with Fill) comes back if it was on.
 - `KeymasterDebug.pickInfo()` reports each line's joints (`lines`, `noKeys`).
 
+## The extrusion can't turn either (1.98)
+
+The owner, after 1.97: "make the extrusion with Extra key None non-round too". `flatEnd(xy, 0.9, 0.7)` in `sunkRing`: an extruded end whose outline is nearly round (4πA/L² over 0.9) has every point past a chord at 0.7 of its smallest radius (towards its farthest point) moved onto the chord, so the end is a D with as many points as the line and each wall still runs from its line point to its floor point; the floor is checked as built (`holds`) as before. The extrusion starts round at the cut's edge and ends with a flat, so it seats one way only, whatever the Extra key. Tested on a round cone: the end's radius varies by a fifth or more, sealed, volume kept.
+- Measured, not yet acted on (the owner: "the extrude into / cut out of convex/concave effect for the cuts doesn't work on everything"): limb- and head-sized Parts regions (0.5% to 12% of the surface) on Rhinehardt, Aysil, Hero, Bills and Brim at 250 mm tall, Extrude 5, Taper 20, Extra key None (`extsweep.js` in the scratchpad): 34 of 125 lines are extruded at planning, 38 get a plug set in from the edge, 42 nothing; built (`planPick`), Rhinehardt's 25 lines gave 1 edge extrusion, 9 plugs, 15 lines with no joint. The extrusion is refused mostly as `noplug` (no level, leveled or even floor is held all round along the line's own axis: the other piece isn't behind every point of the line) and less often as narrow or winding.
+
 ## Versions
 
 `VERSION` holds the version shown next to the app's name, with a short build code that `tools/build.py` works out from the sources (the same sources always give the same code). **Bump `VERSION` in every pull request** (1.14 to 1.15 and so on), so the owner can refresh the live page and see the new version has arrived.
