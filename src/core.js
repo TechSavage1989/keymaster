@@ -2067,11 +2067,20 @@ const KMCore = (() => {
       return { positions, indices: idx, volume: volume(positions, idx), bbox: bounds(positions), tris };
     });
     shells.sort((a, b) => b.volume - a.volume);
-    const inside = (a, b) => a.bbox.min.every((v, i) => v >= b.bbox.min[i] - 1e-6) && a.bbox.max.every((v, i) => v <= b.bbox.max[i] + 1e-6);
+    // (1.99) inside means inside the solid, not just its box: a hand cut free beside a figure's body lies within the body's
+    // box (the base is wide) and was merged back into it as if it were an eye in a head, so the sleeve between them had
+    // to slide off both at once, and its cuff end was left flat. Most of a few of the shell's points must be in the host.
+    const testers = new Map(), tester = (h) => { let f = testers.get(h); if (!f) testers.set(h, f = insideTester(h.positions, h.indices)); return f; };
+    const inside = (a, b) => {
+      if (!(a.bbox.min.every((v, i) => v >= b.bbox.min[i] - 1e-6) && a.bbox.max.every((v, i) => v <= b.bbox.max[i] + 1e-6))) return false;
+      const n = a.positions.length / 3, k = Math.min(9, n), f = tester(b); let inn = 0;
+      for (let j = 0; j < k; j++) { const v = 3 * Math.floor((j + 0.5) * n / k); if (f(a.positions[v], a.positions[v + 1], a.positions[v + 2])) inn++; }
+      return inn * 2 > k;
+    };
     const top = [];
     for (const s of shells) {
       const host = top.filter(h => inside(s, h)).sort((a, b) => a.volume - b.volume)[0];
-      if (host) { const m = mergeMeshes([host, s]); host.positions = m.positions; host.indices = m.indices; host.volume += s.volume; host.tris = host.tris.concat(s.tris); } // an inner shell stays with its host
+      if (host) { testers.delete(host); const m = mergeMeshes([host, s]); host.positions = m.positions; host.indices = m.indices; host.volume += s.volume; host.tris = host.tris.concat(s.tris); } // an inner shell stays with its host
       else top.push(s);
     }
     for (const s of top) s.tris.sort((a, b) => a - b); // the triangles of the original each piece holds (tris), so a clicked triangle maps to its piece

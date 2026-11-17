@@ -2542,7 +2542,7 @@
     if (act === 'multi-clear') { state.multi.clear(); partsSig = ''; renderParts(); renderInspector(); updateHint(); }
   }
   function regionClick(part, point, add = false) {
-    if (part.id !== state.selectedId) { if (state.paint.on) setPainting(false); clearPick(); selectPart(part.id); if (!regionsReady(part)) startRegions(); renderPick(); updateHint(); return; } // its parts are found off the main thread, then outlined
+    if (part.id !== state.selectedId) { clearPick(); selectPart(part.id); /* (1.99) the brush stays on: choosing another part used to drop back to Click, the owner's "the tool is changing back to the default" */ if (!regionsReady(part)) startRegions(); renderPick(); updateHint(); return; } // its parts are found off the main thread, then outlined
     const last = state.regions.last;
     if (add && last && last.partId === part.id && last.regions && state.regions.pick && state.regions.pick.regions) { // Shift-click after a box: the region under it joins the boxed ones, or leaves them
       const seg = regionsFor(part), g = K.regionAtPoint(part.positions, part.indices, seg, point);
@@ -3194,7 +3194,7 @@
       syncScene();
     } else if (act === 'export-part') exportParts(id);
     else if (act === 'delete-part') removePart(id);
-    else if (act === 'select') selectPart(state.selectedId === id ? null : id);
+    else if (act === 'select') { const next = state.selectedId === id ? null : id; if (next && state.regions.on) clearPick(); selectPart(next); const np = selectedPart(); if (np && state.regions.on && !regionsReady(np)) startRegions(); renderPick(); updateHint(); } // (1.99) Regions and the brush stay on when another part is chosen from the list
   });
   // Remove a part from the list (a loose piece not wanted, a spare shape): one undo step puts it back
   function removePart(id) {
@@ -4415,6 +4415,11 @@
       pick.keys = out.perLoop.flatMap(per => per.keys); pick.plugs = out.perLoop.flatMap(per => per.plugs);
       pick.noKeys = out.dropped ? droppedText(out.dropped) : noKeysText(out.noKeys, out.loops.length > 1, out.perLoop);
       pick.result = out.result; pick.forced = out.forced; if (out.error) pick.error = out.error;
+      // (1.99) the owner: "cannot have any flat surface with no key to interlock and prevent turning". A line the cut
+      // leaves with no joint at all (not a speck) makes the pick a warning to be cut anyway, like a thin or hooked one
+      const wantJoint = state.cfg.block || state.cfg.sink > 0 || state.cfg.type !== 'none';
+      const bare = out.result && wantJoint ? out.perLoop.filter(per => !per.tiny && per.why !== 'tiny' && !per.made && !per.extruded && !(per.keys || []).length && !(per.plugs || []).length).length : 0;
+      if (bare && !pick.forced) pick.forced = `${bare === 1 ? (out.perLoop.length === 1 ? 'This line' : 'One of the lines') : `${bare} of the lines`} would be cut flat, with no key to hold the pieces in line or stop them turning. Try a smaller Extrude or Taper, pick a little more or less, or cut it anyway.`;
     }).catch((err) => {
       if (run !== pickRun || state.regions.pick !== pick) return;
       pick.pending = false; pick.error = err.message || String(err);

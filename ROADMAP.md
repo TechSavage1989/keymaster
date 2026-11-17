@@ -50,6 +50,7 @@ Each item is meant to be one focused pull request with tests. Work roughly top t
 - A joint on every cut line (a plug, or a drafted boss that lifts out the one way the pieces part), an exploded view that takes the pieces off one another like an assembly, and a piece keeps its regions after a cut, with narrow tongues trimmed off region borders (1.96).
 - A plug on the extruded end so every limb has a visible key, no key or plug round enough to turn, a patch of a book's cover between fingers given back to the book, and the cutting tool kept after each cut (1.97).
 - The extrusion's end has a flat side where it would be round, so it can't turn even with Extra key None (1.98).
+- A part cut free (a hand at its cuff) is a piece of its own, so both ends of a sleeve get their plug as previewed; a line that would be cut flat with no key asks to be cut anyway; the brush stays on when another part is chosen (1.99).
 - One tool for picking (Regions with Pick by: Click | Brush), and Sections as the smaller pieces within each part, never running into another part (1.84).
 - Limbs kept whole at Balanced and ended in a flat cut at the joint (no flaps under a cape, no spike on the arm), knife-thin edges flagged before a cut, a Thinnest piece setting (1.83).
 - The same regions at any size (they are found from the shape as it opened, so 100% and 1000% agree triangle for triangle; only the keys go by millimetres), and the strips between a book's clasps go with the book (1.82).
