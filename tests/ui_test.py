@@ -234,7 +234,7 @@ with sync_playwright() as p:
     pg.wait_for_timeout(300)
     check('the key can have its own taper', pg.input_value('#keyTaper') == '50' and pg.locator('input[data-kcfg=taperSocket]').count() == 1)
     pg.click('[data-act=key-done]'); pg.wait_for_timeout(200)
-    check('the general settings are unchanged', pg.get_attribute('[data-act=shape][data-value=round]', 'aria-pressed') == 'true' and pg.input_value('input[data-cfg=diameter]') == '5')
+    check('the general settings are unchanged', pg.get_attribute('[data-act=shape][data-value=dshape]', 'aria-pressed') == 'true' and pg.input_value('input[data-cfg=diameter]') == '5')
     select_key(1)
     check('another key keeps the general settings', 'Key 2' in pg.inner_text('#inspector') and 'own settings' not in pg.inner_text('#inspector') and pg.input_value('input[data-kcfg=diameter]') == '5')
     pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
@@ -290,8 +290,8 @@ with sync_playwright() as p:
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(600)
 
     # key shapes: picker, help, direction controls
-    check('seven peg shapes offered', pg.locator('.shape-grid [data-act=shape]').count() == 7)
-    check('round starts selected with no direction controls', pg.get_attribute('[data-act=shape][data-value=round]', 'aria-pressed') == 'true' and pg.locator('input[data-cfg=turn]').count() == 0)
+    check('six peg shapes offered, none round (1.97: a peg must not turn in its socket)', pg.locator('.shape-grid [data-act=shape]').count() == 6 and pg.locator('[data-act=shape][data-value=round]').count() == 0)
+    check('the D-shape starts selected', pg.get_attribute('[data-act=shape][data-value=dshape]', 'aria-pressed') == 'true')
     pg.click('[data-act=shape][data-value=slot]')
     pg.wait_for_timeout(600)
     ins = pg.inner_text('#inspector')
@@ -326,7 +326,7 @@ with sync_playwright() as p:
     set_taper(0)
     check('taper back to straight', 'Straight sides' in pg.inner_text('#inspector'))
     # thick walls leave some areas with no room for a key: the panel and the labels say which, and why
-    pg.click('[data-act=shape][data-value=round]')
+    pg.click('[data-act=shape][data-value=dshape]')
     # with one fixed size first, as before automatic sizing
     pg.click('[data-act=sizemode][data-value=set]'); pg.wait_for_timeout(300)
     pg.fill('input[data-cfg=margin]', '6'); pg.press('input[data-cfg=margin]', 'Tab')
@@ -467,7 +467,7 @@ with sync_playwright() as p:
     check('choosing a printer puts Thinnest piece back to the printer\'s wall', pg.evaluate("KeymasterDebug.cfg().minPiece") == 0 and pg.input_value('#minPiece') == '1.2', pg.input_value('#minPiece'))
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_selector('[data-act=cut]'); pg.wait_for_timeout(300)
     pg.screenshot(path=str(OUT / 'shot_shapes.png'))
-    pg.click('[data-act=shape][data-value=round]')
+    pg.click('[data-act=shape][data-value=dshape]')
     pg.wait_for_timeout(400)
 
     # tilt rings and typed angles
@@ -753,7 +753,7 @@ with sync_playwright() as p:
     wide.evaluate("el => el.remove()")
     pg.set_viewport_size({'width': 1440, 'height': 900})
     pg.evaluate("() => { const r = document.querySelector('#taperPct'); r.value = 0; r.dispatchEvent(new Event('change', {bubbles:true})); }")
-    pg.click('[data-act=shape][data-value=round]')
+    pg.click('[data-act=shape][data-value=dshape]')
     pg.wait_for_timeout(600)
 
     pg.keyboard.press('Escape')
@@ -1089,7 +1089,7 @@ with sync_playwright() as p:
     check('the painted area is picked: one outline, two pieces, Split off painted area', resP['ok'] and resP['painted'] and resP['loops'] == 1 and resP['pieces'] == 2 and 'painted area' in infoP and 'Split off painted area' in pg.inner_text('#cutAction'), (resP, infoP))
     pg.click('[data-act=cut-line]')
     pg.wait_for_function("document.querySelectorAll('#partList li[data-id]').length === 2", timeout=15000)
-    check('splitting off the painted area gives two pieces and stops painting', pg.locator('#partList li[data-id]').count() == 2 and 'painted area' in pg.inner_text('#toast') and pg.get_attribute('#paintBtn', 'aria-pressed') == 'false', pg.inner_text('#toast'))
+    check('splitting off the painted area gives two pieces, and the brush stays on for the next cut on the bigger piece (1.97: the tool is kept)', pg.locator('#partList li[data-id]').count() == 2 and 'painted area' in pg.inner_text('#toast') and pg.get_attribute('#paintBtn', 'aria-pressed') == 'true' and pg.evaluate("KeymasterDebug.tool()") == 'regions' and pg.evaluate("KeymasterDebug.paintedTriangles().length") == 0, (pg.inner_text('#toast'), pg.get_attribute('#paintBtn', 'aria-pressed')))
     pg.keyboard.press('Control+z'); pg.wait_for_timeout(300)
     pg.click('#partList li[data-id] [data-act=select]'); pg.wait_for_timeout(300)
     brush_on(pg); pg.wait_for_timeout(100)

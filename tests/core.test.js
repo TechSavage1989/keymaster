@@ -259,7 +259,9 @@ console.log('key shapes');
   const a30 = K.keyAngle(rot(30), 0, { type: 'peg', shape: 'oval' });
   check('keys follow an area turned 30°', Math.abs(Math.sin(a30 - Math.PI / 6)) < 1e-6, a30 * 180 / Math.PI);
   check('turn adds to the area direction', Math.abs(Math.sin(K.keyAngle(rot(30), 0, { type: 'peg', shape: 'oval', turn: 45 }) - 75 * Math.PI / 180)) < 1e-6);
-  check('round keys never turn', K.keyAngle(rot(30), 0, { type: 'peg', shape: 'round', turn: 45 }) === 0);
+  check('round keys never turn', K.keyAngle(rot(30), 0, { type: 'dowel', shape: 'round', turn: 45 }) === 0);
+  // (1.97) a peg asked to be round is made D-shaped: a key must hold the piece from turning
+  check('a round peg is made as a D-shape, so it can\'t turn in its socket', K.keyGeometrySpec({ type: 'peg', shape: 'round', diameter: 5, length: 6, clearance: 0.2 }).shape === 'dshape');
 
   // regression: square sockets whose straight sides line up used to leave gaps in the cut face
   const sqm = cfgOf({ type: 'magnet', shape: 'square', diameter: 6, length: 3, align: false });
@@ -1360,7 +1362,12 @@ console.log('curved cuts along a border');
     const pcfg = { type: 'plug', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 1.5, printer: 'fdm', pegSide: 'below', perArea: 1, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5, sink: 1, sinkTaper: 20, sizeMax: 5 };
     const preq = { loops: [cl], cfg: pcfg, minThickness: 1, sink: 1, perArea: 1, numberJoints: false, joint: 1 };
     const pj = K.planJoints(cP, cI, preq), pp = K.planPick(cP, cI, { ...preq, force: true }), pparts = pp.result ? pp.result.parts : [];
-    check('Plug on an extruded plug: the extrusion is the plug, two sealed pieces, none of them a loose joint', pj.perLoop[0].extruded && !pj.perLoop[0].plugs.length && pparts.length === 2 && allClosed(pparts), { extruded: pj.perLoop[0].extruded, n: pparts.length, error: pp.error }); }
+    check('Plug on an extruded plug: two sealed pieces, none of them a loose joint', pj.perLoop[0].extruded && pparts.length === 2 && allClosed(pparts), { extruded: pj.perLoop[0].extruded, n: pparts.length, error: pp.error });
+    // (1.97) and the plug stands on the extruded end, set in from its edge, so the end steps into its socket (the owner
+    // saw no key on the sleeves: the extrusion carried on the sleeve's slope)
+    const ppv = pparts.reduce((a, q) => a + q.volume, 0), made = pp.perLoop && pp.perLoop[0];
+    const bare = K.planPick(cP, cI, { ...preq, cfg: { ...pcfg, type: 'none' }, force: true }), bv = bare.result.parts.map(q => q.volume), pv = pparts.map(q => q.volume), ext = bv[0] > bv[1] ? 0 : 1; // (the extrusion's piece: the bigger one here)
+    check('  a smaller plug stands on the extruded end, on the piece the extrusion stands on (it grows, the other loses a socket); the gap is all that goes', !!made && made.plugs.length === 1 && !pp.forced && pv[ext] > bv[ext] + 1 && pv[1 - ext] < bv[1 - ext] - 1 && ppv < K.volume(cP, cI) && ppv > 0.99 * K.volume(cP, cI), { plugs: made && made.plugs.length, forced: pp.forced, bv, pv }); }
   // (1.90) a line round a crevice (narrow against how far it winds out of its plane) is not extruded: it would make a fin
   { const xy = [], h = [], n = 40; for (let i = 0; i < n; i++) { const t = 2 * Math.PI * i / n; xy.push(20 * Math.cos(t), 1.5 * Math.sin(t)); h.push(8 * Math.sin(3 * t)); }
     check('a narrow line that winds far out of its plane gets no plug', K.sunkRing(sp.positions, sp.indices, { o: [0, 0, 0], n: [0, 0, 1], u: [1, 0, 0], v: [0, 1, 0] }, [...Array(n).keys()], xy, h, 1, 3, 0.8) === null); }
@@ -2229,5 +2236,40 @@ console.log('\n1.96 review fixes: bosses with joint numbers, drafted tops, explo
   check('a region cut into two big runs is a region per run, each from the region it was', ok && two, info);
 }
 
+console.log('\nno key or plug can turn (1.97)');
+{
+  // a round area gets a plug with a flat: its outline is a D, not a circle
+  const ring = []; for (let i = 0; i < 64; i++) { const a = 2 * Math.PI * i / 64; ring.push([8 * Math.cos(a), 8 * Math.sin(a)]); }
+  const d = K.antiTwist(ring), area = (r) => { let t = 0; for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; t += a[0] * b[1] - b[0] * a[1]; } return Math.abs(t) / 2; };
+  let L = 0; for (let i = 0; i < d.length; i++) { const a = d[i], b = d[(i + 1) % d.length]; L += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+  check('a round plug outline gets a flat: a D, well short of round', d.length === 64 && 4 * Math.PI * area(d) / (L * L) < 0.93 && area(d) < 0.85 * area(ring) && area(d) > 0.6 * area(ring), [area(d), area(ring), 4 * Math.PI * area(d) / (L * L)]);
+  const sq = [[0, 0], [12, 0], [12, 3], [0, 3]];
+  check('a long outline is left as it is', K.antiTwist(sq) === sq);
+  // a round cylinder cut across, with a plug: the plug's outline has its flat, and the pieces are sealed
+  const cyl = K.shapeMesh({ kind: 'tube', w: 20, d: 20, h: 40, segments: 64 });
+  const pc = { type: 'plug', shape: 'round', diameter: 5, length: 6, clearance: 0.2, margin: 1.2, taper: 0, taperSocket: true, sizeMode: 'auto', sizeMin: 2.5, printer: 'fdm', pegSide: 'below', perArea: 1, align: true, turn: 0, plugSlope: 5, plugDepthMode: 'auto', plugDepth: 5 };
+  const F = K.frameFromNormal([0, 0, 1], [0, 0, 0.013]), an = K.analyzePlane(cyl.positions, cyl.indices, F, pc, 40), pl = K.planPlugs(an, pc).filter(q => q.ok);
+  let pL = 0; const b = pl[0] && pl[0].base; if (b) for (let i = 0; i < b.length; i++) { const p = b[i], q = b[(i + 1) % b.length]; pL += Math.hypot(q[0] - p[0], q[1] - p[1]); }
+  check('a plug on a round cut is not round', pl.length === 1 && 4 * Math.PI * area(b) / (pL * pL) < 0.95, b && 4 * Math.PI * area(b) / (pL * pL));
+  const r = pl.length ? K.cutMesh(cyl.positions, cyl.indices, F, { scale: 40, cfg: pc, plugs: pl }) : null;
+  check('  and the cut is sealed', !!r && r.parts.every(q => K.edgeReport(q.indices).closed && q.volume > 0), r && r.parts.map(q => q.volume));
+}
+console.log('\na flat patch walled off from its region goes to the face it is flush with (1.97)');
+{
+  // a box whose top is cut fine; a strip of the top along one edge is labelled with the side faces (as the boolean
+  // fan under a hand took a patch of a book's cover between two fingers): walled off from the sides by the 90° edge,
+  // flush with the rest of the top, it goes to the top's region; nothing else moves
+  const m = K.prepareMesh(gridCube(12)), P = m.positions, I = m.indices, nt = I.length / 3, g = new Int32Array(nt);
+  const cz = (t) => (P[3 * I[3 * t] + 2] + P[3 * I[3 * t + 1] + 2] + P[3 * I[3 * t + 2] + 2]) / 3, cx = (t) => (P[3 * I[3 * t]] + P[3 * I[3 * t + 1]] + P[3 * I[3 * t + 2]]) / 3;
+  const zTop = Math.max(...Array.from({ length: nt }, (_, t) => cz(t))), xMax = Math.max(...Array.from({ length: nt }, (_, t) => cx(t)));
+  let strip = 0;
+  for (let t = 0; t < nt; t++) { const top = Math.abs(cz(t) - zTop) < 1e-6; g[t] = top ? 0 : 1; if (top && cx(t) > xMax - 0.15) { g[t] = 1; strip++; } }
+  const before = g.slice(), moved = K.flatIslands(P, I, g);
+  let back = 0, other = 0; for (let t = 0; t < nt; t++) { if (before[t] === 1 && Math.abs(cz(t) - zTop) < 1e-6) { if (g[t] === 0) back++; } else if (g[t] !== before[t]) other++; }
+  check('the strip of the top goes back to the top, nothing else moves', strip > 0 && back === strip && other === 0 && moved === strip, { strip, back, other, moved });
+  // a raised flat block on the top (its own region, walled by creases all round, flush with nothing) stays
+  const g2 = new Int32Array(nt); for (let t = 0; t < nt; t++) g2[t] = Math.abs(cz(t) - zTop) < 1e-6 ? 0 : 1;
+  check('a whole flat face of its own region is left alone', K.flatIslands(P, I, g2) === 0);
+}
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

@@ -1312,6 +1312,7 @@ const KMCore = (() => {
   function shapeFor(cfg) {
     if (cfg.shape === 'bar') return 'bar'; // an engraved mark's segment, whatever the key type
     const s = KEY_SHAPES.includes(cfg.shape) ? cfg.shape : 'round';
+    if (cfg.type === 'peg' && s === 'round') return 'dshape'; // (1.97) a peg holds the piece from turning: never round (the owner: "no plug or key can be perfectly or nearly circular")
     return cfg.type === 'magnet' && !MAGNET_SHAPES.includes(s) ? 'round' : s;
   }
   function profileRes(rad) { return Math.max(20, Math.min(56, Math.round((2 * Math.PI * rad) / 0.5))); }
@@ -2131,6 +2132,58 @@ const KMCore = (() => {
   // between made and sculpted surface (`hard`). A tongue bounded by creases is a real feature (a strap, a lapel, a
   // made object's strip) and stays; `fixed` triangles (the made objects) never move. A tube (a sleeve, a finger) is
   // not narrow in this sense: its triangles lie far from its ends. In place; returns how many triangles moved.
+  // (1.97) A flat patch walled off from its own region belongs to the face it lies flush with. The owner's hand on a
+  // book took a patch of the book's cover between two fingers: the boolean that joined them had cut the cover into
+  // small even triangles there, so it looked like skin to every rule that reads triangle shape. What gives it away,
+  // on any model, is how it sits: flat (neighbours within `flat`° of each other), walled off from the rest of its own
+  // region by sharp creases (over `crease`°) along at least half its outline, and running on, flush (under `flush`°),
+  // into another region across the rest. Such a patch, under a quarter of its region, goes to the region it runs on
+  // into (the longest flush border). With `within`, only inside one part. Returns how many triangles moved.
+  function flatIslands(P, I, groupOf, opts = {}) {
+    const nt = I.length / 3, pairs = trianglePairs(I), within = opts.within || null, hard = opts.hard || null; // (with `hard`, only onto a made object's face: a book's page block flush with a skirt stays the book's)
+    const cFlat = Math.cos((opts.flat || 3) * Math.PI / 180), cCrease = Math.cos((opts.crease || 60) * Math.PI / 180), cFlush = Math.cos((opts.flush || 10) * Math.PI / 180);
+    const N = new Float64Array(3 * nt), A = new Float64Array(nt);
+    for (let t = 0; t < nt; t++) {
+      const a = 3 * I[3 * t], c1 = 3 * I[3 * t + 1], c2 = 3 * I[3 * t + 2];
+      const ux = P[c1] - P[a], uy = P[c1 + 1] - P[a + 1], uz = P[c1 + 2] - P[a + 2], vx = P[c2] - P[a], vy = P[c2 + 1] - P[a + 1], vz = P[c2 + 2] - P[a + 2];
+      const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx, L = Math.hypot(x, y, z); A[t] = L / 2;
+      if (L > 0) { N[3 * t] = x / L; N[3 * t + 1] = y / L; N[3 * t + 2] = z / L; }
+    }
+    const dot = (s, t) => N[3 * s] * N[3 * t] + N[3 * s + 1] * N[3 * t + 1] + N[3 * s + 2] * N[3 * t + 2];
+    const len = (i) => Math.hypot(P[3 * pairs[i + 2]] - P[3 * pairs[i + 3]], P[3 * pairs[i + 2] + 1] - P[3 * pairs[i + 3] + 1], P[3 * pairs[i + 2] + 2] - P[3 * pairs[i + 3] + 2]);
+    // flat patches within one region: flooded across flat edges, never drifting more than `flat` from where they began
+    const par = new Int32Array(nt); for (let t = 0; t < nt; t++) par[t] = t;
+    const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < pairs.length; i += 4) { const s = pairs[i], t = pairs[i + 1]; if (groupOf[s] === groupOf[t] && A[s] > 0 && A[t] > 0 && dot(s, t) > cFlat) { const x = find(s), y = find(t); if (x !== y) par[x] = y; } }
+    const pa = new Map(), pn = new Map(), pc = new Map(); // each patch's area, area-weighted normal and triangle count
+    for (let t = 0; t < nt; t++) { const r = find(t); pa.set(r, (pa.get(r) || 0) + A[t]); pc.set(r, (pc.get(r) || 0) + 1); let n = pn.get(r); if (!n) pn.set(r, n = [0, 0, 0]); n[0] += A[t] * N[3 * t]; n[1] += A[t] * N[3 * t + 1]; n[2] += A[t] * N[3 * t + 2]; }
+    const ga = new Map(), gh = new Map(); for (let t = 0; t < nt; t++) { ga.set(groupOf[t], (ga.get(groupOf[t]) || 0) + A[t]); if (hard && hard[t]) gh.set(groupOf[t], (gh.get(groupOf[t]) || 0) + A[t]); }
+    const sculpted = (g) => !hard || (gh.get(g) || 0) < 0.5 * ga.get(g); // (with `hard`, only out of a sculpted region: a made object's own faces are left as the objects' rules put them)
+    // each patch's outline: creased against its own region, or flush with another region (by region)
+    const creased = new Map(), own = new Map(), flushBy = new Map(), total = new Map();
+    const flatPatch = (r) => { const n = pn.get(r); return Math.hypot(n[0], n[1], n[2]) > 0.98 * pa.get(r); };
+    const agree = (r, q) => { const a = pn.get(r), b = pn.get(q); return (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) > cFlush * Math.hypot(...a) * Math.hypot(...b); };
+    for (let i = 0; i < pairs.length; i += 4) {
+      const s = pairs[i], t = pairs[i + 1], rs = find(s), rt = find(t); if (rs === rt) continue;
+      const l = len(i), d = dot(s, t);
+      for (const [p, q, rp] of [[s, t, rs], [t, s, rt]]) {
+        total.set(rp, (total.get(rp) || 0) + l);
+        if (groupOf[q] === groupOf[p]) { own.set(rp, (own.get(rp) || 0) + l); if (d < cCrease) creased.set(rp, (creased.get(rp) || 0) + l); }
+        else if (d > cFlush && !(within && within[p] !== within[q]) && pa.get(find(q)) >= pa.get(rp) && flatPatch(find(q)) && agree(rp, find(q)) && (!hard || hard[q])) { /* flush with a flat face of the other region at least its size, not a stray flat triangle of skin */ let m = flushBy.get(rp); if (!m) flushBy.set(rp, m = new Map()); m.set(groupOf[q], (m.get(groupOf[q]) || 0) + l); }
+      }
+    }
+    const to = new Map();
+    for (const [r, m] of flushBy) {
+      const g = groupOf[r], o = own.get(r) || 0;
+      if (!(o > 0) || (creased.get(r) || 0) < 0.5 * o || pa.get(r) > 0.25 * ga.get(g) || !sculpted(g) || pc.get(r) < (opts.min || 12)) continue; // (a few triangles flush by chance are not a face)
+      const n = pn.get(r), nl = Math.hypot(...n); if (!(nl > 0.98 * pa.get(r))) continue; // (flat as a whole, not a gentle curve)
+      let best = -1, bl = 0; for (const [h, l] of m) if (l > bl) { bl = l; best = h; }
+      if (best >= 0) to.set(r, best);
+    }
+    let moved = 0;
+    if (to.size) for (let t = 0; t < nt; t++) { const h = to.get(find(t)); if (h !== undefined && groupOf[t] !== h) { groupOf[t] = h; moved++; } }
+    return moved;
+  }
   function trimTongues(P, I, groupOf, opts = {}) {
     const nt = I.length / 3, { nb, C } = triangleAdjacency(P, I), frac = opts.frac === undefined ? 0.25 : opts.frac;
     const cosSharp = Math.cos(((opts.sharp === undefined ? 25 : opts.sharp) * Math.PI) / 180), hard = opts.hard || null, fixed = opts.fixed || null;
@@ -2487,6 +2540,7 @@ const KMCore = (() => {
     }
     const groupOf = new Int32Array(nt), ids = new Map(); for (let t = 0; t < nt; t++) { const r = find(t); if (!ids.has(r)) ids.set(r, ids.size); groupOf[t] = ids.get(r); }
     if (opts.tongues !== false) trimTongues(P, I, groupOf, { hard: sec.hard || null, within: parts }); // (1.96) tongues go to the section they poke into, within their part
+    if (opts.planes !== false) flatIslands(P, I, groupOf, { within: parts, hard: sec.hard || null }); // (1.97) a flat patch walled off from its section goes to the face it is flush with
     unpinchGroups(P, I, groupOf);
     const out = bordersFromGroups(P, I, groupOf);
     out.areas = new Array(out.count).fill(0); for (let t = 0; t < nt; t++) out.areas[out.groupOf[t]] += A[t];
@@ -3033,6 +3087,7 @@ const KMCore = (() => {
       let fixed = null; if (prop) { fixed = new Uint8Array(nt); for (let t = 0; t < nt; t++) if (prop[t] >= 0) fixed[t] = 1; }
       trimTongues(P, I, groupOf, { hard: made, fixed }); // (no region is emptied: a tongue is at most a tenth of its region)
     }
+    if (opts.planes !== false) flatIslands(P, I, groupOf, { hard: made }); // (1.97) no patch of a book's cover between the fingers goes with the hand on it
     unpinchGroups(P, I, groupOf);
     const seg = bordersFromGroups(P, I, groupOf);
     seg.areas = new Array(seg.count).fill(0); for (let t = 0; t < nt; t++) seg.areas[groupOf[t]] += A[t];
@@ -5018,7 +5073,7 @@ const KMCore = (() => {
       let clash = keep.length < n;
       for (let i = 0; i < cap.length && !clash; i += 3) for (let k = 0; k < 3; k++) if (surf.has(ek(cap[i + k], cap[i + (k + 1) % 3]))) { clash = true; break; }
       const per = opts.perLoop ? opts.perLoop[li] || {} : opts, into2 = wantCCW ? 1 : -1;
-      const lcfg = per.inset && per.cfg ? per.cfg : per.pegSide && per.pegSide !== cfg.pegSide ? { ...cfg, pegSide: per.pegSide } : cfg; // which piece the pegs or plug stand on, per line (an inset plug brings its own settings)
+      const lcfg = (per.inset || per.onEnd) && per.cfg ? per.cfg : per.pegSide && per.pegSide !== cfg.pegSide ? { ...cfg, pegSide: per.pegSide } : cfg; // which piece the pegs or plug stand on, per line (an inset plug brings its own settings)
       // a sunk face: the line pushed into side 2 by up to opts.sink, as far as that piece can hold; the face, its
       // keys and its checks then all work on the sunk ring
       const sinkWall = opts.minThickness > 0 ? opts.minThickness : cfg.margin || 0.8, taper = opts.sinkTaper !== undefined ? opts.sinkTaper : cfg.sinkTaper || 0;
@@ -5044,7 +5099,16 @@ const KMCore = (() => {
         const eflip = wantCCW ? esum < 0 : esum > 0; for (let i = 0; i < eloc.length; i += 3) { if (eflip) ecap.push(eids[eloc[i]], eids[eloc[i + 2]], eids[eloc[i + 1]]); else ecap.push(eids[eloc[i]], eids[eloc[i + 1]], eids[eloc[i + 2]]); }
         const exyMap = new Map(ring.map((v, i) => [v, [exy[2 * i], exy[2 * i + 1]]]));
         fixTJunctions(ecap, ring); splitThroughPoints(ecap, [ring], (id) => exyMap.get(id)); patchCap(ecap, [ring], (id) => exyMap.get(id), wantCCW);
-        return Object.assign(faceOf(es.xy2, es.h2, { F: Fe, xy: exy, h: eh, cap: ecap, clash: false, xyOf: (id) => exyMap.get(id), wantCCW }), { sunk: es });
+        // (1.97) the plug on the extruded end, planned again on this face, standing along the same axis
+        let endPlugs = null;
+        if (per.onEnd && per.cfg) try {
+          const L2 = makeLoop(ring, [], es.xy2), anE = { frame: Fe, base: { error: null, loops: [L2], regions: buildRegions([L2]) }, depth: [], curved: { deviation: 0, heightAt: capHeightGrid(es.xy2, es.h2), sink: es.max, into2, sunk: es } };
+          Object.defineProperty(anE, '_src', { value: { P, I, F: Fe, scale: diag(bounds(P)), cfg: per.cfg, cache: new Map() } });
+          Object.defineProperty(anE.curved, 'rays', { get() { return raysFor(P, I, Fe); } });
+          const ecfg = { ...per.cfg, pegSide: curvedSideOf('below', into2) }, pl = planPlugs(anE, ecfg).filter(q => q.ok && q.depth >= 1);
+          if (pl.length) endPlugs = { plugs: pl, cfg: ecfg };
+        } catch (err) { endPlugs = null; }
+        return Object.assign(faceOf(es.xy2, es.h2, { F: Fe, xy: exy, h: eh, cap: ecap, clash: false, xyOf: (id) => exyMap.get(id), wantCCW }), { sunk: es, endPlugs });
       };
       // (1.96) the locating boss for a line that can't carry a plug along the way the pieces go on: the face's own
       // shape pulled in from the edge (`planPlugs`), standing along the line's own axis, with sides drafted a little
@@ -5077,10 +5141,14 @@ const KMCore = (() => {
         c.cfg = lcfg;
         c.keys = !own || cfg.type === 'none' || cfg.type === 'plug' ? [] : (per.keys || []).filter(k => regionAt(f.sec, k.x, k.y) === 0); c.marks = f.fr.F !== lf.F ? [] : markKeys(per.marks).filter(k => regionAt(f.sec, k.x, k.y) === 0); /* (marks were laid out in the line's own frame: none on a face worked in another) */ c.plugs = own && (cfg.type === 'plug' || per.inset) ? (per.plugs || []).filter(q => q.ok) : [];
         c.bossUsed = null;
+        if (joints === 'end' && per.onEnd) { // (1.97) the extruded end's own plug, and nothing else
+          if (f === c.sunkFace && f.fr.F === lf.F) { c.plugs = (per.plugs || []).filter(q => q.ok); c.cfg = lcfg; }
+          else if (f.endPlugs) { c.plugs = f.endPlugs.plugs; c.cfg = f.endPlugs.cfg; }
+        }
         if (joints === 'boss' && c.bossPlan && f === c.plain) { c.plugs = c.bossPlan.plugs; c.cfg = c.bossPlan.cfg; c.bossUsed = c.bossPlan; c.marks = []; } // (a boss covers the face: no joint number under it)
         c.joined = c.keys.length + c.plugs.length;
       };
-      c.tiny = !!per.tiny; c.way = null; c.bossPlan = null;
+      c.tiny = !!per.tiny; c.way = null; c.bossPlan = null; c.endOK = !!per.onEnd && !per.endLow;
       c.use('sunk'); c.ownJoined = c.joined;
       return c;
     });
@@ -5204,8 +5272,8 @@ const KMCore = (() => {
           const phi = Math.acos(Math.max(-1, Math.min(1, e[0] * q[0] + e[1] * q[1] + e[2] * q[2]))) * 180 / Math.PI; c.wayOff = phi;
           if (phi <= 3) return [c.sunkFace ? 'sunk' : 'plain', 'own']; // (its own axis, near enough: checked along it, with its keys)
           c.way = e;
-          if (!bossAll && c.sunkFace && phi <= (c.sunkFace.sunk.taper || 0) - 2) return ['sunk', 'none'];
-          if (!bossAll && (c.axisFace = c.along(e))) return ['axis', 'none'];
+          if (!bossAll && c.sunkFace && phi <= (c.sunkFace.sunk.taper || 0) - 2) return ['sunk', c.endOK ? 'end' : 'none'];
+          if (!bossAll && (c.axisFace = c.along(e))) return ['axis', c.endOK ? 'end' : 'none'];
           if ((c.bossPlan = c.boss(e))) return ['plain', 'boss'];
           return ['plain', 'none'];
         });
@@ -5233,7 +5301,7 @@ const KMCore = (() => {
     // 'boss' (a drafted boss, with its plan for the app to draw), 'plug' / 'keys' (as planned), or null with why
     const jointsMade = caps.map(c => {
       const v = 3 * c.ring[0], kind = c.sunk && c.sunk.column ? (c.axisFace && c.sunk === c.axisFace.sunk ? 'skew' : 'edge') : c.bossUsed ? 'boss' : c.plugs.length ? 'plug' : c.keys.length ? 'keys' : null;
-      const j = { at: [P[v], P[v + 1], P[v + 2]], kind, keys: c.keys.length, off: c.way ? c.wayOff : 0 };
+      const j = { at: [P[v], P[v + 1], P[v + 2]], kind, keys: c.keys.length, endPlugs: c.sunk && c.sunk.column ? c.plugs.length : 0, off: c.way ? c.wayOff : 0 }; // (1.97) a plug standing on an extruded end
       if (c.bossUsed) Object.assign(j, { plugs: c.bossUsed.plugs, cfg: c.bossUsed.cfg, draft: c.bossUsed.draft, draw: c.bossUsed.draw, depth: Math.max(...c.bossUsed.plugs.map(q => q.depth)) });
       if (!kind) j.why = c.tiny ? 'tiny' : c.wayOff > 60 ? 'off' : 'room';
       return j;
@@ -6049,7 +6117,24 @@ const KMCore = (() => {
           else if (cfg.type === 'plug' && sk && sk.column) {
             // (1.89) the cut is already extruded into a plug: a second plug on its floor added nothing and, on a steeply
             // tapered floor, came away as a slab of its own; the extruded plug is this line's plug
-            per.plugs = []; per.extruded = true;
+            // (1.97) but a plug chosen as the extra key is a key the owner looks for: the extrusion starts at the cut's
+            // edge and carries on the piece's own slope, so it reads as the piece made longer, not as a key ("there are no
+            // plugs or keys on the upper arm parts"). A smaller plug now stands on the extruded end, set in from its
+            // edge, on the same piece (side 1, which the extrusion stands on: 'below' in the frame's terms through `curvedSideOf`), so the end steps down into its socket
+            per.extruded = true;
+            const endSide = curvedSideOf('below', an.curved.into2); // side 1 holds the extrusion
+            const ecfg = { ...lcfg, pegSide: endSide, plugSlope: Math.max(lcfg.plugSlope || 5, cfg.sinkTaper || 0) }; // (sides as steep as the extrusion's, so it lifts out whichever way the extrusion does)
+            let pl = []; try { pl = planPlugs(an, ecfg); } catch (err) { pl = []; }
+            per.plugs = pl.filter(q => q.ok && q.depth >= 1);
+            if (!per.plugs.length && ecfg.plugSlope > (lcfg.plugSlope || 5)) { // too steep to fit: the usual slope, kept only where the pieces part along the line's own axis
+              ecfg.plugSlope = lcfg.plugSlope || 5; per.endLow = true;
+              try { per.plugs = planPlugs(an, ecfg).filter(q => q.ok && q.depth >= 1); } catch (err) { per.plugs = []; }
+            }
+            if (per.plugs.length) {
+              per.cfg = ecfg; per.onEnd = true;
+              const H = an.curved.heightAt;
+              for (const q of per.plugs) { let lo = Infinity, hi = -Infinity; for (const [x, y] of q.mouth) { const z = H(x, y); lo = Math.min(lo, z); hi = Math.max(hi, z); } draw.plugs.push({ base: q.base, top: q.top, z0: q.side > 0 ? lo : hi, tip: (q.side > 0 ? hi : lo) + q.side * q.depth }); }
+            }
           } else if (cfg.type === 'plug') {
             const pl = planPlugs(an, lcfg);
             per.plugs = pl.filter(q => q.ok);
@@ -6210,7 +6295,7 @@ const KMCore = (() => {
       if (j.kind === 'boss') { Object.assign(q, { keys: [], plugs: j.plugs, inset: true, boss: true, draft: j.draft, cfg: j.cfg, extruded: false }); out.draw[i] = { keys: [], plugs: j.draw }; }
       else {
         if (!j.keys && (per.keys || []).length) { q.keys = []; out.draw[i] = { ...out.draw[i], keys: [] }; }
-        if (j.kind !== 'plug' && (per.plugs || []).length) { q.plugs = []; q.inset = false; out.draw[i] = { ...out.draw[i], plugs: [] }; }
+        if (j.kind !== 'plug' && !j.endPlugs && (per.plugs || []).length) { q.plugs = []; q.inset = false; out.draw[i] = { ...out.draw[i], plugs: [] }; }
         if (j.kind !== 'edge' && j.kind !== 'skew') { if (q.extruded) q.extruded = false; if (out.draw[i] && out.draw[i].sink) out.draw[i] = { ...out.draw[i], sink: null }; }
         else q.extruded = true;
       }
@@ -6640,6 +6725,27 @@ const KMCore = (() => {
   }
   const outlineArea = (pts) => { let s = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; s += a[0] * b[1] - b[0] * a[1]; } return s / 2; };
   // points spread evenly along a closed outline, then smoothed a little to take the grid's stair-steps out
+  // (1.97) No key may turn in its socket (the owner: "no plug or key can be perfectly or nearly circular. the point is
+  // that the keys would hold the part in place and prevent twisting"). A plug's outline that is nearly round (4πA/L²
+  // over `limit`, 0.9: a rounded square is 0.85 and holds by its corners) gets a flat: the ring is cut by a chord a third of the way in from its far side, the way a D-shaped
+  // shaft is, and spread back to as many points as it had. Anything else comes back as it was.
+  function antiTwist(ring, limit = 0.9) {
+    const n = ring.length; if (n < 8) return ring;
+    let A = 0, L = 0, cx = 0, cy = 0;
+    for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n], cr = a[0] * b[1] - b[0] * a[1]; A += cr; cx += (a[0] + b[0]) * cr; cy += (a[1] + b[1]) * cr; L += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+    A /= 2; if (!(Math.abs(A) > 0)) return ring; cx /= 6 * A; cy /= 6 * A;
+    if (4 * Math.PI * Math.abs(A) / (L * L) < limit) return ring;
+    let far = -1, fx = 1, fy = 0, rmin = Infinity;
+    for (const [x, y] of ring) { const r = Math.hypot(x - cx, y - cy); if (r > far) { far = r; fx = (x - cx) / r; fy = (y - cy) / r; } rmin = Math.min(rmin, r); }
+    const h = rmin * 0.45; // the flat: 0.45 of the smallest radius out from the middle, towards the farthest point
+    const side = (p) => (p[0] - cx) * fx + (p[1] - cy) * fy - h, out = [];
+    for (let i = 0; i < n; i++) {
+      const a = ring[i], b = ring[(i + 1) % n], sa = side(a), sb = side(b);
+      if (sa <= 0) out.push(a);
+      if ((sa <= 0) !== (sb <= 0)) { const t = sa / (sa - sb); out.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]); }
+    }
+    return out.length >= 4 ? evenRing(out, n) : ring;
+  }
   function evenRing(pts, n) {
     const L = [0]; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; L.push(L[i] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
     const per = L[pts.length], out = [];
@@ -6754,7 +6860,7 @@ const KMCore = (() => {
       if (!sh.reason && !ringOk(sh.ring)) sh = plugShape(sec, ri, inset, round * 2); // a crossing outline: round it more
       if (!sh.reason && !ringOk(sh.ring)) return { reason: 'Area too irregular for a plug' };
       if (sh.reason) return sh;
-      const base = sh.ring, mouth = offsetRing(base, gs);
+      const base = cfg.round === true ? sh.ring : antiTwist(sh.ring), mouth = offsetRing(base, gs); // (1.97) never a round plug: it could turn
       let lo = Infinity, hi = -Infinity;
       for (const q of mouth) { const z = H(q[0], q[1]); lo = Math.min(lo, z); hi = Math.max(hi, z); }
       const from = S > 0 ? hi : lo;
@@ -8690,7 +8796,7 @@ ${jointRows.length ? `<h2 style="font-size:17px">Joints</h2><table><thead><tr><t
     thinAreas, jointThickness, slidesApart, lockedPairs, rayGrid, solidRuns, shownRegions, thinMessage, fanCentre, straightLoop,
     repairMesh, cutMesh, mergeMeshes, transformPositions, creasedArrays, writeSTL, makeZip, torusKnot, earcut,
     clipMesh, boxMesh, polytopeMesh, hullMesh, latheMesh, shapeMesh, facePlanes, booleanWith, booleanShape, ringSectors,
-    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh, segmentSections, explodePlan, explodeAt, explodeMates, castFirst, surfaceSamples, inheritTriangles, carryRegions, trimTongues,
+    segmentParts, convexOutline, faceDirections, propObjects, ownObjectPieces, regionBorderCurves, planPick, planJoints, plainData, strokeLoop, pickComponents, splitCandidates, flatSplitCandidates, flatSplit, trianglePairs, fillSelectionGaps, shellComponents, extractTriangles, touchingSets, regionPath, nearestVertices, smoothLoopVertices, smoothRegionPick, sliceRegionPick, sliceDrawnLoops, sliceByField, cutPrintCheck, unpinchGroups, limbEndPick, tubeLike, knifeEdges, pickMesh, segmentSections, explodePlan, explodeAt, explodeMates, castFirst, surfaceSamples, inheritTriangles, carryRegions, trimTongues, flatIslands, antiTwist,
   };
 })();
 if (typeof module !== 'undefined') module.exports = KMCore;
